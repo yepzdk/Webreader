@@ -1,5 +1,9 @@
 # WebReader
 
+[![Release](https://img.shields.io/github/v/release/yepzdk/webreader?label=release)](https://github.com/yepzdk/webreader/releases/latest)
+[![CI](https://github.com/yepzdk/webreader/actions/workflows/ci.yml/badge.svg)](https://github.com/yepzdk/webreader/actions/workflows/ci.yml)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-yepzdk-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/yepzdk)
+
 A small macOS reading app. Send it a link — from a browser picker like [Choosy](https://www.choosy.app/), `open -a WebReader <url>`, or the clipboard — and it renders the article as a clean, distraction-free page: title, byline, body. No ads, no site chrome.
 
 Reader extraction is [Mozilla Readability](https://github.com/mozilla/readability), the library behind Firefox's reader view. It runs on the rendered page inside the app's own session, so articles behind a login you're signed in to extract correctly.
@@ -63,6 +67,10 @@ Scripts/build-app.sh   # assemble build/WebReader.app
 ```
 
 The package has two targets: **ReaderKit** — Foundation-only reader logic (article model, appearance settings, recents, the generated reader/start/offline pages, URL cleaning) that a future iOS app shares — and **WebReader**, the AppKit host. See `CLAUDE.md` for the architecture notes.
+
+## Support
+
+WebReader is free and open source. If it saves you from a few cookie banners a day, you can [buy me a coffee](https://buymeacoffee.com/yepzdk).
 
 ## License
 
