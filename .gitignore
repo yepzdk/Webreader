@@ -1,0 +1,14 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Generated test bundles
+*.app
+
+# Claude Code harness state
+.claude/
+build/
