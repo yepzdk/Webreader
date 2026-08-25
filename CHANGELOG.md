@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-25
+
 ### Added
 - WebReader is now its own project, split out of [webwrap](https://github.com/yepzdk/webwrap)
   0.8.0's reader mode. Feature parity with the webwrap-generated app: link handling with
@@ -26,3 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
+
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/yepzdk/webreader/releases/tag/v0.9.0
