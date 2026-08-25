@@ -73,6 +73,29 @@ non-trivial logic gets one small XCTest, not a suite. Design: no emoji in the UI
 line icons, one accent color, subtle radii — `OfflineFallbackTests.testNoEmojiInPage` guards
 one of those.
 
+## Release process
+
+Releases are built, signed, and notarized **on the maintainer's Mac** (the Developer ID
+certificate and notarization credentials live in its keychain — nothing is exported to CI),
+then published as a GitHub Release and a Homebrew cask.
+
+1. PR `chore: release X.Y.Z`: bump `CFBundleShortVersionString` in `App/Info.plist` and roll
+   `[Unreleased]` in `CHANGELOG.md` into `## [X.Y.Z] - YYYY-MM-DD`. Merge it.
+2. `git checkout main && git pull && Scripts/release.sh`. The script refuses to run off a
+   clean `main`, without a matching CHANGELOG section, or if the tag exists. It builds a
+   universal binary via `Scripts/build-app.sh` with the hardened runtime, notarizes with
+   `xcrun notarytool` (keychain profile `webreader`; override with `NOTARY_PROFILE`), staples,
+   zips, and runs `gh release create vX.Y.Z` with the CHANGELOG section as notes.
+3. It then runs `Scripts/update-cask.sh X.Y.Z <sha>`, which rewrites `Casks/webreader.rb` in
+   the `yepzdk/homebrew-tools` tap and pushes. If only that step fails, re-run it by hand
+   with the arguments the script printed.
+
+Contracts: the release asset **`WebReader.zip` keeps that exact name** — the blog and README
+link `releases/latest/download/WebReader.zip`. The cask pins `WebReader-X.Y.Z.zip` by sha.
+
+One-time setup on a new Mac: import the Developer ID certificate, then
+`xcrun notarytool store-credentials webreader --apple-id <id> --team-id 96DL4CMTDZ`.
+
 ## Conventions
 
 - Never commit to `main`. Branch as `feature/issue-{number}-{description}`.
