@@ -1,0 +1,117 @@
+import XCTest
+@testable import ReaderKit
+
+// Tests for the handler-only start page's pure HTML generation. Mirrors the
+// Start page tests: escaping, the URL field, recents, and appearance controls.
+
+final class StartPageTests: XCTestCase {
+    func testContainsEscapedAppName() {
+        let html = StartPage.html(appName: "Read & Relax <x>")
+        XCTAssertTrue(html.contains("Read &amp; Relax &lt;x&gt;"))
+        XCTAssertFalse(html.contains("Read & Relax <x>"))
+    }
+
+    func testDefaultBackgroundFollowsAppearance() {
+        // No manifest color → the light/dark-switching variable, not a fixed color.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("background: var(--bg);"))
+    }
+
+    // MARK: - URL entry
+
+    func testOffersURLEntryAndTheShortcutHint() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"url\""))
+        XCTAssertTrue(html.contains("placeholder=\"Paste or type a URL\""))
+        XCTAssertTrue(html.contains("<button type=\"submit\">Open</button>"))
+        // The keyboard path is taught, not just the button.
+        XCTAssertTrue(html.contains("<kbd>⇧⌘O</kbd>"))
+        XCTAssertTrue(html.contains("messageHandlers.readerOpenURL.postMessage"))
+        // Autofocused so a paste-and-return needs no click.
+        XCTAssertTrue(html.contains("autofocus"))
+    }
+
+    func testHasAnInlineRejectionMessageHookedToTheHost() {
+        // A beep alone is invisible when the user is looking at the field they typed into.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"error\""))
+        XCTAssertTrue(html.contains("role=\"alert\""))
+        XCTAssertTrue(html.contains("window.readerURLRejected"))
+    }
+
+    // MARK: - Recents
+
+    func testListsRecentsInlineNewestFirst() {
+        var history = ReaderHistory()
+        history.record(title: "Older piece", url: "https://news.example.com/older")
+        history.record(title: "Newest piece", url: "https://blog.example.com/new")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("class=\"recents-inline\""))
+        XCTAssertTrue(html.contains("data-url=\"https://blog.example.com/new\""))
+        XCTAssertTrue(html.contains("blog.example.com"))
+        let newest = html.range(of: "Newest piece")
+        let oldest = html.range(of: "Older piece")
+        XCTAssertNotNil(newest)
+        XCTAssertNotNil(oldest)
+        XCTAssertTrue(newest!.lowerBound < oldest!.lowerBound)
+    }
+
+    func testRecentTitlesAreEscaped() {
+        var history = ReaderHistory()
+        history.record(title: "Tips & <script>", url: "https://x.test/a\" onclick=\"alert(1)")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("Tips &amp; &lt;script&gt;"))
+        XCTAssertFalse(html.contains("onclick=\"alert(1)\""))
+    }
+
+    func testEmptyHistoryKeepsTheRoutingExplanation() {
+        // A first-run app genuinely has nothing to list, so it still explains how to
+        // get links in rather than showing a bare empty box.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("No articles yet"))
+        XCTAssertTrue(html.contains("Choosy"))
+        XCTAssertFalse(html.contains("class=\"recents-inline\""))
+    }
+
+    // MARK: - Shared chrome
+
+    func testCarriesTheSameChromeAsTheReader() {
+        var history = ReaderHistory()
+        history.record(title: "Something", url: "https://x.test/s")
+        let html = StartPage.html(appName: "Reader", history: history)
+        // Appearance popover and recents popover, both from ReaderChrome.
+        XCTAssertTrue(html.contains("id=\"readerAa\""))
+        XCTAssertTrue(html.contains("id=\"readerRecentsBtn\""))
+        XCTAssertTrue(html.contains("messageHandlers.readerSettings.postMessage"))
+        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+    }
+
+    func testBakedReaderSettingsDriveThePage() {
+        var settings = ReaderSettings()
+        settings.fontSize = 22
+        settings.theme = .sepia
+        let html = StartPage.html(appName: "Reader", settings: settings)
+        XCTAssertTrue(html.contains("<html lang=\"en\" data-theme=\"sepia\">"))
+        XCTAssertTrue(html.contains("--reader-size: 22px;"))
+        // The script is seeded with the same settings it renders.
+        XCTAssertTrue(html.contains(settings.json))
+    }
+
+    func testIsACompleteStandaloneDocument() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.hasPrefix("<!doctype html>"))
+        XCTAssertTrue(html.hasSuffix("</html>"))
+    }
+
+    func testHasNoReadingProgressBar() {
+        // Reading progress belongs to a long article (#93); this page has no such content,
+        // and the shared appearance script must not assume the hook exists here.
+        var history = ReaderHistory()
+        history.record(title: "Something", url: "https://x.test/s")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertFalse(html.contains("id=\"readerProgress\""))
+        XCTAssertFalse(html.contains("window.readerOnLayoutChange = measure"))
+        // The guarded call is still present (it's in the shared script) but must be a no-op.
+        XCTAssertTrue(html.contains("if (window.readerOnLayoutChange)"))
+    }
+}
