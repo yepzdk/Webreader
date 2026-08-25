@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 
 # shellcheck disable=SC2086  # ARCHS is deliberately word-split into flags
 swift build -c release ${ARCHS:-}
+# shellcheck disable=SC2086
 BIN="$(swift build -c release ${ARCHS:-} --show-bin-path)/WebReader"
 
 APP="build/WebReader.app"

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - One-time import of appearance settings, recents, and zoom from the webwrap-generated
   WebReader app on first launch.
 - View → Reset Reader Appearance replaces the old Settings window's Restore Defaults.
+- Release pipeline: `Scripts/release.sh` publishes a signed, notarized universal build as a
+  GitHub Release and bumps the Homebrew cask `yepzdk/tools/webreader`.
 
 ### Changed
 - New bundle identifier `dk.yepz.webreader`; site logins from the old app don't carry over.

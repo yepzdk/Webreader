@@ -8,7 +8,15 @@ WebReader started life as a [webwrap](https://github.com/yepzdk/webwrap)-generat
 
 ## Install
 
-There's no release yet — build it yourself (Xcode command-line tools, macOS 13+):
+macOS 13 or later, Apple Silicon or Intel. Releases are signed with a Developer ID and notarized, so they open without a Gatekeeper detour.
+
+```sh
+brew install --cask yepzdk/tools/webreader
+```
+
+Or download the latest [`WebReader.zip`](https://github.com/yepzdk/webreader/releases/latest/download/WebReader.zip) and drag the app to Applications. Versioned zips and checksums are on the [releases page](https://github.com/yepzdk/webreader/releases).
+
+To build it yourself instead (Xcode command-line tools):
 
 ```sh
 git clone https://github.com/yepzdk/webreader.git
@@ -16,7 +24,7 @@ cd webreader
 Scripts/build-app.sh --install     # builds build/WebReader.app and copies it to /Applications
 ```
 
-The bundle is ad-hoc signed. Set `SIGN_IDENTITY="Developer ID Application: …"` to sign with the hardened runtime instead.
+A self-built bundle is ad-hoc signed, so it runs on the Mac that built it. Set `SIGN_IDENTITY="Developer ID Application: …"` to sign with the hardened runtime instead.
 
 ## Using it
 
