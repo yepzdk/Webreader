@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Assemble the app bundle
+        run: |
+          Scripts/build-app.sh
+          test -x build/WebReader.app/Contents/MacOS/WebReader
+          plutil -lint build/WebReader.app/Contents/Info.plist
+          codesign --verify build/WebReader.app
