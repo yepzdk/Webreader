@@ -24,6 +24,16 @@ final class ReaderDecodeTests: XCTestCase {
         XCTAssertEqual(garbled?.hiddenHits, [:])
     }
 
+    func testEncodesAndDecodesItself() throws {
+        // The cache stores articles with the encoder; hits ride along under the same key
+        // the extraction script uses.
+        let article = Article(title: "T", byline: nil, siteName: "S", content: "<p>x</p>",
+                              hiddenHits: ["annonce": 2])
+        let data = try JSONEncoder().encode(article)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"hidden\""))
+        XCTAssertEqual(try JSONDecoder().decode(Article.self, from: data), article)
+    }
+
     func testDecodesWithAbsentOptionals() {
         let article = Reader.decode(#"{"title":"T","content":"<p>x</p>"}"#)
         XCTAssertEqual(article?.title, "T")

@@ -4,8 +4,9 @@ import Foundation
 /// clean, distraction-free page. Everything here is string/JSON work — unit-tested;
 /// the WebKit orchestration (when to extract, applying the result) lives in the host.
 
-/// An article extracted by Readability, decoded from its `parse()` result.
-public struct Article: Decodable, Equatable {
+/// An article extracted by Readability, decoded from its `parse()` result. Codable both
+/// ways: the same shape is what `ArticleCache` keeps on disk.
+public struct Article: Codable, Equatable {
     public let title: String
     public let byline: String?
     public let siteName: String?
@@ -34,6 +35,15 @@ public struct Article: Decodable, Equatable {
         content = try c.decode(String.self, forKey: .content)
         // Tolerant: a missing or malformed map is "no hits", never a failed article.
         hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hidden)) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(byline, forKey: .byline)
+        try c.encodeIfPresent(siteName, forKey: .siteName)
+        try c.encode(content, forKey: .content)
+        try c.encode(hiddenHits, forKey: .hidden)
     }
 }
 

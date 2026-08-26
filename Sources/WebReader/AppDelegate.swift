@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var pendingReaderRender = false
     private var readerSourceURL: URL?
 
+    /// On-disk copies of the recent articles (see `ArticleCache`): recents rows open from
+    /// here, and a failed load falls back to it.
+    private let cache = ArticleCache(
+        directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "dk.yepz.webreader")
+            .appendingPathComponent("articles"))
+
     // MARK: - Launch
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -212,7 +219,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         ])
     }
 
-    @objc private func reloadPage(_ sender: Any?) { webView.reload() }
+    /// In the reader, Reload fetches the source page again — which re-extracts and refreshes
+    /// the cached copy. Reloading the rendered document itself would change nothing.
+    @objc private func reloadPage(_ sender: Any?) {
+        if isShowingReader, let source = readerSourceURL {
+            webView.load(URLRequest(url: source))
+        } else {
+            webView.reload()
+        }
+    }
     @objc private func goBack(_ sender: Any?) { webView.goBack() }
     @objc private func goForward(_ sender: Any?) { webView.goForward() }
     @objc private func goHome(_ sender: Any?) { showStartPage() }
@@ -301,22 +316,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 if manual { NSSound.beep() }
                 return
             }
-            self.readerSourceURL = self.webView.url
+            self.renderReader(article, source: self.webView.url)
+        }
+    }
+
+    /// Shows `article` as the reader document, records it in recents, and keeps a copy on
+    /// disk for the next time its row is clicked. `source` is the article page (the baseURL,
+    /// so relative images resolve); nil only if WebKit lost track of it, in which case there
+    /// is nothing to record or cache.
+    private func renderReader(_ article: Article, source: URL?) {
+        readerSourceURL = source
+        var history = ReaderStore.history(store: store)
+        if let source {
             // Record before rendering so the article being opened is the panel's top row.
             // The cleaned URL, because opening a row routes through `openIncoming`, which
             // cleans — recording the raw one would make the replay look like a new article.
-            var history = ReaderStore.history(store: self.store)
-            if let source = self.readerSourceURL {
-                history.record(title: article.title, url: URLCleaner.clean(source).absoluteString)
-                ReaderStore.setHistory(history, store: self.store)
-            }
-            let html = ReaderPage.html(article: article,
-                                       settings: ReaderStore.settings(store: self.store),
-                                       history: history,
-                                       hidden: hidden)
-            self.pendingReaderRender = true
-            self.webView.loadHTMLString(html, baseURL: self.readerSourceURL)
+            let cleaned = URLCleaner.clean(source)
+            history.record(title: article.title, url: cleaned.absoluteString)
+            ReaderStore.setHistory(history, store: store)
+            // The cache tracks the recents list exactly: store this one, drop what fell off.
+            cache.store(article, for: cleaned)
+            cache.prune(keeping: history.entries.map(\.url))
         }
+        let html = ReaderPage.html(article: article,
+                                   settings: ReaderStore.settings(store: store),
+                                   history: history,
+                                   hidden: ReaderStore.hiddenPhrases(store: store))
+        pendingReaderRender = true
+        webView.loadHTMLString(html, baseURL: source)
     }
 
     // MARK: - Incoming URLs
@@ -449,6 +476,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
             ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
+        // A saved copy beats an error page — the article is what was asked for. ⌘R fetches
+        // the live page again once the network is back.
+        if let failed = failedURL, let cached = cache.article(for: URLCleaner.clean(failed)) {
+            failedURL = nil
+            renderReader(cached, source: URLCleaner.clean(failed))
+            return
+        }
         let html = OfflineFallback.html(appName: appName, host: failedURL?.host,
                                         kind: OfflineFallback.classify(errorCode: nsError.code))
         isShowingFallback = true
@@ -476,6 +510,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             ReaderStore.setSettings(ReaderSettings.decode(message.body), store: store)
         case "readerOpen":
             guard ownPage, let raw = message.body as? String, let url = URL(string: raw) else { return }
+            // A saved copy opens straight from disk: no load, no network. Only recents rows
+            // take this shortcut — an incoming link is "read this now" and always loads live.
+            let cleaned = URLCleaner.clean(url)
+            if let cached = cache.article(for: cleaned) {
+                isShowingFallback = false
+                isShowingStartPage = false
+                failedURL = nil
+                renderReader(cached, source: cleaned)
+                return
+            }
             // A rejected URL must leave the reader state alone — the reader is still on
             // screen. Beep like the other explicit open paths.
             guard openIncoming(url) else {
@@ -484,10 +528,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             // The row promises the reader, so enter it once this load finishes. Keyed to
             // the URL `openIncoming` actually loads (it cleans first).
-            enterReaderForURL = URLCleaner.clean(url)
+            enterReaderForURL = cleaned
         case "readerClear":
             guard ownPage else { return }
             ReaderStore.setHistory(ReaderHistory(), store: store)
+            cache.prune(keeping: [])
         case "readerUnhide":
             guard ownPage, let phrase = message.body as? String else { return }
             var phrases = ReaderStore.hiddenPhrases(store: store)

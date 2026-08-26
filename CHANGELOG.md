@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Recent articles are kept on disk: opening one from the recents list is instant and works
+  offline, and a failed page load falls back to the saved copy when there is one. Saved
+  copies follow the recents list (30) and go with Clear history.
+
+### Changed
+- Reload (⌘R) in the reader fetches the article page again instead of redrawing the
+  rendered page, refreshing the saved copy.
+
 ### Changed
 - The reading-progress line now uses the text color instead of the accent, so it no longer
   looks like a stalled page load.
