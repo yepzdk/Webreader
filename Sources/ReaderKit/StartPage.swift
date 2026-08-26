@@ -10,7 +10,8 @@ public enum StartPage {
     /// the same chrome as the reader page, reading the same persisted settings (#91).
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
-                            history: ReaderHistory = ReaderHistory()) -> String {
+                            history: ReaderHistory = ReaderHistory(),
+                            hidden: HiddenPhrases = HiddenPhrases()) -> String {
         let name = HTML.escape(appName)
         let sans = ReaderSettings.FontFamily.sans.css
         // Recents are listed inline here rather than tucked in the popover: this page has
@@ -109,7 +110,7 @@ public enum StartPage {
             \(recentsList)
           </main>
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden), by: 10))
           (function () {
             var form = document.getElementById('open');
             var field = document.getElementById('url');

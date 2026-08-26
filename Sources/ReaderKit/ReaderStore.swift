@@ -29,6 +29,7 @@ public enum ReaderStore {
         public static let settings = "reader.settings"
         public static let history = "reader.history"
         public static let zoom = "reader.zoom"
+        public static let hiddenPhrases = "reader.hiddenPhrases"
         /// Marker set once the one-time import from the webwrap-generated app has run.
         public static let legacyImported = "reader.legacyImported"
     }
@@ -59,6 +60,18 @@ public enum ReaderStore {
 
     public static func setHistory(_ history: ReaderHistory, store: KeyValueStore) {
         store.set(history.json, forKey: Key.history)
+    }
+
+    // MARK: - Hidden phrases
+
+    /// Never stored → the defaults (see `HiddenPhrases.fromJSON`). User data like history:
+    /// `resetAppearance` leaves it alone.
+    public static func hiddenPhrases(store: KeyValueStore) -> HiddenPhrases {
+        HiddenPhrases.fromJSON(store.string(forKey: Key.hiddenPhrases))
+    }
+
+    public static func setHiddenPhrases(_ phrases: HiddenPhrases, store: KeyValueStore) {
+        store.set(phrases.json, forKey: Key.hiddenPhrases)
     }
 
     // MARK: - Page zoom

@@ -9,7 +9,7 @@ import ReaderKit
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
                          WKScriptMessageHandler {
     private var window: NSWindow!
-    private var webView: WKWebView!
+    private var webView: ReaderWebView!
     private var progressLine: ProgressLine?
     private let store: KeyValueStore = DefaultsStore()
     private let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "WebReader"
@@ -61,9 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.applicationNameForUserAgent = Self.safariApplicationName
-        // Our generated pages post here: the offline page's Try Again, the reader's Aa and
-        // recents popovers, and the start page's URL field.
-        for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL"] {
+        // Our generated pages post here: the offline page's Try Again, the reader's Aa,
+        // recents and hidden-text popovers, and the start page's URL field.
+        for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
+                     "readerUnhide"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -74,8 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if !window.setFrameUsingName("WebReaderMainWindow") { window.center() }
         window.setFrameAutosaveName("WebReaderMainWindow")
 
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
+        webView = ReaderWebView(frame: window.contentView!.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
+        webView.canHideSelection = { [weak self] in self?.isShowingReader ?? false }
+        webView.onHideSelection = { [weak self] in self?.hideSelectedText(nil) }
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -143,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let copyURL = editMenu.addItem(withTitle: "Copy Current URL",
                                        action: #selector(copyCurrentURL(_:)), keyEquivalent: "c")
         copyURL.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        // No shortcut: ⌘H, ⇧⌘H and ⌥⌘H are all taken. The reader's context menu offers it too.
+        editMenu.addItem(withTitle: "Hide Selected Text in Articles",
+                         action: #selector(hideSelectedText(_:)), keyEquivalent: "").target = self
         copyURL.target = self
 
         let viewMenu = NSMenu(title: "View")
@@ -189,6 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return WebURL.isWebURL(url)
         case #selector(openFromClipboard(_:)):
             return WebURL.clipboardURL(from: NSPasteboard.general.string(forType: .string)) != nil
+        case #selector(hideSelectedText(_:)):
+            return isShowingReader
         default:
             return true
         }
@@ -246,6 +255,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: - Reader
 
+    /// Learns the reader's current selection as a phrase to hide: strips it from the page
+    /// live and persists it for every article from now on. Beeps when there's nothing
+    /// usable — no selection, longer than a sentence, or already in the list.
+    @objc private func hideSelectedText(_ sender: Any?) {
+        guard isShowingReader else { NSSound.beep(); return }
+        webView.evaluateJavaScript("window.getSelection().toString()") { [weak self] result, _ in
+            guard let self else { return }
+            var phrases = ReaderStore.hiddenPhrases(store: self.store)
+            guard let text = result as? String, phrases.add(text) else {
+                NSSound.beep()
+                return
+            }
+            ReaderStore.setHiddenPhrases(phrases, store: self.store)
+            self.webView.evaluateJavaScript("window.readerSetHidden(\(phrases.scriptLiteral))")
+        }
+    }
+
     @objc private func toggleReader(_ sender: Any?) {
         if isShowingReader {
             // Back to the original page; its load must not immediately re-enter.
@@ -268,7 +294,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// in-place swaps within a second. Failure leaves the page untouched: a beep for a
     /// manual request, silence for the automatic path — never an error page.
     private func enterReader(manual: Bool) {
-        webView.evaluateJavaScript(Reader.extractionScript) { [weak self] result, _ in
+        let hidden = ReaderStore.hiddenPhrases(store: store)
+        webView.evaluateJavaScript(Reader.extractionScript(hiding: hidden)) { [weak self] result, _ in
             guard let self else { return }
             guard let article = Reader.decode(result) else {
                 if manual { NSSound.beep() }
@@ -285,7 +312,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             let html = ReaderPage.html(article: article,
                                        settings: ReaderStore.settings(store: self.store),
-                                       history: history)
+                                       history: history,
+                                       hidden: hidden)
             self.pendingReaderRender = true
             self.webView.loadHTMLString(html, baseURL: self.readerSourceURL)
         }
@@ -333,7 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         isShowingStartPage = true
         webView.loadHTMLString(StartPage.html(appName: appName,
                                               settings: ReaderStore.settings(store: store),
-                                              history: ReaderStore.history(store: store)),
+                                              history: ReaderStore.history(store: store),
+                                              hidden: ReaderStore.hiddenPhrases(store: store)),
                                baseURL: nil)
     }
 
@@ -459,6 +488,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "readerClear":
             guard ownPage else { return }
             ReaderStore.setHistory(ReaderHistory(), store: store)
+        case "readerUnhide":
+            guard ownPage, let phrase = message.body as? String else { return }
+            var phrases = ReaderStore.hiddenPhrases(store: store)
+            phrases.remove(phrase)
+            ReaderStore.setHiddenPhrases(phrases, store: store)
         case "readerOpenURL":
             // The start page's field, normalized like ⇧⌘O so bare "example.com/x" works.
             guard isShowingStartPage, let raw = message.body as? String else { return }

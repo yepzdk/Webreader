@@ -15,6 +15,15 @@ final class ReaderDecodeTests: XCTestCase {
                                siteName: "The Site", content: "<p>Body</p>"))
     }
 
+    func testDecodesHiddenHitsAndDefaultsToEmpty() {
+        let with = Reader.decode(#"{"title":"T","content":"<p>x</p>","hidden":{"annonce":2}}"#)
+        XCTAssertEqual(with?.hiddenHits, ["annonce": 2])
+        let without = Reader.decode(#"{"title":"T","content":"<p>x</p>"}"#)
+        XCTAssertEqual(without?.hiddenHits, [:])
+        let garbled = Reader.decode(#"{"title":"T","content":"<p>x</p>","hidden":"nope"}"#)
+        XCTAssertEqual(garbled?.hiddenHits, [:])
+    }
+
     func testDecodesWithAbsentOptionals() {
         let article = Reader.decode(#"{"title":"T","content":"<p>x</p>"}"#)
         XCTAssertEqual(article?.title, "T")
@@ -65,6 +74,14 @@ final class ReaderSettingsTests: XCTestCase {
         XCTAssertEqual(ReaderSettings.fromJSON("not json"), ReaderSettings())
     }
 
+    func testQuoteStyleDecodesAndRoundTrips() {
+        XCTAssertEqual(ReaderSettings.decode(["quoteStyle": "italic"]).quoteStyle, .italic)
+        XCTAssertEqual(ReaderSettings.decode(["quoteStyle": "comic"]).quoteStyle, .bordered)
+        var settings = ReaderSettings()
+        settings.quoteStyle = .italic
+        XCTAssertEqual(ReaderSettings.fromJSON(settings.json), settings)
+    }
+
     func testFontSizeIsClamped() {
         XCTAssertEqual(ReaderSettings.decode(["fontSize": 6]).fontSize,
                        ReaderSettings.fontSizeRange.lowerBound)
@@ -85,13 +102,34 @@ final class ReaderSettingsTests: XCTestCase {
 
 final class ReaderExtractionScriptTests: XCTestCase {
     func testContainsVendoredSourcesAndGate() {
-        let script = Reader.extractionScript
+        let script = Reader.extractionScript()
         // Both vendored libraries are inlined, and the cheap gate runs before parse.
         XCTAssertTrue(script.contains("function Readability("))
         XCTAssertTrue(script.contains("function isProbablyReaderable("))
         XCTAssertTrue(script.contains("isProbablyReaderable(document)"))
         // Parse must run on a clone — Readability's parse is destructive.
         XCTAssertTrue(script.contains("document.cloneNode(true)"))
+    }
+
+    func testStripsHiddenPhrasesFromParsedContent() {
+        let script = Reader.extractionScript(hiding: HiddenPhrases(["Annonce", "</script>"]))
+        XCTAssertTrue(script.contains("function readerHideBlocks("))
+        // On a DOMParser document (no browsing context, so no image fetches), and the
+        // filtered body is what gets returned.
+        XCTAssertTrue(script.contains("new DOMParser().parseFromString(article.content"))
+        XCTAssertTrue(script.contains("var hidden = readerHideBlocks(doc.body, [\"Annonce\",\"<\\/script>\"])"))
+        XCTAssertTrue(script.contains("content: doc.body.innerHTML"))
+        XCTAssertTrue(script.contains("hidden: hidden.hits"))
+    }
+
+    func testWrapsQuotationsAfterHiding() {
+        let script = Reader.extractionScript()
+        XCTAssertTrue(script.contains("function readerWrapQuotes("))
+        // Hide first, then wrap — a removed block shouldn't be styled, and the wrap must
+        // see the final DOM.
+        let hide = script.range(of: "var hidden = readerHideBlocks(")!
+        let wrap = script.range(of: "readerWrapQuotes(doc.body);")!
+        XCTAssertTrue(hide.lowerBound < wrap.lowerBound)
     }
 }
 
@@ -145,10 +183,13 @@ final class ReaderPageTests: XCTestCase {
         // each panel must name itself once opened.
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("title=\"Recent articles\""))
+        XCTAssertTrue(html.contains("title=\"Hidden text\""))
         XCTAssertTrue(html.contains("title=\"Text &amp; appearance\""))
         XCTAssertTrue(html.contains(">Recent articles</h2>"))
+        XCTAssertTrue(html.contains(">Hidden text</h2>"))
         XCTAssertTrue(html.contains(">Text &amp; appearance</h2>"))
         XCTAssertTrue(html.contains("aria-labelledby=\"readerRecentsTitle\""))
+        XCTAssertTrue(html.contains("aria-labelledby=\"readerHiddenTitle\""))
         XCTAssertTrue(html.contains("aria-labelledby=\"readerPanelTitle\""))
         // The A/A size row doesn't self-explain either.
         XCTAssertTrue(html.contains("title=\"Smaller text\""))
@@ -160,10 +201,45 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("id=\"readerAa\""))
         XCTAssertTrue(html.contains("messageHandlers.readerSettings.postMessage"))
         // Every adjustable value has a control.
-        for value in ["serif", "sans", "narrow", "normal", "wide",
-                      "compact", "relaxed", "auto", "light", "sepia", "dark", "black"] {
+        for value in ["serif", "sans", "narrow", "normal", "wide", "compact", "relaxed",
+                      "auto", "light", "sepia", "dark", "black", "bordered", "italic"] {
             XCTAssertTrue(html.contains("data-value=\"\(value)\""), value)
         }
+    }
+
+    func testQuoteStyleIsAnAttributeOnlyWhenItalic() {
+        XCTAssertTrue(ReaderPage.html(article: article).contains("<html lang=\"en\">"))
+        var settings = ReaderSettings()
+        settings.quoteStyle = .italic
+        let html = ReaderPage.html(article: article, settings: settings)
+        XCTAssertTrue(html.contains("<html lang=\"en\" data-quotes=\"italic\">"))
+        // Both treatments are in the stylesheet; the attribute just switches.
+        XCTAssertTrue(html.contains("article p.qp { padding-left: 14px; border-left: 3px solid var(--border); }"))
+        XCTAssertTrue(html.contains(":root[data-quotes=\"italic\"] article .q { font-weight: inherit; font-style: italic; }"))
+    }
+
+    func testHiddenHitsFeedTheBadge() {
+        let hit = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>",
+                          hiddenHits: ["annonce": 2, "</script>": 1])
+        let html = ReaderPage.html(article: hit)
+        XCTAssertTrue(html.contains("id=\"readerHiddenCount\" class=\"badge\" hidden"))
+        XCTAssertTrue(html.contains("var HITS = {\"<\\/script>\":1,\"annonce\":2};"))
+        XCTAssertTrue(html.contains("Removed from this article"))
+        // No article, no hits: the start page bakes an empty map.
+        XCTAssertTrue(StartPage.html(appName: "R").contains("var HITS = {};"))
+    }
+
+    func testHiddenTextPanelIsScriptFilledAndPhrasesCannotEscapeTheScript() {
+        let html = ReaderPage.html(article: article,
+                                   hidden: HiddenPhrases(["</script><img src=x onerror=alert(1)>"]))
+        XCTAssertTrue(html.contains("id=\"readerHiddenList\""))
+        XCTAssertTrue(html.contains("window.readerSetHidden = function"))
+        XCTAssertTrue(html.contains("messageHandlers.readerUnhide.postMessage"))
+        // The phrase reaches the page only as a JS string literal — and one that can't end
+        // the <script> block early. The one legitimate </script> is the page's own.
+        XCTAssertFalse(html.contains("</script><img"))
+        XCTAssertTrue(html.contains("<\\/script><img src=x onerror=alert(1)>"))
+        XCTAssertEqual(html.components(separatedBy: "</script>").count - 1, 1)
     }
 
     func testRecentsPanelListsTitlesAndEscapesThem() {
@@ -193,12 +269,12 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertFalse(html.contains("id=\"readerClear\""))
     }
 
-    func testBothPopoversAreRightAnchored() {
+    func testAllPopoversAreRightAnchored() {
         // The controls sit at the window's right edge, so a panel must hang leftward or
         // it runs off screen. Regression guard: left-anchoring the recents panel pushed
         // most of it out of the viewport.
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains("#readerPanel, #readerRecents {"))
+        XCTAssertTrue(html.contains("#readerPanel, #readerRecents, #readerHidden {"))
         XCTAssertTrue(html.contains("position: absolute; top: calc(100% + 8px); right: 0;"))
         XCTAssertFalse(html.contains("left: 0; right: auto;"))
         // …and it's kept from overflowing the opposite edge on a narrow window.
@@ -226,7 +302,9 @@ final class ReaderPageTests: XCTestCase {
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("id=\"readerProgress\""))
         // Themed, so it follows the chosen palette rather than a fixed color.
-        XCTAssertTrue(html.contains("background: var(--accent);"))
+        // Not the accent — that's the native load line's color, and a still blue bar
+        // reads as a stuck load.
+        XCTAssertTrue(html.contains("background: var(--fg);"))
         // Matches the native load line's height so the two read as one idiom.
         XCTAssertTrue(html.contains("height: 2.5px;"))
         // Decorative: a scroll fraction is nothing for a screen reader to announce.
