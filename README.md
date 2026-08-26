@@ -38,9 +38,11 @@ Incoming links are cleaned first: tracking redirects that embed the real destina
 
 **Reading.** Every page that looks like an article opens as a reader page; pages that don't load normally. **⇧⌘R** (View → Toggle Reader View) switches between the reader rendering and the original page. A hairline along the top edge fills as you scroll, so a long article's remaining length is visible at a glance.
 
-**Appearance.** The **Aa** button in the top-right corner sets font size, serif or sans type, column width, line height, and theme (auto, light, sepia, dark, black). Changes apply instantly and persist. **⌘+ / ⌘− / ⌘0** zoom any page. View → Reset Reader Appearance returns everything to stock.
+**Appearance.** The **Aa** button in the top-right corner sets font size, serif or sans type, column width, line height, theme (auto, light, sepia, dark, black), and how inline quotations (»…«, “…”) are set — bordered with medium weight, or italic. Changes apply instantly and persist. **⌘+ / ⌘− / ⌘0** zoom any page. View → Reset Reader Appearance returns everything to stock.
 
 **Recents.** The list button next to **Aa** opens the last 30 articles read; click one to reopen it in the reader. The start page (**⇧⌘H**) lists the same articles inline. Clear history from the bottom of the panel — Reset Reader Appearance leaves it alone.
+
+**Hidden text.** Boilerplate lines that survive extraction — "Artiklen fortsætter efter annoncen", "Advertisement" and the like — are removed. A paragraph is dropped only when its entire text is one of the phrases, never when it merely contains one. Teach it new ones as you read: select the sentence in the reader, right-click → **Hide Selected Text in Articles** (also under Edit). It disappears immediately and from every article after that. The eye-off button next to **Aa** shows how many blocks the current article lost and lists the phrases — the ones that hit this article first, with their count — each with a remove control.
 
 **Paywalls.** To get full text from a site that paywalls logged-out visitors, log in once inside the app (⇧⌘R to the original page, sign in). The session persists.
 

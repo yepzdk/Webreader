@@ -25,6 +25,8 @@ Two SwiftPM targets, no dependencies:
   - `ReaderChrome.swift` — the Aa popover, recents popover, theme palette, and scroll-progress
     line shared byte-for-byte by the reader page and the start page.
   - `ReaderHistory.swift` — recents (cap 30, dedupe by URL).
+  - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
+    `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
   - `URLCleaner.swift` — tracking-redirect unwrap / tracking-param strip (ported from
     yepzdk/url-cleaner; never unwraps OAuth `redirect*` params or unencoded nested URLs).
@@ -47,7 +49,16 @@ Two SwiftPM targets, no dependencies:
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
-  `readerClear`, `readerOpenURL`. Rename in both Swift and the page scripts together.
+  `readerClear`, `readerOpenURL`, `readerUnhide`. Rename in both Swift and the page scripts
+  together. The host calls back into the reader page via `window.readerSetHidden(list)`.
+- Hidden phrases match a **whole block's text only** (never a substring, never inline
+  elements) so a learned phrase can't rewrite prose. The stored list is seeded with
+  `HiddenPhrases.defaults` the first time it's read and is plain user data afterwards — new
+  defaults don't reach existing users, and Reset Reader Appearance leaves the list alone.
+- Quotation styling is two-step: the extraction script wraps »…«/“…” pairs found in a single
+  text node in `<span class="q">` (paragraphs opening with one get `qp`), and the reader
+  page's CSS renders them bordered by default or italic under `data-quotes="italic"`.
+  Switching the setting is attribute-only — no re-extraction.
 - Recents store the **cleaned** URL, because reopening a row routes through `openIncoming`,
   which cleans; the raw URL would look like a different article.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).

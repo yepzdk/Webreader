@@ -26,10 +26,12 @@ enum ReaderChrome {
             .joined(separator: "\n")
     }
 
-    /// The `data-theme` attribute for `<html>`. Absent for `auto`, so the appearance
-    /// follows the system (and any baked background color still applies).
+    /// The `data-theme` and `data-quotes` attributes for `<html>`. Each is absent at its
+    /// default (`auto` follows the system; bordered quotes are the stylesheet's baseline), so
+    /// the stock page is attribute-free.
     static func themeAttribute(_ settings: ReaderSettings) -> String {
-        settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\""
+        (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
+            + (settings.quoteStyle == .bordered ? "" : " data-quotes=\"\(settings.quoteStyle.rawValue)\"")
     }
 
     /// The palette custom properties: light defaults, the dark media query, and the four
@@ -90,30 +92,40 @@ enum ReaderChrome {
         }
         /* Each button owns the popover anchored under it. */
         .reader-control { position: relative; }
-        #readerAa, #readerRecentsBtn {
+        #readerAa, #readerRecentsBtn, #readerHiddenBtn {
           padding: 4px 10px; font-family: inherit; font-size: 14px;
           color: var(--muted); background: var(--bg);
           border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
         }
         #readerAa:hover, #readerAa[aria-expanded="true"],
-        #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"] { color: var(--fg); }
-        /* The icon button matches the "Aa" button's box; the SVG inherits currentColor. */
-        #readerRecentsBtn { display: flex; align-items: center; padding: 5px 9px; }
-        #readerRecentsBtn svg { display: block; }
-        #readerPanel, #readerRecents {
+        #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
+        #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
+        /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor. */
+        #readerRecentsBtn, #readerHiddenBtn { display: flex; align-items: center; padding: 5px 9px; }
+        #readerRecentsBtn svg, #readerHiddenBtn svg { display: block; }
+        /* How many blocks this article lost. Inverted neutrals — black on white in light,
+           white on black in dark, brown on cream in sepia — never the accent. */
+        #readerHiddenBtn { position: relative; }
+        .badge {
+          position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px;
+          padding: 0 4px; border-radius: 8px; background: var(--fg); color: var(--bg);
+          font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+        }
+        .badge[hidden] { display: none; }
+        #readerPanel, #readerRecents, #readerHidden {
           position: absolute; top: calc(100% + 8px); right: 0; width: 240px;
           padding: 12px; background: var(--bg);
           border: 1px solid var(--border); border-radius: 8px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
           display: flex; flex-direction: column; gap: 10px;
         }
-        #readerPanel[hidden], #readerRecents[hidden] { display: none; }
+        #readerPanel[hidden], #readerRecents[hidden], #readerHidden[hidden] { display: none; }
         /* Recents: a plain list of titles. Padding is on the rows, so the panel itself
            sheds its gap and lets a long list scroll instead of running off-screen.
            Right-anchored like the Aa panel: the controls sit at the window's right edge,
            so the panel has to hang leftward to stay on screen. `max-width` keeps it from
            running off the LEFT edge on a narrow window. */
-        #readerRecents {
+        #readerRecents, #readerHidden {
           width: 280px; max-width: calc(100vw - 28px);
           padding: 6px; gap: 0; max-height: 60vh; overflow-y: auto;
         }
@@ -127,7 +139,28 @@ enum ReaderChrome {
           display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .recent-host { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
-        .recent-empty { margin: 0; padding: 7px 8px; color: var(--muted); }
+        .recent-empty, .phrase-empty { margin: 0; padding: 7px 8px; color: var(--muted); }
+        /* Hidden-text rows: the phrase and a remove control. Built by the page script from
+           the phrase list via textContent — no phrase ever becomes markup. */
+        .phrase {
+          display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 8px;
+          border-radius: 5px; font-size: 12px; color: var(--fg);
+        }
+        .phrase:hover { background: var(--surface); }
+        .phrase-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .phrase-remove {
+          display: flex; padding: 4px; border: 0; border-radius: 4px; background: transparent;
+          color: var(--muted); cursor: pointer;
+        }
+        .phrase-remove:hover { color: var(--fg); background: var(--border); }
+        .phrase-remove svg { display: block; }
+        .phrase-count { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+        /* Phrases that hit this article are listed first; the rest follow under a rule. */
+        .phrase-group {
+          margin: 6px 6px 2px; padding: 0 2px; font-size: 10px; font-weight: 600;
+          letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+        }
+        .phrase-group.rest { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
         /* Clearing history lives next to the history itself — Restore Defaults is for
            presentation settings and deliberately leaves user data alone. */
         #readerClear {
@@ -143,8 +176,8 @@ enum ReaderChrome {
           font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
           text-transform: uppercase; color: var(--muted);
         }
-        /* The recents panel puts padding on its rows, so its heading carries its own. */
-        #readerRecents .panel-title { margin: 2px 6px 4px; padding: 2px 2px 8px; }
+        /* The list panels put padding on their rows, so their headings carry their own. */
+        #readerRecents .panel-title, #readerHidden .panel-title { margin: 2px 6px 4px; padding: 2px 2px 8px; }
         .seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
         .seg button {
           flex: 1; padding: 7px 0; border: 0; background: transparent; cursor: pointer;
@@ -181,7 +214,9 @@ enum ReaderChrome {
         """
         #readerProgress {
           position: fixed; top: 0; left: 0; width: 100%; height: 2.5px; z-index: 9;
-          background: var(--accent);
+          /* Foreground, not accent: the native page-load line is accent-colored, and a
+             blue hairline sitting still at 30% reads as a stuck load. */
+          background: var(--fg);
           /* scaleX from the left rather than animating width: composites on the GPU, so a
              fast scroll doesn't force layout on every frame. */
           transform-origin: left center; transform: scaleX(0);
@@ -272,9 +307,9 @@ enum ReaderChrome {
             + "\n<button id=\"readerClear\">Clear history</button>"
     }
 
-    /// The chrome markup: the recents button with its popover, then the "Aa" button with
-    /// the appearance popover. Both carry hover tooltips and name their own panel, since
-    /// the buttons themselves are unlabelled.
+    /// The chrome markup: the recents button with its popover, the hidden-text button with
+    /// its (script-filled) list, then the "Aa" button with the appearance popover. All carry
+    /// hover tooltips and name their own panel, since the buttons themselves are unlabelled.
     static func controls(history: ReaderHistory) -> String {
         """
         <div class="reader-controls">
@@ -289,6 +324,24 @@ enum ReaderChrome {
             </button>
             <div id="readerRecents" hidden aria-labelledby="readerRecentsTitle">
               \(indent(recentsBody(history), by: 6))
+            </div>
+          </div>
+          <div class="reader-control">
+            <button id="readerHiddenBtn" aria-label="Hidden text"
+                    title="Hidden text" aria-haspopup="true"
+                    aria-expanded="false" aria-controls="readerHidden">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
+                <path d="M2 2l20 20"/>
+              </svg>
+              <span id="readerHiddenCount" class="badge" hidden aria-hidden="true"></span>
+            </button>
+            <div id="readerHidden" hidden aria-labelledby="readerHiddenTitle">
+              <h2 class="panel-title" id="readerHiddenTitle">Hidden text</h2>
+              <div id="readerHiddenList"></div>
             </div>
           </div>
           <div class="reader-control">
@@ -317,6 +370,10 @@ enum ReaderChrome {
                 <button data-key="lineHeight" data-value="normal">Normal</button>
                 <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
               </div>
+              <div class="seg" role="group" aria-label="Quotes">
+                <button data-key="quoteStyle" data-value="bordered">Bordered</button>
+                <button data-key="quoteStyle" data-value="italic">Italic</button>
+              </div>
               <div class="themes" role="group" aria-label="Theme">
                 <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
                 <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
@@ -331,14 +388,26 @@ enum ReaderChrome {
     }
 
     /// The chrome script: applies the appearance settings live, persists them via
-    /// `readerSettings`, opens a recents row via `readerOpen`, and clears the list
-    /// via `readerClear`. Shared verbatim so both pages behave identically.
-    static func controlsScript(settings: ReaderSettings) -> String {
+    /// `readerSettings`, opens a recents row via `readerOpen`, clears the list via
+    /// `readerClear`, and drops a hidden phrase via `readerUnhide`. Shared verbatim so both
+    /// pages behave identically.
+    ///
+    /// `window.readerSetHidden(list)` is also the host's entry point after it learns a
+    /// phrase from the selection: it strips matching blocks from the article live, adds
+    /// what it removed to the hit counts, and redraws the badge and list.
+    ///
+    /// `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
+    /// the start page has no article and passes nothing.
+    static func controlsScript(settings: ReaderSettings, hidden: HiddenPhrases = HiddenPhrases(),
+                               hitsJSON: String = "{}") -> String {
         let sans = ReaderSettings.FontFamily.sans.css
         let serif = ReaderSettings.FontFamily.serif.css
         return """
         (function () {
+          \(indent(HiddenPhrases.hideScript, by: 2))
           var s = \(settings.json);
+          var HIDDEN = \(hidden.scriptLiteral);
+          var HITS = \(hitsJSON);
           var MIN = \(ReaderSettings.fontSizeRange.lowerBound), MAX = \(ReaderSettings.fontSizeRange.upperBound);
           var FONTS = { serif: '\(serif)', sans: '\(sans)' };
           var WIDTHS = { narrow: '\(ReaderSettings.Width.narrow.css)', normal: '\(ReaderSettings.Width.normal.css)', wide: '\(ReaderSettings.Width.wide.css)' };
@@ -348,8 +417,16 @@ enum ReaderChrome {
           var panel = document.getElementById('readerPanel');
           var recentsBtn = document.getElementById('readerRecentsBtn');
           var recents = document.getElementById('readerRecents');
-          // The two popovers, so opening one closes the other.
-          var popovers = [{ btn: btn, panel: panel }, { btn: recentsBtn, panel: recents }];
+          var hiddenBtn = document.getElementById('readerHiddenBtn');
+          var hiddenPanel = document.getElementById('readerHidden');
+          var hiddenList = document.getElementById('readerHiddenList');
+          var badge = document.getElementById('readerHiddenCount');
+          // The popovers, so opening one closes the others.
+          var popovers = [{ btn: btn, panel: panel }, { btn: recentsBtn, panel: recents },
+                          { btn: hiddenBtn, panel: hiddenPanel }];
+          var REMOVE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" ' +
+            'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+            '<path d="M18 6 6 18M6 6l12 12"/></svg>';
 
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
@@ -358,6 +435,8 @@ enum ReaderChrome {
             root.style.setProperty('--reader-leading', LEADINGS[s.lineHeight]);
             if (s.theme === 'auto') { root.removeAttribute('data-theme'); }
             else { root.setAttribute('data-theme', s.theme); }
+            if (s.quoteStyle === 'italic') { root.setAttribute('data-quotes', 'italic'); }
+            else { root.removeAttribute('data-quotes'); }
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });
@@ -389,9 +468,82 @@ enum ReaderChrome {
             } else { return; }
             apply(); save();
           });
+          // Strips matching blocks from the article (the start page has none) and redraws
+          // the list. Rows are built with DOM APIs from the phrase strings — phrases come
+          // from other sites' pages and never take the markup path.
+          window.readerSetHidden = function (list) {
+            HIDDEN = list;
+            var result = readerHideBlocks(document.querySelector('article'), HIDDEN);
+            Object.keys(result.hits).forEach(function (k) { HITS[k] = (HITS[k] || 0) + result.hits[k]; });
+            if (window.readerOnLayoutChange) { window.readerOnLayoutChange(); }
+            // The badge counts blocks actually removed from this page — a phrase dropped
+            // from the list later doesn't bring its blocks back until a reload.
+            var total = 0;
+            Object.keys(HITS).forEach(function (k) { total += HITS[k]; });
+            badge.textContent = String(total);
+            badge.hidden = total === 0;
+            hiddenBtn.setAttribute('aria-label',
+              total ? 'Hidden text, ' + total + ' removed from this article' : 'Hidden text');
+            hiddenList.textContent = '';
+            if (!HIDDEN.length) {
+              var empty = document.createElement('p');
+              empty.className = 'phrase-empty';
+              empty.textContent = 'No hidden text';
+              hiddenList.appendChild(empty);
+              return;
+            }
+            function heading(label, extra) {
+              var h = document.createElement('p');
+              h.className = 'phrase-group' + (extra ? ' ' + extra : '');
+              h.textContent = label;
+              hiddenList.appendChild(h);
+            }
+            var hit = HIDDEN.filter(function (p) { return HITS[readerNormalize(p)]; });
+            var rest = HIDDEN.filter(function (p) { return !HITS[readerNormalize(p)]; });
+            if (hit.length) {
+              heading('Removed from this article');
+              hit.forEach(row);
+              if (rest.length) { heading('Other phrases', 'rest'); }
+            }
+            rest.forEach(row);
+            function row(phrase) {
+              var row = document.createElement('div');
+              row.className = 'phrase';
+              var text = document.createElement('span');
+              text.className = 'phrase-text';
+              text.textContent = phrase;
+              text.title = phrase;
+              var count = HITS[readerNormalize(phrase)];
+              if (count) {
+                var chip = document.createElement('span');
+                chip.className = 'phrase-count';
+                chip.textContent = '×' + count;
+              }
+              var remove = document.createElement('button');
+              remove.className = 'phrase-remove';
+              remove.setAttribute('aria-label', 'Stop hiding “' + phrase + '”');
+              remove.title = 'Stop hiding';
+              remove.innerHTML = REMOVE_ICON;
+              remove.addEventListener('click', function (e) {
+                // Redrawing detaches the clicked button; without this the document-level
+                // close handler would see a node outside .reader-controls and shut the panel.
+                e.stopPropagation();
+                window.readerSetHidden(HIDDEN.filter(function (p) { return p !== phrase; }));
+                try { window.webkit.messageHandlers.readerUnhide.postMessage(phrase); }
+                catch (err) {}
+              });
+              row.appendChild(text);
+              if (count) { row.appendChild(chip); }
+              row.appendChild(remove);
+              hiddenList.appendChild(row);
+            }
+          };
           btn.addEventListener('click', function () { setOpen(panel.hidden ? panel : null); });
           recentsBtn.addEventListener('click', function () {
             setOpen(recents.hidden ? recents : null);
+          });
+          hiddenBtn.addEventListener('click', function () {
+            setOpen(hiddenPanel.hidden ? hiddenPanel : null);
           });
           // A recents row hands its URL to the host, which re-validates it against the
           // app's domain scope before navigating — the same path an incoming link takes.
@@ -427,6 +579,7 @@ enum ReaderChrome {
             if (open) { setOpen(null); open.btn.focus(); }
           });
           apply();
+          window.readerSetHidden(HIDDEN);
         })();
         """
     }

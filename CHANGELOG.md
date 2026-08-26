@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The reading-progress line now uses the text color instead of the accent, so it no longer
+  looks like a stalled page load.
+
+### Added
+- Boilerplate lines such as "Artiklen fortsætter efter annoncen" and ad labels are removed
+  from articles. Blocks are dropped only when their whole text matches a phrase.
+- Learn new phrases as you read: select the text and pick Hide Selected Text in Articles
+  from the context or Edit menu. A Hidden text popover lists them, each removable, with a
+  count of what the current article lost and the phrases that hit it listed first.
+- Inline quotations (»…«, “…”) are styled: a left border with the quote in medium weight,
+  or italic — a new Quotes control in the Aa popover.
+
 ## [0.9.0] - 2026-08-25
 
 ### Added

@@ -11,6 +11,30 @@ public struct Article: Decodable, Equatable {
     public let siteName: String?
     /// The Readability-cleaned article body HTML (`<script>` is stripped upstream).
     public let content: String
+    /// Blocks the hidden-phrase pass removed, per normalized phrase — what the eye-off badge
+    /// and the popover's grouping show. Empty when nothing matched (or nothing was sent).
+    public let hiddenHits: [String: Int]
+
+    public init(title: String, byline: String?, siteName: String?, content: String,
+                hiddenHits: [String: Int] = [:]) {
+        self.title = title
+        self.byline = byline
+        self.siteName = siteName
+        self.content = content
+        self.hiddenHits = hiddenHits
+    }
+
+    private enum CodingKeys: String, CodingKey { case title, byline, siteName, content, hidden }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        byline = try c.decodeIfPresent(String.self, forKey: .byline)
+        siteName = try c.decodeIfPresent(String.self, forKey: .siteName)
+        content = try c.decode(String.self, forKey: .content)
+        // Tolerant: a missing or malformed map is "no hits", never a failed article.
+        hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hidden)) ?? [:]
+    }
 }
 
 /// The reader's appearance settings, adjustable from the in-reader "Aa" popover and
@@ -57,11 +81,18 @@ public struct ReaderSettings: Equatable {
         case auto, light, sepia, dark, black
     }
 
+    /// How inline quotations (»…«, “…”) are set: a left border on the paragraph with the
+    /// quote in medium weight, or plain italics.
+    public enum QuoteStyle: String, CaseIterable {
+        case bordered, italic
+    }
+
     public var fontSize = 17
     public var fontFamily = FontFamily.serif
     public var width = Width.normal
     public var lineHeight = LineHeight.normal
     public var theme = Theme.auto
+    public var quoteStyle = QuoteStyle.bordered
 
     public init() {}
 
@@ -88,6 +119,9 @@ public struct ReaderSettings: Equatable {
         if let raw = dict["theme"] as? String, let value = Theme(rawValue: raw) {
             settings.theme = value
         }
+        if let raw = dict["quoteStyle"] as? String, let value = QuoteStyle(rawValue: raw) {
+            settings.quoteStyle = value
+        }
         return settings
     }
 
@@ -100,6 +134,7 @@ public struct ReaderSettings: Equatable {
             "width": width.rawValue,
             "lineHeight": lineHeight.rawValue,
             "theme": theme.rawValue,
+            "quoteStyle": quoteStyle.rawValue,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         else { return "{}" }
@@ -115,24 +150,74 @@ public struct ReaderSettings: Equatable {
 }
 
 public enum Reader {
+    /// Wraps inline quotations in `<span class="q">` so the page can style them, and marks a
+    /// paragraph that opens with a quote `qp` (quotation plus attribution — the common shape
+    /// of "»…,« siger X"). Text nodes only, and only inside `<p>`; a pair must open and
+    /// close in the same text node.
+    static let quoteScript = """
+    function readerWrapQuotes(root) {
+      var PAIRS = { '»': '«', '“': '”', '”': '”', '„': '“', '"': '"' };
+      var OPEN = /[»“”„"]/;
+      Array.prototype.forEach.call(root.querySelectorAll('p'), function (p) {
+        var doc = p.ownerDocument;
+        var walker = doc.createTreeWalker(p, 4 /* NodeFilter.SHOW_TEXT */);
+        var nodes = [];
+        while (walker.nextNode()) { nodes.push(walker.currentNode); }
+        nodes.forEach(function (node) {
+          if (node.parentNode.closest('code, pre')) { return; }
+          var text = node.nodeValue, frag = null, cut = 0, i = 0;
+          while (i < text.length) {
+            var rel = text.slice(i).search(OPEN);
+            if (rel < 0) { break; }
+            var start = i + rel;
+            var end = text.indexOf(PAIRS[text[start]], start + 1);
+            // ponytail: a quote that closes in another node (a link inside it) stays plain;
+            // cross-node matching isn't worth the code until it shows up.
+            if (end < 0) { i = start + 1; continue; }
+            frag = frag || doc.createDocumentFragment();
+            frag.appendChild(doc.createTextNode(text.slice(cut, start)));
+            var q = doc.createElement('span');
+            q.className = 'q';
+            q.textContent = text.slice(start, end + 1);
+            frag.appendChild(q);
+            cut = i = end + 1;
+          }
+          if (!frag) { return; }
+          frag.appendChild(doc.createTextNode(text.slice(cut)));
+          node.parentNode.replaceChild(frag, node);
+        });
+        if (p.querySelector('.q') && OPEN.test(p.textContent.trim().charAt(0))) { p.classList.add('qp'); }
+      });
+    }
+    """
+
     /// The script the host evaluates on a loaded page. Gates on the cheap
     /// `isProbablyReaderable` check, parses a CLONE of the document (Readability's
-    /// parse is destructive), and returns the article as a JSON string — or `null`
-    /// when the page isn't an article. The IIFE keeps the vendored sources out of
-    /// the page's global scope.
-    public static var extractionScript: String {
+    /// parse is destructive), strips the `hiding` phrases, wraps quotations, and returns the
+    /// article as a JSON string — or `null` when the page isn't an article. The IIFE keeps
+    /// the vendored sources out of the page's global scope.
+    ///
+    /// The post-passes run on a `DOMParser` document: no browsing context, so the article's
+    /// images aren't fetched a first time just to be filtered.
+    public static func extractionScript(hiding hidden: HiddenPhrases = HiddenPhrases()) -> String {
         """
         (function() {
         \(ReadabilityJS.readability)
         \(ReadabilityJS.readerable)
+        \(HiddenPhrases.hideScript)
+        \(quoteScript)
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
         if (!article || !article.content) { return null; }
+        var doc = new DOMParser().parseFromString(article.content, 'text/html');
+        var hidden = readerHideBlocks(doc.body, \(hidden.scriptLiteral));
+        readerWrapQuotes(doc.body);
         return JSON.stringify({
           title: article.title || document.title || "",
           byline: article.byline,
           siteName: article.siteName,
-          content: article.content
+          content: doc.body.innerHTML,
+          hidden: hidden.hits
         });
         })()
         """
@@ -165,9 +250,13 @@ public enum ReaderPage {
     /// `history` is the recents list, baked into a sibling popover; its rows post the
     /// chosen URL to the host (`readerOpen`), which validates and navigates.
     /// Titles are escaped there too — they come from other sites' pages.
+    ///
+    /// `hidden` is the phrase list for the third popover; the page also re-applies it live
+    /// when the host learns a new phrase (`window.readerSetHidden`).
     public static func html(article: Article,
                             settings: ReaderSettings = ReaderSettings(),
-                            history: ReaderHistory = ReaderHistory()) -> String {
+                            history: ReaderHistory = ReaderHistory(),
+                            hidden: HiddenPhrases = HiddenPhrases()) -> String {
         let title = HTML.escape(article.title)
         // Byline and site name merge into one muted meta line; either may be absent.
         let meta = [article.byline, article.siteName]
@@ -177,6 +266,10 @@ public enum ReaderPage {
             .joined(separator: " \u{00B7} ")
         let metaLine = meta.isEmpty ? "" : "<p class=\"meta\">\(meta)</p>"
         let sans = ReaderSettings.FontFamily.sans.css
+        // Hit counts are keyed by normalized phrase — plain ASCII/word text — but they came
+        // from a page, so they take the same `</`-safe route as the phrase list.
+        let hits = (try? JSONSerialization.data(withJSONObject: article.hiddenHits, options: [.sortedKeys]))
+            .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         return """
         <!doctype html>
         <html lang="en"\(ReaderChrome.themeAttribute(settings))>
@@ -226,6 +319,14 @@ public enum ReaderPage {
           article table { display: block; overflow-x: auto; border-collapse: collapse; }
           article td, article th { border: 1px solid var(--border); padding: 6px 10px; }
           article hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
+          /* Inline quotations are wrapped in .q at extraction; a paragraph opening with one
+             is .qp. Bordered by default; data-quotes="italic" swaps the treatment. Medium
+             weight needs a face that has one (New York does; Georgia falls back to regular,
+             and the border still carries the quote). */
+          article p.qp { padding-left: 14px; border-left: 3px solid var(--border); }
+          article .q { font-weight: 500; }
+          :root[data-quotes="italic"] article p.qp { padding-left: 0; border-left: 0; }
+          :root[data-quotes="italic"] article .q { font-weight: inherit; font-style: italic; }
           /* Appearance ("Aa") popover and recents list. Chrome UI, so it keeps the sans
              stack and fixed sizes regardless of the reading settings. */
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(), by: 10))
@@ -243,7 +344,8 @@ public enum ReaderPage {
             <article>\(article.content)</article>
           </main>
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+                                                             hitsJSON: hits.replacingOccurrences(of: "</", with: "<\\/")), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
           </script>
         </body>
