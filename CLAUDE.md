@@ -67,8 +67,12 @@ Two SwiftPM targets, no dependencies:
   on Clear history). Only recents rows and failed loads are served from it — incoming links
   always load live. The cached body is post-filter; phrases learned later still apply
   because the reader page re-runs the hide on load, but a phrase *removed* later only
-  reappears after ⌘R (re-extract). Cached renders still go through `renderReader`, so they
-  record history and re-store like a live one.
+  reappears after ⌘R (re-extract). Cached renders go through `renderReader` too — it resets
+  page state and records history for every entry point — but only a live extraction writes
+  the cache.
+- Every reader page carries `<meta name="generator" content="WebReader">`, and the
+  extraction script returns `Reader.ownPageSentinel` when it sees it, so back/forward onto a
+  reader entry marks it as the reader instead of extracting (and caching) our own rendering.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
 - `ProgressLine.height` (2.5pt) and `ReaderChrome.progressCSS` (2.5px) are kept in step by
   hand; they can't share a constant across the Swift/CSS boundary.

@@ -121,6 +121,19 @@ final class ReaderExtractionScriptTests: XCTestCase {
         XCTAssertTrue(script.contains("document.cloneNode(true)"))
     }
 
+    func testRecognizesItsOwnReaderDocumentBeforeExtracting() {
+        let script = Reader.extractionScript()
+        let marker = script.range(of: "meta[name=\"generator\"][content=\"WebReader\"]")!
+        let gate = script.range(of: "isProbablyReaderable(document)")!
+        XCTAssertTrue(marker.lowerBound < gate.lowerBound)
+        XCTAssertTrue(script.contains("return \"\(Reader.ownPageSentinel)\";"))
+        // The sentinel is not an article.
+        XCTAssertNil(Reader.decode(Reader.ownPageSentinel))
+        // …and every reader page carries the marker.
+        XCTAssertTrue(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil, content: ""))
+            .contains("<meta name=\"generator\" content=\"WebReader\">"))
+    }
+
     func testStripsHiddenPhrasesFromParsedContent() {
         let script = Reader.extractionScript(hiding: HiddenPhrases(["Annonce", "</script>"]))
         XCTAssertTrue(script.contains("function readerHideBlocks("))
