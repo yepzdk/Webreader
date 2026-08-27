@@ -7,11 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- The reading-progress line now uses the text color instead of the accent, so it no longer
-  looks like a stalled page load.
-
 ### Added
+- Recent articles are kept on disk: opening one from the recents list is instant and works
+  offline, and a failed page load falls back to the saved copy when there is one. Saved
+  copies follow the recents list (30) and go with Clear history.
 - Boilerplate lines such as "Artiklen fortsætter efter annoncen" and ad labels are removed
   from articles. Blocks are dropped only when their whole text matches a phrase.
 - Learn new phrases as you read: select the text and pick Hide Selected Text in Articles
@@ -19,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   count of what the current article lost and the phrases that hit it listed first.
 - Inline quotations (»…«, “…”) are styled: a left border with the quote in medium weight,
   or italic — a new Quotes control in the Aa popover.
+
+### Changed
+- Reload (⌘R) in the reader fetches the article page again instead of redrawing the
+  rendered page, refreshing the saved copy.
+- The reading-progress line now uses the text color instead of the accent, so it no longer
+  looks like a stalled page load.
 
 ## [0.9.0] - 2026-08-25
 

@@ -24,6 +24,16 @@ final class ReaderDecodeTests: XCTestCase {
         XCTAssertEqual(garbled?.hiddenHits, [:])
     }
 
+    func testEncodesAndDecodesItself() throws {
+        // The cache stores articles with the encoder; hits ride along under the same key
+        // the extraction script uses.
+        let article = Article(title: "T", byline: nil, siteName: "S", content: "<p>x</p>",
+                              hiddenHits: ["annonce": 2])
+        let data = try JSONEncoder().encode(article)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"hidden\""))
+        XCTAssertEqual(try JSONDecoder().decode(Article.self, from: data), article)
+    }
+
     func testDecodesWithAbsentOptionals() {
         let article = Reader.decode(#"{"title":"T","content":"<p>x</p>"}"#)
         XCTAssertEqual(article?.title, "T")
@@ -109,6 +119,19 @@ final class ReaderExtractionScriptTests: XCTestCase {
         XCTAssertTrue(script.contains("isProbablyReaderable(document)"))
         // Parse must run on a clone — Readability's parse is destructive.
         XCTAssertTrue(script.contains("document.cloneNode(true)"))
+    }
+
+    func testRecognizesItsOwnReaderDocumentBeforeExtracting() {
+        let script = Reader.extractionScript()
+        let marker = script.range(of: "meta[name=\"generator\"][content=\"WebReader\"]")!
+        let gate = script.range(of: "isProbablyReaderable(document)")!
+        XCTAssertTrue(marker.lowerBound < gate.lowerBound)
+        XCTAssertTrue(script.contains("return \"\(Reader.ownPageSentinel)\";"))
+        // The sentinel is not an article.
+        XCTAssertNil(Reader.decode(Reader.ownPageSentinel))
+        // …and every reader page carries the marker.
+        XCTAssertTrue(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil, content: ""))
+            .contains("<meta name=\"generator\" content=\"WebReader\">"))
     }
 
     func testStripsHiddenPhrasesFromParsedContent() {

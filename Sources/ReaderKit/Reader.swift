@@ -4,8 +4,9 @@ import Foundation
 /// clean, distraction-free page. Everything here is string/JSON work — unit-tested;
 /// the WebKit orchestration (when to extract, applying the result) lives in the host.
 
-/// An article extracted by Readability, decoded from its `parse()` result.
-public struct Article: Decodable, Equatable {
+/// An article extracted by Readability, decoded from its `parse()` result. Codable both
+/// ways: the same shape is what `ArticleCache` keeps on disk.
+public struct Article: Codable, Equatable {
     public let title: String
     public let byline: String?
     public let siteName: String?
@@ -24,7 +25,9 @@ public struct Article: Decodable, Equatable {
         self.hiddenHits = hiddenHits
     }
 
-    private enum CodingKeys: String, CodingKey { case title, byline, siteName, content, hidden }
+    /// Only the decoder is hand-written (for tolerance); with the key spelled out here the
+    /// compiler synthesizes `encode(to:)`, so a new field can't be forgotten on the way out.
+    private enum CodingKeys: String, CodingKey { case title, byline, siteName, content, hiddenHits = "hidden" }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,7 +36,7 @@ public struct Article: Decodable, Equatable {
         siteName = try c.decodeIfPresent(String.self, forKey: .siteName)
         content = try c.decode(String.self, forKey: .content)
         // Tolerant: a missing or malformed map is "no hits", never a failed article.
-        hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hidden)) ?? [:]
+        hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hiddenHits)) ?? [:]
     }
 }
 
@@ -150,6 +153,11 @@ public struct ReaderSettings: Equatable {
 }
 
 public enum Reader {
+    /// What `extractionScript` returns on one of our own reader documents (they carry the
+    /// generator `<meta>`), instead of extracting the rendering a second time. `decode`
+    /// treats it as "no article"; the host treats it as "already the reader".
+    public static let ownPageSentinel = "webreader-page"
+
     /// Wraps inline quotations in `<span class="q">` so the page can style them, and marks a
     /// paragraph that opens with a quote `qp` (quotation plus attribution — the common shape
     /// of "»…,« siger X"). Text nodes only, and only inside `<p>`; a pair must open and
@@ -191,11 +199,12 @@ public enum Reader {
     }
     """
 
-    /// The script the host evaluates on a loaded page. Gates on the cheap
-    /// `isProbablyReaderable` check, parses a CLONE of the document (Readability's
-    /// parse is destructive), strips the `hiding` phrases, wraps quotations, and returns the
-    /// article as a JSON string — or `null` when the page isn't an article. The IIFE keeps
-    /// the vendored sources out of the page's global scope.
+    /// The script the host evaluates on a loaded page. Returns `ownPageSentinel` for our own
+    /// reader document (back/forward can land on one), otherwise gates on the cheap
+    /// `isProbablyReaderable` check, parses a CLONE of the document (Readability's parse is
+    /// destructive), strips the `hiding` phrases, wraps quotations, and returns the article as
+    /// a JSON string — or `null` when the page isn't an article. The IIFE keeps the vendored
+    /// sources out of the page's global scope.
     ///
     /// The post-passes run on a `DOMParser` document: no browsing context, so the article's
     /// images aren't fetched a first time just to be filtered.
@@ -206,6 +215,7 @@ public enum Reader {
         \(ReadabilityJS.readerable)
         \(HiddenPhrases.hideScript)
         \(quoteScript)
+        if (document.querySelector('meta[name="generator"][content="WebReader"]')) { return "\(ownPageSentinel)"; }
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
         if (!article || !article.content) { return null; }
@@ -277,6 +287,7 @@ public enum ReaderPage {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="color-scheme" content="light dark">
+        <meta name="generator" content="WebReader">
         <title>\(title)</title>
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))

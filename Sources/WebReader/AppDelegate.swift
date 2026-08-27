@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var pendingReaderRender = false
     private var readerSourceURL: URL?
 
+    /// On-disk copies of the recent articles (see `ArticleCache`): recents rows open from
+    /// here, and a failed load falls back to it.
+    private let cache = ArticleCache(
+        directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "dk.yepz.webreader")
+            .appendingPathComponent("articles"))
+
     // MARK: - Launch
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -212,7 +219,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         ])
     }
 
-    @objc private func reloadPage(_ sender: Any?) { webView.reload() }
+    /// In the reader, Reload fetches the source page again — which re-extracts and refreshes
+    /// the cached copy. Reloading the rendered document itself would change nothing.
+    @objc private func reloadPage(_ sender: Any?) {
+        if isShowingReader, let source = readerSourceURL {
+            webView.load(URLRequest(url: source))
+        } else {
+            webView.reload()
+        }
+    }
     @objc private func goBack(_ sender: Any?) { webView.goBack() }
     @objc private func goForward(_ sender: Any?) { webView.goForward() }
     @objc private func goHome(_ sender: Any?) { showStartPage() }
@@ -283,40 +298,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 webView.reload()
             }
         } else {
-            enterReader(manual: true)
+            guard let url = webView.url else { NSSound.beep(); return }
+            enterReader(from: url, manual: true)
         }
     }
 
-    /// Runs the Readability extraction on the current page and, on success, loads the
-    /// reader rendering as its OWN document (baseURL = the article, so relative image URLs
-    /// resolve). A new document rather than an in-place DOM swap, because the article
-    /// page's still-running JS must die with its page — hydrating sites were reverting
-    /// in-place swaps within a second. Failure leaves the page untouched: a beep for a
-    /// manual request, silence for the automatic path — never an error page.
-    private func enterReader(manual: Bool) {
+    /// Runs the Readability extraction on the page at `url` (the one that just finished
+    /// loading) and, on success, caches the article and loads the reader rendering as its
+    /// OWN document (baseURL = the article, so relative image URLs resolve). A new document
+    /// rather than an in-place DOM swap, because the article page's still-running JS must
+    /// die with its page — hydrating sites were reverting in-place swaps within a second.
+    /// Failure leaves the page untouched: a beep for a manual request, silence for the
+    /// automatic path — never an error page.
+    private func enterReader(from url: URL, manual: Bool) {
         let hidden = ReaderStore.hiddenPhrases(store: store)
         webView.evaluateJavaScript(Reader.extractionScript(hiding: hidden)) { [weak self] result, _ in
             guard let self else { return }
+            // Back/forward landed on one of our own reader documents: it IS the reader, so
+            // just say so. Nothing to extract, record, or cache.
+            if result as? String == Reader.ownPageSentinel {
+                self.isShowingReader = true
+                self.readerSourceURL = url
+                return
+            }
+            // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
+            // already the new (provisional) URL and this result belongs to a page nobody
+            // wants any more — rendering it would file page A's body under page B's key.
+            guard self.webView.url == url else { return }
             guard let article = Reader.decode(result) else {
                 if manual { NSSound.beep() }
                 return
             }
-            self.readerSourceURL = self.webView.url
-            // Record before rendering so the article being opened is the panel's top row.
-            // The cleaned URL, because opening a row routes through `openIncoming`, which
-            // cleans — recording the raw one would make the replay look like a new article.
-            var history = ReaderStore.history(store: self.store)
-            if let source = self.readerSourceURL {
-                history.record(title: article.title, url: URLCleaner.clean(source).absoluteString)
-                ReaderStore.setHistory(history, store: self.store)
-            }
-            let html = ReaderPage.html(article: article,
-                                       settings: ReaderStore.settings(store: self.store),
-                                       history: history,
-                                       hidden: hidden)
-            self.pendingReaderRender = true
-            self.webView.loadHTMLString(html, baseURL: self.readerSourceURL)
+            // Only a live extraction has something new to write; cache hits re-render as-is.
+            self.cache.store(article, for: URLCleaner.clean(url))
+            self.renderReader(article, source: url)
         }
+    }
+
+    /// Shows `article` as the reader document and records it in recents. `source` is the
+    /// article page (the baseURL, so relative images resolve). The single funnel for live
+    /// extractions and cache hits, so page state is reset here and nowhere else; the cache
+    /// is pruned here too, because recents — which it mirrors — change here.
+    private func renderReader(_ article: Article, source: URL) {
+        isShowingFallback = false
+        isShowingStartPage = false
+        failedURL = nil
+        readerSourceURL = source
+        // Record before rendering so the article being opened is the panel's top row.
+        // The cleaned URL, because opening a row routes through `openIncoming`, which
+        // cleans — recording the raw one would make the replay look like a new article.
+        var history = ReaderStore.history(store: store)
+        history.record(title: article.title, url: URLCleaner.clean(source).absoluteString)
+        ReaderStore.setHistory(history, store: store)
+        cache.prune(keeping: history.entries.map(\.url))
+        let html = ReaderPage.html(article: article,
+                                   settings: ReaderStore.settings(store: store),
+                                   history: history,
+                                   hidden: ReaderStore.hiddenPhrases(store: store))
+        pendingReaderRender = true
+        webView.loadHTMLString(html, baseURL: source)
     }
 
     // MARK: - Incoming URLs
@@ -423,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         enterReaderForURL = nil
         guard !isShowingReader, !isShowingFallback, !isShowingStartPage,
               let url = webView.url, WebURL.isWebURL(url) else { return }
-        enterReader(manual: requested)
+        enterReader(from: url, manual: requested)
     }
 
     // MARK: - Load failures
@@ -449,6 +489,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
             ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
+        // A saved copy beats an error page — the article is what was asked for; ⌘R fetches
+        // the live page again once the network is back. Not when the user just asked for the
+        // ORIGINAL page (⇧⌘R): then the offline page is the honest answer, and its didFinish
+        // consumes `suppressReaderOnce` exactly as before.
+        if !suppressReaderOnce, let failed = failedURL,
+           let cached = cache.article(for: URLCleaner.clean(failed)) {
+            renderReader(cached, source: URLCleaner.clean(failed))
+            return
+        }
         let html = OfflineFallback.html(appName: appName, host: failedURL?.host,
                                         kind: OfflineFallback.classify(errorCode: nsError.code))
         isShowingFallback = true
@@ -476,6 +525,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             ReaderStore.setSettings(ReaderSettings.decode(message.body), store: store)
         case "readerOpen":
             guard ownPage, let raw = message.body as? String, let url = URL(string: raw) else { return }
+            // A saved copy opens straight from disk: no load, no network. Only recents rows
+            // take this shortcut — an incoming link is "read this now" and always loads live.
+            let cleaned = URLCleaner.clean(url)
+            if let cached = cache.article(for: cleaned) {
+                renderReader(cached, source: cleaned)
+                return
+            }
             // A rejected URL must leave the reader state alone — the reader is still on
             // screen. Beep like the other explicit open paths.
             guard openIncoming(url) else {
@@ -484,10 +540,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             // The row promises the reader, so enter it once this load finishes. Keyed to
             // the URL `openIncoming` actually loads (it cleans first).
-            enterReaderForURL = URLCleaner.clean(url)
+            enterReaderForURL = cleaned
         case "readerClear":
             guard ownPage else { return }
             ReaderStore.setHistory(ReaderHistory(), store: store)
+            cache.prune(keeping: [])
         case "readerUnhide":
             guard ownPage, let phrase = message.body as? String else { return }
             var phrases = ReaderStore.hiddenPhrases(store: store)
