@@ -44,6 +44,10 @@ Incoming links are cleaned first: tracking redirects that embed the real destina
 
 **Hidden text.** Boilerplate lines that survive extraction — "Artiklen fortsætter efter annoncen", "Advertisement" and the like — are removed. A paragraph is dropped only when its entire text is one of the phrases, never when it merely contains one. Teach it new ones as you read: select the sentence in the reader, right-click → **Hide Selected Text in Articles** (also under Edit). It disappears immediately and from every article after that. The eye-off button next to **Aa** shows how many blocks the current article lost and lists the phrases — the ones that hit this article first, with their count — each with a remove control.
 
+**Suggestions.** The start page lists a few articles you might want next, ranked against what you have been reading — no accounts, no tracking, all on-device. It ships with one source: [wallnot.dk](https://wallnot.dk), a non-commercial Danish index of articles without paywalls, so there is something to read on the first launch. **⌘,** opens Settings, where you can add your own sources (a feed address, or a site address to look one up on), remove any of them including the shipped one, and — once your sources span more than one language — limit suggestions to the languages you read.
+
+Fetching suggestions contacts the sources themselves and nothing else; what you read never leaves the Mac.
+
 **Paywalls.** To get full text from a site that paywalls logged-out visitors, log in once inside the app (⇧⌘R to the original page, sign in). The session persists.
 
 | Shortcut | Action |
@@ -52,6 +56,7 @@ Incoming links are cleaned first: tracking redirects that embed the real destina
 | ⇧⌘R | Toggle reader view |
 | ⇧⌘H | Home (start page) |
 | ⇧⌘C | Copy current URL |
+| ⌘, | Settings |
 | ⌘R | Reload |
 | ⌘+ / ⌘− / ⌘0 | Zoom |
 | ⌘[ / ⌘] | Back / forward |

@@ -73,6 +73,30 @@ final class StartPageTests: XCTestCase {
         XCTAssertFalse(html.contains("class=\"recents-inline\""))
     }
 
+    // MARK: - Suggestions
+
+    func testSuggestionSectionIsPresentButHiddenUntilTheHostFillsIt() {
+        // The page must render and be usable before any feed is fetched, so the section
+        // ships empty and hidden; the host reveals it via the callback.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"suggested\" hidden"))
+        XCTAssertTrue(html.contains("class=\"suggestions\""))
+        XCTAssertTrue(html.contains("window.readerSetSuggestions"))
+    }
+
+    func testOffersAWayIntoSettings() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"startSettings\""))
+        XCTAssertTrue(html.contains("readerOpenSettings"))
+    }
+
+    func testSuggestedRowsShareTheRecentsClickPath() {
+        // Both lists use `.recent` rows; one delegated listener covers them.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".suggestions button[data-url]"))
+        XCTAssertTrue(html.contains("post('readerOpen', row.dataset.url)"))
+    }
+
     // MARK: - Shared chrome
 
     func testCarriesTheSameChromeAsTheReader() {

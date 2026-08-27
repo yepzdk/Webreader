@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// on); the flags also gate the script message handlers, so only our pages — never a
     /// live site — can post to them.
     private var isShowingStartPage = false
+    private var isShowingSettings = false
     private var isShowingFallback = false
     /// The URL whose load produced the offline page, so Try Again retries *that*
     /// navigation rather than going home.
@@ -43,6 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var enterReaderForURL: URL?
     private var pendingReaderRender = false
     private var readerSourceURL: URL?
+
+    /// The suggestion sources' fetcher, and the in-flight ranking for the start page.
+    /// Suggestions are strictly best-effort: the start page renders without them and the
+    /// task is cancelled the moment the page goes away.
+    private let feeds = FeedFetcher()
+    private var suggestionTask: Task<Void, Never>?
 
     /// On-disk copies of the recent articles (see `ArticleCache`): recents rows open from
     /// here, and a failed load falls back to it.
@@ -71,7 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // Our generated pages post here: the offline page's Try Again, the reader's Aa,
         // recents and hidden-text popovers, and the start page's URL field.
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
-                     "readerUnhide"] {
+                     "readerUnhide", "readerOpenSettings", "readerHome", "readerAddSource",
+                     "readerRemoveSource", "readerSetLanguages"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -118,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let appMenu = NSMenu()
         mainMenu.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = appMenu
         appMenu.addItem(withTitle: "About \(appName)", action: #selector(showAbout(_:)), keyEquivalent: "")
+            .target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
             .target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -231,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc private func goBack(_ sender: Any?) { webView.goBack() }
     @objc private func goForward(_ sender: Any?) { webView.goForward() }
     @objc private func goHome(_ sender: Any?) { showStartPage() }
+    @objc private func showSettings(_ sender: Any?) { showSettingsPage() }
 
     @objc private func openFromClipboard(_ sender: Any?) {
         guard let url = WebURL.clipboardURL(from: NSPasteboard.general.string(forType: .string)),
@@ -263,6 +275,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.pageZoom = 1.0
         if isShowingStartPage {
             showStartPage()
+        } else if isShowingSettings {
+            showSettingsPage()
         } else if isShowingReader, let source = readerSourceURL {
             webView.load(URLRequest(url: source))
         }
@@ -342,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func renderReader(_ article: Article, source: URL) {
         isShowingFallback = false
         isShowingStartPage = false
+        isShowingSettings = false
         failedURL = nil
         readerSourceURL = source
         // Record before rendering so the article being opened is the panel's top row.
@@ -386,6 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } else {
             isShowingFallback = false
             isShowingStartPage = false
+            isShowingSettings = false
             failedURL = nil
             webView.load(URLRequest(url: url))
             NSApp.activate(ignoringOtherApps: true)
@@ -397,6 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// persisted settings as the reader page.
     private func showStartPage() {
         isShowingFallback = false
+        isShowingSettings = false
         failedURL = nil
         isShowingStartPage = true
         webView.loadHTMLString(StartPage.html(appName: appName,
@@ -404,6 +421,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                                               history: ReaderStore.history(store: store),
                                               hidden: ReaderStore.hiddenPhrases(store: store)),
                                baseURL: nil)
+    }
+
+    /// The settings page: the suggestion sources and their language filter.
+    private func showSettingsPage() {
+        suggestionTask?.cancel()
+        isShowingFallback = false
+        isShowingStartPage = false
+        failedURL = nil
+        isShowingSettings = true
+        webView.loadHTMLString(SettingsPage.html(appName: appName,
+                                                 settings: ReaderStore.settings(store: store),
+                                                 suggestions: ReaderStore.suggestions(store: store)),
+                               baseURL: nil)
+    }
+
+    // MARK: - Suggestions
+
+    /// Fetches the sources, ranks them against what's been read, and hands the result to the
+    /// start page. Everything here is best-effort and off the main actor except the final
+    /// hand-off: the page is already on screen and stays usable whatever happens.
+    private func loadSuggestions() {
+        suggestionTask?.cancel()
+        let settings = ReaderStore.suggestions(store: store)
+        guard !settings.sources.isEmpty else { return }
+        let history = ReaderStore.history(store: store)
+        let cache = cache
+        suggestionTask = Task { [weak self] in
+            guard let self else { return }
+            let items = await self.feeds.items(for: settings.sources)
+            guard !Task.isCancelled else { return }
+            // The profile is the recent articles' own text, straight from the cache. A row
+            // whose body has fallen out of the cache (it's a Caches folder, and history
+            // predating the cache has none) still contributes its title — a weaker signal
+            // than the full text, but far better than dropping the article from the profile.
+            let read = history.entries.map { entry in
+                URL(string: entry.url).flatMap { cache.article(for: $0) }
+                    ?? Article(title: entry.title, byline: nil, siteName: nil, content: "")
+            }
+            let ranked = Suggestions.rank(items, read: read,
+                                          readURLs: Set(history.entries.map(\.url)),
+                                          languages: settings.languages)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self.showSuggestions(ranked) }
+        }
+    }
+
+    @MainActor
+    private func showSuggestions(_ items: [FeedItem]) {
+        // The page may have been replaced while the feeds were in flight.
+        guard isShowingStartPage else { return }
+        let rows = items.map { ["title": $0.title, "url": $0.url, "source": $0.host] }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else { return }
+        webView.evaluateJavaScript(
+            "window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
     }
 
     // MARK: - Navigation policy
@@ -442,6 +513,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // rendering — except the reader document's own load, marked by `pendingReaderRender`.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if !pendingReaderRender { isShowingReader = false }
+        // Whatever is loading isn't the start page any more; a late result must not land on it.
+        suggestionTask?.cancel()
     }
 
     // Every real page that finishes loading is offered to the reader; pages that don't
@@ -461,7 +534,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // since the user asked for that article. Any finished load consumes the request.
         let requested = enterReaderForURL != nil && enterReaderForURL == webView.url
         enterReaderForURL = nil
-        guard !isShowingReader, !isShowingFallback, !isShowingStartPage,
+        // The start page is up and interactive; the suggestions catch up when they can.
+        if isShowingStartPage { loadSuggestions() }
+        guard !isShowingReader, !isShowingFallback, !isShowingStartPage, !isShowingSettings,
               let url = webView.url, WebURL.isWebURL(url) else { return }
         enterReader(from: url, manual: requested)
     }
@@ -482,6 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func showFallbackIfNeeded(for error: Error) {
         let nsError = error as NSError
         isShowingStartPage = false
+        isShowingSettings = false
         // The load a recents row asked for never arrived; cleared before the ignorable
         // guard because cancelled loads are the likeliest way a row's navigation dies.
         enterReaderForURL = nil
@@ -510,7 +586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // controller-wide, so a live site's JS could otherwise post to them.
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
-        let ownPage = isShowingReader || pendingReaderRender || isShowingStartPage
+        let ownPage = isShowingReader || pendingReaderRender || isShowingStartPage || isShowingSettings
         switch message.name {
         case "readerRetry":
             guard isShowingFallback else { return }
@@ -550,6 +626,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             var phrases = ReaderStore.hiddenPhrases(store: store)
             phrases.remove(phrase)
             ReaderStore.setHiddenPhrases(phrases, store: store)
+        case "readerOpenSettings":
+            guard isShowingStartPage else { return }
+            showSettingsPage()
+        case "readerHome":
+            guard isShowingSettings else { return }
+            showStartPage()
+        case "readerAddSource":
+            // The page has already disabled its button; it waits for one of the two callbacks.
+            guard isShowingSettings, let raw = message.body as? String,
+                  let url = WebURL.clipboardURL(from: raw) else {
+                rejectSource()
+                return
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                guard let source = try? await self.feeds.resolve(url) else {
+                    await MainActor.run { self.rejectSource() }
+                    return
+                }
+                await MainActor.run { self.addSource(source) }
+            }
+        case "readerRemoveSource":
+            guard isShowingSettings, let url = message.body as? String else { return }
+            var settings = ReaderStore.suggestions(store: store)
+            settings.remove(url: url)
+            // A language nobody publishes any more would linger in the filter forever. An
+            // empty intersection must become "no filter", not "reject everything": the
+            // language section disappears below two languages, so an empty set would silence
+            // suggestions with no control left to undo it.
+            settings.languages = settings.languages
+                .map { $0.intersection(settings.availableLanguages) }
+                .flatMap { $0.isEmpty ? nil : $0 }
+            ReaderStore.setSuggestions(settings, store: store)
+        case "readerSetLanguages":
+            guard isShowingSettings, let codes = message.body as? [String] else { return }
+            var settings = ReaderStore.suggestions(store: store)
+            // Everything ticked is the same as no filter — and stays right when a source
+            // introducing a new language is added later.
+            settings.languages = Set(codes) == Set(settings.availableLanguages) ? nil : Set(codes)
+            ReaderStore.setSuggestions(settings, store: store)
         case "readerOpenURL":
             // The start page's field, normalized like ⇧⌘O so bare "example.com/x" works.
             guard isShowingStartPage, let raw = message.body as? String else { return }
@@ -561,5 +677,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         default:
             break
         }
+    }
+
+    /// Stores a resolved source and tells the settings page to show its row.
+    @MainActor
+    private func addSource(_ source: FeedSource) {
+        guard isShowingSettings else { return }
+        var settings = ReaderStore.suggestions(store: store)
+        let languagesBefore = settings.availableLanguages
+        guard settings.add(source) else {
+            rejectSource(message: "That source is already in the list.")
+            return
+        }
+        ReaderStore.setSuggestions(settings, store: store)
+        // The language section only exists once two languages are in play, and it's built in
+        // Swift — crossing that line is the one case the page can't update in place.
+        if languagesBefore.count < 2, settings.availableLanguages.count >= 2 {
+            showSettingsPage()
+            return
+        }
+        let row = ["title": source.title, "url": source.url, "language": source.language as Any]
+        guard let data = try? JSONSerialization.data(withJSONObject: row, options: []) else { return }
+        webView.evaluateJavaScript(
+            "window.readerSourceAdded && window.readerSourceAdded(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
+    }
+
+    /// Re-enables the settings page's add form with an inline message.
+    @MainActor
+    private func rejectSource(message: String = "No feed found at that address.") {
+        guard isShowingSettings else { return }
+        let escaped = message.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        webView.evaluateJavaScript(
+            "window.readerSourceRejected && window.readerSourceRejected('\(escaped)')")
     }
 }

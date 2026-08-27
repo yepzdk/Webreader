@@ -69,6 +69,23 @@ final class OfflineFallbackHTMLTests: XCTestCase {
         XCTAssertFalse(hasEmoji, "fallback page must not contain emoji")
     }
 
+    // MARK: - JS interpolation
+
+    func testJSLiteralNeutralizesScriptEndAndLineSeparators() {
+        // Everything the app interpolates into a <script> comes from someone else's page:
+        // feed titles, article titles, learned phrases.
+        let json = "[\"</script><script>alert(1)</script>\",\"a\u{2028}b\u{2029}c\"]"
+        let safe = HTML.jsLiteral(json)
+        XCTAssertFalse(safe.lowercased().contains("</script"))
+        // A raw U+2028/U+2029 ends a JS statement even inside a string literal.
+        XCTAssertFalse(safe.unicodeScalars.contains { $0.value == 0x2028 || $0.value == 0x2029 })
+        XCTAssertTrue(safe.contains("\\u2028"))
+        // Still the same JSON once the JS layer has read it back.
+        XCTAssertEqual(safe.replacingOccurrences(of: "<\\/", with: "</")
+            .replacingOccurrences(of: "\\u2028", with: "\u{2028}")
+            .replacingOccurrences(of: "\\u2029", with: "\u{2029}"), json)
+    }
+
     func testEscapesAppNameAndHost() {
         let page = OfflineFallback.html(appName: "A & <B>", host: "x\"y", kind: .cannotReach)
         XCTAssertTrue(page.contains("A &amp; &lt;B&gt;"))

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Suggested articles on the start page, ranked against what you have been reading. Ships
+  with [wallnot.dk](https://wallnot.dk) — Danish articles without paywalls — as a source.
+- A settings page (⌘,) for the suggestion sources: add a feed or a site address to look one
+  up on, remove any of them (the shipped one included), and limit suggestions by language.
 - Recent articles are kept on disk: opening one from the recents list is instant and works
   offline, and a failed page load falls back to the saved copy when there is one. Saved
   copies follow the recents list (30) and go with Clear history.

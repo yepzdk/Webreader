@@ -356,7 +356,7 @@ public enum ReaderPage {
           </main>
           <script>
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
-                                                             hitsJSON: hits.replacingOccurrences(of: "</", with: "<\\/")), by: 10))
+                                                             hitsJSON: HTML.jsLiteral(hits)), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
           </script>
         </body>

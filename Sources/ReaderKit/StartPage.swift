@@ -90,13 +90,30 @@ public enum StartPage {
             margin: 36px 0 8px; padding-bottom: 8px;
             border-bottom: 1px solid var(--border);
           }
-          .recents-inline { display: flex; flex-direction: column; }
+          .recents-inline, .suggestions { display: flex; flex-direction: column; }
           .empty { margin-top: 36px; }
+          #suggested[hidden], .empty-suggestions[hidden] { display: none; }
+          /* Suggested rows reuse the recents row markup, so they inherit its styling — the
+             second line names the article's own outlet. */
+          .empty-suggestions { text-align: left; margin-top: 10px; }
+          .link {
+            padding: 0; border: 0; background: none; cursor: pointer;
+            font: inherit; color: var(--accent); text-decoration: underline;
+          }
+          /* A quiet way into Settings from the page whose content it governs. */
+          #startSettings {
+            position: fixed; bottom: 14px; left: 14px;
+            padding: 5px 10px; font-family: inherit; font-size: 12px;
+            color: var(--muted); background: var(--bg);
+            border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+          }
+          #startSettings:hover { color: var(--fg); }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(), by: 10))
         </style>
         </head>
         <body>
           \(ReaderChrome.indent(ReaderChrome.controls(history: history), by: 2))
+          <button id="startSettings" type="button">Settings</button>
           <main>
             <h1>\(name)</h1>
             <form id="open">
@@ -108,6 +125,15 @@ public enum StartPage {
             <p class="hint">or press <kbd>⇧⌘O</kbd> to open a copied link</p>
             <p id="error" hidden role="alert">That doesn't look like a link this app can open.</p>
             \(recentsList)
+            <!-- Filled by the host once the sources have been fetched and ranked; the page
+                 renders (and is usable) long before that, and stays as-is if nothing comes. -->
+            <section id="suggested" hidden>
+              <h2 class="section">Suggested articles</h2>
+              <div class="suggestions"></div>
+              <p class="hint empty-suggestions" hidden>Nothing to suggest yet.
+                <button type="button" class="link" id="suggestSettings">Add a source</button>
+              </p>
+            </section>
           </main>
           <script>
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden), by: 10))
@@ -131,17 +157,48 @@ public enum StartPage {
               field.focus();
               field.select();
             };
-            // The inline recents list shares the popover's row markup, so it needs the same
-            // click handling — the popover's own listener is scoped to the popover.
-            var inline = document.querySelector('.recents-inline');
-            if (inline) {
-              inline.addEventListener('click', function (e) {
-                var row = e.target.closest('button[data-url]');
-                if (!row) { return; }
-                try { window.webkit.messageHandlers.readerOpen.postMessage(row.dataset.url); }
-                catch (err) {}
-              });
+            function post(name, body) {
+              try { window.webkit.messageHandlers[name].postMessage(body); } catch (err) {}
             }
+            // The inline recents list and the suggestions share the popover's row markup,
+            // so they need the same click handling — the popover's own listener is scoped
+            // to the popover.
+            document.querySelector('main').addEventListener('click', function (e) {
+              if (e.target.closest('#suggestSettings')) { post('readerOpenSettings', ''); return; }
+              var row = e.target.closest('.recents-inline button[data-url], .suggestions button[data-url]');
+              if (!row) { return; }
+              post('readerOpen', row.dataset.url);
+            });
+            document.getElementById('startSettings').addEventListener('click', function () {
+              post('readerOpenSettings', '');
+            });
+
+            // The host calls this once its sources are fetched and ranked — possibly never
+            // (no sources, no network), which is why the section starts hidden. Rows are
+            // built from text, never markup: the titles come from other people's feeds.
+            window.readerSetSuggestions = function (items) {
+              var section = document.getElementById('suggested');
+              var list = section.querySelector('.suggestions');
+              var empty = section.querySelector('.empty-suggestions');
+              list.textContent = '';
+              (items || []).forEach(function (item) {
+                var row = document.createElement('button');
+                row.className = 'recent';
+                row.type = 'button';
+                row.dataset.url = item.url;
+                var title = document.createElement('span');
+                title.className = 'recent-title';
+                title.textContent = item.title;
+                var source = document.createElement('span');
+                source.className = 'recent-host';
+                source.textContent = item.source || '';
+                row.appendChild(title);
+                row.appendChild(source);
+                list.appendChild(row);
+              });
+              empty.hidden = (items || []).length > 0;
+              section.hidden = false;
+            };
           })();
           </script>
         </body>

@@ -66,10 +66,11 @@ public struct HiddenPhrases: Equatable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// The list as a JS array literal, safe to interpolate inside a `<script>`: `</` is
-    /// escaped so a learned phrase containing `</script>` can't end the block early.
+    /// The list as a JS array literal, safe to interpolate inside a `<script>` — see
+    /// `HTML.jsLiteral`. A learned phrase is article text, so it can carry `</script>` or a
+    /// line separator.
     public var scriptLiteral: String {
-        json.replacingOccurrences(of: "</", with: "<\\/")
+        HTML.jsLiteral(json)
     }
 
     /// nil (never stored) or garbage → the defaults; a stored array is taken as-is, so an

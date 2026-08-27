@@ -27,6 +27,12 @@ Two SwiftPM targets, no dependencies:
   - `ReaderHistory.swift` — recents (cap 30, dedupe by URL).
   - `ArticleCache.swift` — one JSON file per recent article in the host-supplied Caches
     directory, keyed by FNV-1a of the cleaned URL (verified on read).
+  - `Suggestions.swift` — `FeedSource`/`SuggestionSettings` (the user's sources, seeded with
+    wallnot.dk), `Feed.parse` (RSS 2.0 + Atom via `XMLParser`) / `Feed.discover`, and
+    `Suggestions.rank`.
+  - `FeedFetcher.swift` — the only networking outside the web view: an actor fetching the
+    sources with a 10-minute in-memory TTL; failures are "no items", never errors.
+  - `SettingsPage.swift` — the suggestion sources and the language filter (⌘,).
   - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
     `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
@@ -51,8 +57,10 @@ Two SwiftPM targets, no dependencies:
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
-  `readerClear`, `readerOpenURL`, `readerUnhide`. Rename in both Swift and the page scripts
-  together. The host calls back into the reader page via `window.readerSetHidden(list)`.
+  `readerClear`, `readerOpenURL`, `readerUnhide`, `readerOpenSettings`, `readerHome`,
+  `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`. Rename in both Swift and the
+  page scripts together. The host calls back via `window.readerSetHidden(list)`,
+  `window.readerSetSuggestions(items)`, `window.readerSourceAdded/Rejected(…)`.
 - Hidden phrases match a **whole block's text only** (never a substring, never inline
   elements) so a learned phrase can't rewrite prose. The stored list is seeded with
   `HiddenPhrases.defaults` the first time it's read and is plain user data afterwards — new
@@ -73,6 +81,20 @@ Two SwiftPM targets, no dependencies:
 - Every reader page carries `<meta name="generator" content="WebReader">`, and the
   extraction script returns `Reader.ownPageSentinel` when it sees it, so back/forward onto a
   reader entry marks it as the reader instead of extracting (and caching) our own rendering.
+- Suggestion sources are user data like history and hidden phrases: seeded with
+  `SuggestionSettings.defaults` on first read, plain data afterwards (removing wallnot.dk
+  sticks), and Reset Reader Appearance leaves them alone.
+- Ranking is TF-IDF cosine, not `NLEmbedding`: Apple ships no Danish sentence-embedding
+  model (nor Swedish or Norwegian), so embeddings would rank the primary use case at random.
+  The profile is the recents' cached bodies, falling back to the row's title when the body
+  has aged out of the Caches folder.
+- Anything interpolated into a generated page's `<script>` goes through `HTML.jsLiteral`,
+  never a bare `</` replace: feed titles, article titles and learned phrases are other
+  people's text, and `JSONSerialization` leaves U+2028/U+2029 raw — they end a JS statement
+  even inside a string literal.
+- The start page renders before suggestions exist: the section ships hidden and empty, the
+  host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
+  cancelled on any navigation away. Nothing about suggestions can block or fail the page.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
 - `ProgressLine.height` (2.5pt) and `ReaderChrome.progressCSS` (2.5px) are kept in step by
   hand; they can't share a constant across the Swift/CSS boundary.
