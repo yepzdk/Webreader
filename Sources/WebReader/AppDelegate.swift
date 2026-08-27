@@ -584,6 +584,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // Each message is honored only while its page is actually showing — the handlers are
     // controller-wide, so a live site's JS could otherwise post to them.
+    //
+    // WebKit delivers these on the main thread, but the protocol requirement isn't annotated,
+    // so the isolation has to be spelled out for the main-actor UI work the cases do.
+    @MainActor
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
         let ownPage = isShowingReader || pendingReaderRender || isShowingStartPage || isShowingSettings

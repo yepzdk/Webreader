@@ -3,7 +3,7 @@ import Foundation
 /// Where suggested articles come from: a feed the user has added (or the shipped default).
 /// `title` is the feed's own channel title, resolved once when the source is added, so the
 /// settings list can name a source without re-fetching it.
-public struct FeedSource: Equatable, Codable {
+public struct FeedSource: Equatable, Codable, Sendable {
     public let url: String
     public let title: String
     /// The feed's declared language (`<language>` / `xml:lang`), lowercased to its base code
@@ -23,7 +23,7 @@ public struct FeedSource: Equatable, Codable {
 /// The user's suggestion sources and language filter. Seeded with `defaults` the first time
 /// it's read and plain user data afterwards — like `HiddenPhrases`, removing the shipped
 /// source sticks, and `ReaderStore.resetAppearance` leaves this alone.
-public struct SuggestionSettings: Equatable {
+public struct SuggestionSettings: Equatable, Sendable {
     /// One shipped source, so the start page can suggest something before anything has been
     /// read. wallnot.dk is a non-commercial Danish aggregator of paywall-free articles;
     /// removable like any other row.
@@ -102,7 +102,7 @@ public struct SuggestionSettings: Equatable {
 }
 
 /// One candidate article from a feed.
-public struct FeedItem: Equatable {
+public struct FeedItem: Equatable, Sendable {
     public let title: String
     public let url: String
     /// The feed's channel title. Kept for provenance, but the start page's second line is
@@ -129,7 +129,7 @@ public struct FeedItem: Equatable {
 
 /// Parsing feeds and finding them in a page. Pure — the fetching lives in `FeedFetcher`.
 public enum Feed {
-    public struct Parsed: Equatable {
+    public struct Parsed: Equatable, Sendable {
         public let title: String
         public let language: String?
         public let items: [FeedItem]
