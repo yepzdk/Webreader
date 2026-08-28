@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-28
+
 ### Fixed
 - The start page came up inert in 0.10.0: clicking a recent article did nothing and no
   suggestions ever appeared.
@@ -62,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/yepzdk/webreader/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yepzdk/webreader/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/yepzdk/webreader/releases/tag/v0.9.0
