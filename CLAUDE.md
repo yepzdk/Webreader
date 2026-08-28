@@ -110,6 +110,12 @@ Two SwiftPM targets, no dependencies:
   whole-host, never a suffix.
 - No feed inspected (wallnot, DR, Information, Rust Blog) carries `<category>`, so there are
   no tag badges: any tag would be a machine-derived keyword dressed up as metadata.
+- `PageState` (ReaderKit) owns which generated page is on screen, and `AppDelegate` only
+  wires WebKit's callbacks to it. It lives there because the transitions are subtle and the
+  host target has no tests: 0.10.0 shipped with `didStartProvisionalNavigation` clearing the
+  flag that `loadHTMLString` had just set (WebKit fires it for our own loads too), leaving
+  the start page on screen with every message handler gated shut. `willShow` marks a load as
+  ours; `navigationStarted` only clears when the navigation is someone else's.
 - Every generated page carries a `<meta name="generator">` — `WebReader` (reader, matched
   EXACTLY by the extraction script), `WebReader Start`, `WebReader Settings`. They are real
   back/forward entries, so `didStartProvisionalNavigation` clears the page flags and

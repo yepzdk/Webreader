@@ -22,8 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// from `webView.url` (whose value after `loadHTMLString` isn't something to depend
     /// on); the flags also gate the script message handlers, so only our pages — never a
     /// live site — can post to them.
-    private var isShowingStartPage = false
-    private var isShowingSettings = false
+    /// The generated-page state machine (`ReaderKit.PageState`), which owns the transition
+    /// rules — they are subtle enough to have shipped a bug in 0.10.0, and living in
+    /// ReaderKit is what makes them testable. These two stay as computed flags so the many
+    /// gates reading them are unchanged.
+    private var pageState = PageState()
+    private var isShowingStartPage: Bool { pageState.isShowingStartPage }
+    private var isShowingSettings: Bool { pageState.isShowingSettings }
     private var isShowingFallback = false
     /// The URL whose load produced the offline page, so Try Again retries *that*
     /// navigation rather than going home.
@@ -376,8 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// is pruned here too, because recents — which it mirrors — change here.
     private func renderReader(_ article: Article, source: URL) {
         isShowingFallback = false
-        isShowingStartPage = false
-        isShowingSettings = false
+        pageState.clear()
         failedURL = nil
         readerSourceURL = source
         readerArticleTitle = article.title
@@ -424,8 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             pendingIncomingURL = url
         } else {
             isShowingFallback = false
-            isShowingStartPage = false
-            isShowingSettings = false
+            pageState.clear()
             failedURL = nil
             webView.load(URLRequest(url: url))
             NSApp.activate(ignoringOtherApps: true)
@@ -437,9 +440,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// persisted settings as the reader page.
     private func showStartPage() {
         isShowingFallback = false
-        isShowingSettings = false
         failedURL = nil
-        isShowingStartPage = true
+        pageState.willShow(.startPage)
         webView.loadHTMLString(StartPage.html(appName: appName,
                                               settings: ReaderStore.settings(store: store),
                                               history: ReaderStore.history(store: store),
@@ -451,9 +453,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func showSettingsPage() {
         suggestionTask?.cancel()
         isShowingFallback = false
-        isShowingStartPage = false
         failedURL = nil
-        isShowingSettings = true
+        pageState.willShow(.settings)
         webView.loadHTMLString(SettingsPage.html(appName: appName,
                                                  settings: ReaderStore.settings(store: store),
                                                  suggestions: ReaderStore.suggestions(store: store)),
@@ -550,11 +551,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if !pendingReaderRender { isShowingReader = false }
         // Our generated pages are real history entries, so back/forward can navigate AWAY
-        // from one without going through any of the paths that reset these flags. Left set,
-        // they gate every message handler against the page actually on screen: the start
-        // page's field would go dead, and suggestions would never load.
-        isShowingSettings = false
-        isShowingStartPage = false
+        // from one without going through any of the paths that reset these flags — left set,
+        // they gate every message handler against the page actually on screen. But
+        // `loadHTMLString` fires this too, and the load THIS app just started must not clear
+        // the flag it just set. `PageState` owns that distinction (and is tested on it).
+        pageState.navigationStarted()
         // Whatever is loading isn't the start page any more; a late result must not land on it.
         suggestionTask?.cancel()
     }
@@ -573,30 +574,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             suppressReaderOnce = false
             return
         }
+        // Our own start/settings load has landed; the page it set still stands.
+        if let own = pageState.navigationFinished() {
+            if own == .startPage { loadSuggestions() }
+            return
+        }
         // A recents row asked for this page explicitly — it beeps if extraction fails,
         // since the user asked for that article. Any finished load consumes the request.
         let requested = enterReaderForURL != nil && enterReaderForURL == webView.url
         enterReaderForURL = nil
         // The start page is up and interactive; the suggestions catch up when they can.
         if isShowingStartPage { loadSuggestions() }
-        guard !isShowingReader, !isShowingFallback, !isShowingStartPage, !isShowingSettings,
-              let url = webView.url, WebURL.isWebURL(url) else { return }
-        // Back/forward can restore one of our own pages without going through the method
-        // that built it — the flags are cleared on every navigation, so ask the document
-        // what it is before treating it as a website to extract. `about:blank`-based
-        // documents have no web URL and never reach here; the reader has its own sentinel
-        // inside `enterReader`.
-        webView.evaluateJavaScript(
-            "(document.querySelector('meta[name=\"generator\"]')||{}).content || ''"
-        ) { @MainActor [weak self] result, _ in
+        guard !isShowingReader, !isShowingFallback, !isShowingStartPage, !isShowingSettings
+        else { return }
+        // Anything that isn't a real web page here is a back/forward restore of one of our
+        // own `loadHTMLString` documents (they carry no URL of their own — `about:blank`),
+        // so ask the document what it is rather than trying to extract it.
+        guard let url = webView.url, WebURL.isWebURL(url) else {
+            remarkOwnPage()
+            return
+        }
+        // A restored reader entry is handled by `enterReader`'s own sentinel; a restored
+        // start or settings page has to be recognised from its generator marker.
+        webView.evaluateJavaScript(Self.generatorScript) { @MainActor [weak self] result, _ in
             guard let self, self.webView.url == url else { return }
-            switch result as? String {
-            case "WebReader Start":
-                self.isShowingStartPage = true
+            let generator = (result as? String) ?? ""
+            switch PageState.Page(generator: generator) {
+            case .startPage:
+                self.pageState.restored(generator: generator)
                 self.loadSuggestions()
-            case "WebReader Settings":
-                self.isShowingSettings = true
+            case .settings:
+                self.pageState.restored(generator: generator)
             default:
+                // Including the reader, which `enterReader`'s own sentinel recognises.
                 self.enterReader(from: url, manual: requested)
             }
         }
@@ -619,8 +629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// ignoring cancellations/policy interruptions that aren't real errors.
     private func showFallbackIfNeeded(for error: Error) {
         let nsError = error as NSError
-        isShowingStartPage = false
-        isShowingSettings = false
+        pageState.clear()
         // The load a recents row asked for never arrived; cleared before the ignorable
         // guard because cancelled loads are the likeliest way a row's navigation dies.
         enterReaderForURL = nil
@@ -789,6 +798,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             break
         }
     }
+
+    /// Reads the generator marker of a restored `loadHTMLString` document (back/forward onto
+    /// the start or settings page) and re-establishes its flag. Without this the page is on
+    /// screen with every one of its message handlers gated shut.
+    @MainActor
+    private func remarkOwnPage() {
+        webView.evaluateJavaScript(Self.generatorScript) { @MainActor [weak self] result, _ in
+            guard let self else { return }
+            let generator = (result as? String) ?? ""
+            self.pageState.restored(generator: generator)
+            if self.pageState.isShowingStartPage { self.loadSuggestions() }
+        }
+    }
+
+    /// The `<meta name="generator">` content of the current document, or "" — how a restored
+    /// page says which of ours it is.
+    private static let generatorScript =
+        "(document.querySelector('meta[name=\"generator\"]')||{}).content || ''"
 
     /// Tells the reader page which rating to draw for `url`. Used when a restored (back or
     /// forward) document's baked-in state may be out of date.
