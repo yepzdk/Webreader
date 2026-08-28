@@ -1,0 +1,39 @@
+# WebReader desktop entry (freedesktop.org Desktop Entry Specification).
+#
+# Installed to /usr/share/applications/ by the AUR package, or to
+# ~/.local/share/applications/ by install-local.sh.
+
+[Desktop Entry]
+Type=Application
+Name=WebReader
+GenericName=Web Reader
+Comment=Open a web page in a distraction-free reader view
+Exec=webreader %u
+Icon=dk.yepz.webreader
+Terminal=false
+StartupNotify=true
+Categories=Network;WebBrowser;News;
+Keywords=Reader;Reading;Article;Web;Browser;Readability;
+
+# %u, not %U: the host takes exactly one URL per invocation. With
+# G_APPLICATION_HANDLES_OPEN set, GApplication delivers it through the "open"
+# signal rather than as an argv tail, and a single-URL field code keeps the
+# desktop environment from batching several URLs into one launch.
+
+# StartupWMClass must match the toplevel's WM class, which GTK derives from the
+# executable name "webreader". Without it the running window is not associated
+# with this entry: the taskbar shows it as an unknown app, and Hyprland window
+# rules written against class:webreader do not match.
+StartupWMClass=webreader
+
+# MimeType is the whole reason WebReader shows up as a browser. The two
+# x-scheme-handler entries are what xdg-settings, gio, and the "Default
+# Applications" lists in GNOME Settings, Firefox and Zen enumerate when they
+# offer you something to open http(s) links with.
+#
+# Declaring these types does NOT make WebReader the default handler. Defaults
+# are recorded per user in ~/.config/mimeapps.list (and system-wide in
+# /usr/share/applications/mimeapps.list); nothing in this file, in the package,
+# or in install-local.sh writes there. Installing WebReader adds a choice; it
+# never takes one away.
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;

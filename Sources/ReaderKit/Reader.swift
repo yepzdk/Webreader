@@ -83,8 +83,9 @@ public struct ReaderSettings: Equatable {
         }
     }
 
-    /// `auto` follows the system light/dark appearance (the original behavior); the
-    /// explicit themes pin a palette regardless of system appearance.
+    /// `auto` follows the host: the system light/dark appearance, or — where the host can
+    /// resolve one — the desktop's whole palette (`ReaderPalette`, #16). The explicit
+    /// themes pin their own palette regardless of either, which is what they are for.
     public enum Theme: String, CaseIterable {
         case auto, light, sepia, dark, black
     }
@@ -272,12 +273,16 @@ public enum ReaderPage {
     /// `platform` selects the font stacks. It defaults to macOS so the AppKit host and its
     /// call sites need no argument; a GTK host passes `.linux` and gets faces that actually
     /// resolve there.
+    ///
+    /// `palette` is the desktop palette for `Theme.auto` and defaults to nil, which keeps
+    /// the `prefers-color-scheme` fallback the AppKit host relies on. See `ReaderPalette`.
     public static func html(article: Article,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
                             hidden: HiddenPhrases = HiddenPhrases(),
                             rating: TopicPreferences.Rating? = nil,
-                            platform: Platform = .macOS) -> String {
+                            platform: Platform = .macOS,
+                            palette: ReaderPalette? = nil) -> String {
         let title = HTML.escape(article.title)
         // Byline and site name merge into one muted meta line; either may be absent.
         let meta = [article.byline, article.siteName]
@@ -301,7 +306,8 @@ public enum ReaderPage {
         <meta name="generator" content="WebReader">
         <title>\(title)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
+                                                      palette: palette), by: 10))
           * { box-sizing: border-box; }
           html, body { margin: 0; }
           body {

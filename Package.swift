@@ -14,8 +14,22 @@ let hostTargets: [Target] = [
     .executableTarget(name: "WebReader", dependencies: ["ReaderKit"])
 ]
 #else
-let hostProducts: [Product] = []
-let hostTargets: [Target] = []
+let hostProducts: [Product] = [
+    // The command name a `.desktop` `Exec=` line and a Hyprland bind invoke, hence lowercase.
+    .executable(name: "webreader", targets: ["WebReaderGTK"])
+]
+let hostTargets: [Target] = [
+    // Header-only C shim: the GTK/GObject macros and varargs Swift's ClangImporter cannot
+    // see. `webkitgtk-6.0.pc` requires gtk4, so one pkg-config name covers every -I/-l.
+    .systemLibrary(
+        name: "CWebKitGTK",
+        path: "Sources/CWebKitGTK",
+        pkgConfig: "webkitgtk-6.0",
+        providers: [.apt(["libwebkitgtk-6.0-dev"])]
+    ),
+    // The GTK4 + WebKitGTK host; the Linux counterpart of Sources/WebReader.
+    .executableTarget(name: "WebReaderGTK", dependencies: ["ReaderKit", "CWebKitGTK"])
+]
 #endif
 
 let package = Package(

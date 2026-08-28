@@ -10,12 +10,14 @@ public enum StartPage {
     /// the same chrome as the reader page, reading the same persisted settings (#91).
     ///
     /// `platform` selects the font stacks, defaulting to macOS so the AppKit host needs no
-    /// argument; a GTK host passes `.linux`.
+    /// argument; a GTK host passes `.linux`. `palette` is the desktop palette for
+    /// `Theme.auto`, nil by default so the `prefers-color-scheme` fallback stands.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
                             hidden: HiddenPhrases = HiddenPhrases(),
-                            platform: Platform = .macOS) -> String {
+                            platform: Platform = .macOS,
+                            palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
         // Recents are listed inline here rather than tucked in the popover: this page has
@@ -42,7 +44,8 @@ public enum StartPage {
         <meta name="generator" content="WebReader Start">
         <title>\(name)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
+                                                      palette: palette), by: 10))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {

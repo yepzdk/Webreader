@@ -40,22 +40,49 @@ enum ReaderChrome {
     ///
     /// `platform` selects the reading font stack and defaults to macOS, so the AppKit host
     /// needs no argument; the Linux host passes `.linux`.
-    static func themeCSS(_ settings: ReaderSettings, platform: Platform = .macOS) -> String {
+    ///
+    /// `palette` is the host's desktop palette and is honoured **only under `.auto`** (#16).
+    /// An explicit theme exists precisely to pin its own colours regardless of what the
+    /// desktop is wearing, so it ignores the argument entirely. When a palette does apply
+    /// it replaces the light defaults outright and the `prefers-color-scheme` block is
+    /// dropped rather than emitted-and-overridden: the palette already answers the
+    /// light/dark question, via `color-scheme`, and leaving a media query behind it would
+    /// repaint a light desktop's reader dark the moment the system switch flipped.
+    /// The `[data-theme]` selectors are always emitted — the Aa popover sets that attribute
+    /// live, without a reload, so the explicit palettes must already be in the document.
+    static func themeCSS(_ settings: ReaderSettings, platform: Platform = .macOS,
+                         palette: ReaderPalette? = nil) -> String {
+        let hosted = settings.theme == .auto ? palette : nil
+        let rootPalette = hosted.map {
+            """
+            --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
+            --border: \($0.border); --surface: \($0.surface);
+            color-scheme: \($0.isDark ? "dark" : "light");
+            """
+        } ?? """
+        --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
+        --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
         """
+        var blocks = ["""
         :root {
-          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-          --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
+          \(indent(rootPalette, by: 2))
           --reader-size: \(settings.fontSize)px;
           --reader-leading: \(settings.lineHeight.css);
           --reader-width: \(settings.width.css);
           --reader-font: \(settings.fontFamily.css(on: platform));
         }
-        @media (prefers-color-scheme: dark) {
-          :root {
-            --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-            --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
-          }
+        """]
+        if hosted == nil {
+            blocks.append("""
+            @media (prefers-color-scheme: dark) {
+              :root {
+                --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
+                --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
+              }
+            }
+            """)
         }
+        blocks.append("""
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
         :root[data-theme="light"] {
@@ -78,7 +105,8 @@ enum ReaderChrome {
           --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
           color-scheme: dark;
         }
-        """
+        """)
+        return blocks.joined(separator: "\n")
     }
 
     /// CSS for the chrome controls: the button row, both popovers, the appearance segments
