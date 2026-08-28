@@ -159,6 +159,9 @@ public struct TopicPreferences: Equatable, Sendable {
     /// How far repeated clicks can push one term, and how many terms are remembered.
     public static let clamp = 3.0
     public static let limit = 200
+    /// A sanity bound on what a stored total may be, for hand-edited or corrupt blobs only.
+    /// Far above anything clicking produces, so it never interferes with a legitimate undo.
+    static let maxStoredWeight = 1_000.0
 
     /// Which way an article was rated. Also what the reader page's buttons render.
     public enum Rating: String, Sendable { case more, less }
@@ -196,7 +199,10 @@ public struct TopicPreferences: Equatable, Sendable {
             ratings[url] = nil
         }
         guard current != rating else { return nil }
-        apply(title, delta: rating == .more ? Self.boost : Self.damp)
+        // A headline with no usable terms (punctuation, a bare number) teaches nothing, so
+        // there is no opinion to record — a button left pressed over an empty preference
+        // would be a lie.
+        guard apply(title, delta: rating == .more ? Self.boost : Self.damp) else { return nil }
         ratings[url] = rating
         if ratings.count > Self.ratingsLimit { forgetOldestRatings() }
         return rating
@@ -210,19 +216,34 @@ public struct TopicPreferences: Equatable, Sendable {
         for url in ratings.keys.prefix(ratings.count - Self.ratingsLimit) { ratings[url] = nil }
     }
 
-    private mutating func apply(_ title: String, delta: Double) {
+    /// Adds `delta` to every term of `title`. Returns false when the title yields no terms,
+    /// so a rating that would change nothing isn't recorded as one.
+    ///
+    /// The stored total is deliberately NOT clamped: clamping on the way in makes the value
+    /// stop being a faithful sum of the clicks, and undoing a click then can't reverse it —
+    /// ten likes saturating at +3 used to undo to −3, a maximal dislike of a topic the user
+    /// had repeatedly liked. `influence(of:)` clamps at the point of use instead.
+    @discardableResult
+    private mutating func apply(_ title: String, delta: Double) -> Bool {
         let terms = Set(Suggestions.tokens(title))
-        guard !terms.isEmpty else { return }
+        guard !terms.isEmpty else { return false }
         for term in terms {
-            let value = (weights[term] ?? 0) + delta
-            weights[term] = min(max(value, -Self.clamp), Self.clamp)
+            weights[term] = (weights[term] ?? 0) + delta
         }
         // A term nudged back to neutral is not a preference — drop it rather than storing 0.
-        weights = weights.filter { $0.value != 0 }
-        guard weights.count > Self.limit else { return }
+        // The rounding guard keeps repeated ±1.5/±1.0 arithmetic from leaving a 1e-16 ghost.
+        weights = weights.filter { abs($0.value) > 1e-9 }
+        guard weights.count > Self.limit else { return true }
         // Over the cap, the least-committed opinions go first.
         let keep = weights.sorted { abs($0.value) > abs($1.value) }.prefix(Self.limit)
         weights = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        return true
+    }
+
+    /// A term's effect on ranking: the accumulated total, bounded so no single topic can run
+    /// away with the list however many times it has been liked.
+    public func influence(of term: String) -> Double {
+        min(max(weights[term] ?? 0, -Self.clamp), Self.clamp)
     }
 
     public var json: String {
@@ -244,8 +265,11 @@ public struct TopicPreferences: Equatable, Sendable {
         var weights: [String: Double] = [:]
         for (term, value) in raw {
             guard let number = value as? Double ?? (value as? Int).map(Double.init),
-                  number != 0, number.isFinite, !term.isEmpty else { continue }
-            weights[term] = min(max(number, -clamp), clamp)
+                  abs(number) > 1e-9, number.isFinite, !term.isEmpty else { continue }
+            // Stored totals are unclamped on purpose (see `apply`) — clamping here would
+            // truncate an accumulated total and break the undo. Only absurd hand-edited
+            // values are reined in, generously, so a rating can still be reversed.
+            weights[term] = min(max(number, -maxStoredWeight), maxStoredWeight)
         }
         if weights.count > limit {
             let keep = weights.sorted { abs($0.value) > abs($1.value) }.prefix(limit)
@@ -581,7 +605,7 @@ public enum Suggestions {
             // forever regardless of what's actually been read.
             var nudge = 0.0
             if !topics.weights.isEmpty, !document.isEmpty {
-                for term in Set(document) { nudge += (topics.weights[term] ?? 0) * idf(term) }
+                for term in Set(document) { nudge += topics.influence(of: term) * idf(term) }
                 nudge /= Double(Set(document).count) * TopicPreferences.clamp
             }
             return (item, cosine(weighted, profile) + nudge)

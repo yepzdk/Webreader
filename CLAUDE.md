@@ -92,6 +92,10 @@ Two SwiftPM targets, no dependencies:
   never a bare `</` replace: feed titles, article titles and learned phrases are other
   people's text, and `JSONSerialization` leaves U+2028/U+2029 raw — they end a JS statement
   even inside a string literal.
+- `TopicPreferences.weights` are accumulated **unclamped**, and bounded only at the point of
+  use by `influence(of:)`. Clamping on write makes the stored value stop being a faithful sum
+  of the clicks, and an undo then can't reverse it — ten likes saturating at +3 undid to −3,
+  a maximal dislike of a repeatedly-liked topic. Same reason the decoder doesn't clamp.
 - A rating given in the reader is a toggle, so `TopicPreferences` stores `ratings`
   (cleaned URL → more/less) beside the weights: replaying a rating's own terms is the only
   way to undo it exactly, since the weights are clamped and capped (lossy). The reader page

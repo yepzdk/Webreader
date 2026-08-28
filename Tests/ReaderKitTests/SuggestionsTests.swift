@@ -121,10 +121,13 @@ final class SuggestionsTests: XCTestCase {
                        Suggestions.rank(items, read: read, topics: TopicPreferences()).map(\.url))
     }
 
-    func testWeightsClampAndTheMapIsCapped() {
+    func testInfluenceIsBoundedWhileTheStoredTotalIsNot() {
+        // The total accumulates unclamped so a click can be undone exactly; the bound is
+        // applied where it matters — when the weight influences ranking.
         var topics = TopicPreferences()
         for _ in 0..<20 { topics.prefer("vindmøller") }
-        XCTAssertEqual(topics.weights.values.first, TopicPreferences.clamp)
+        XCTAssertGreaterThan(topics.weights["vindmø"] ?? 0, TopicPreferences.clamp)
+        XCTAssertEqual(topics.influence(of: "vindmø"), TopicPreferences.clamp)
         // Opposing clicks cancel out and the neutral term is forgotten, not stored as 0.
         var mixed = TopicPreferences()
         mixed.prefer("havvind")
@@ -158,6 +161,26 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertEqual(topics.weights["vindmø"], TopicPreferences.damp)
     }
 
+    func testUndoingASaturatedTopicReturnsToNeutralNotToTheOpposite() {
+        // Regression: clamping on write made the stored value stop being a sum of the
+        // clicks, so undoing ten likes landed on a maximal DISLIKE of a liked topic.
+        var topics = TopicPreferences()
+        for i in 0..<10 { topics.setRating(.more, title: "Vindmøller", url: "https://a.test/\(i)") }
+        XCTAssertGreaterThan(topics.influence(of: "vindmø"), 0)
+        for i in 0..<10 { topics.setRating(.more, title: "Vindmøller", url: "https://a.test/\(i)") }
+        XCTAssertTrue(topics.ratings.isEmpty)
+        XCTAssertEqual(topics.influence(of: "vindmø"), 0)
+        XCTAssertTrue(topics.weights.isEmpty)
+    }
+
+    func testATitleWithNoUsableTermsIsNotRecordedAsARating() {
+        // Nothing can be learned from it, so leaving a button pressed would be a lie.
+        var topics = TopicPreferences()
+        XCTAssertNil(topics.setRating(.more, title: "!! ?? ..", url: "https://a.test/x"))
+        XCTAssertNil(topics.rating(for: "https://a.test/x"))
+        XCTAssertTrue(topics.weights.isEmpty)
+    }
+
     func testRatingsSurviveARoundTripAndOldBareWeightMapsStillLoad() {
         var topics = TopicPreferences()
         topics.setRating(.less, title: "Superligaen fodbold", url: "https://a.test/agf")
@@ -185,8 +208,11 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertEqual(TopicPreferences.fromJSON(topics.json), topics)
         XCTAssertTrue(TopicPreferences.fromJSON("{ not json").weights.isEmpty)
         XCTAssertTrue(TopicPreferences.fromJSON(nil).weights.isEmpty)
-        // A hand-edited blob can't push a weight past the clamp.
-        XCTAssertEqual(TopicPreferences.fromJSON("{\"vind\":99}").weights["vind"], TopicPreferences.clamp)
+        // A stored total above the clamp is legitimate (it is a sum of clicks) and is kept,
+        // but its effect on ranking is still bounded.
+        let loud = TopicPreferences.fromJSON("{\"vind\":99}")
+        XCTAssertEqual(loud.weights["vind"], 99)
+        XCTAssertEqual(loud.influence(of: "vind"), TopicPreferences.clamp)
     }
 
     // MARK: - Feed parsing
