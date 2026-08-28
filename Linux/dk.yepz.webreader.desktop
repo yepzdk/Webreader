@@ -20,11 +20,12 @@ Keywords=Reader;Reading;Article;Web;Browser;Readability;
 # signal rather than as an argv tail, and a single-URL field code keeps the
 # desktop environment from batching several URLs into one launch.
 
-# StartupWMClass must match the toplevel's WM class, which GTK derives from the
-# executable name "webreader". Without it the running window is not associated
-# with this entry: the taskbar shows it as an unknown app, and Hyprland window
-# rules written against class:webreader do not match.
-StartupWMClass=webreader
+# StartupWMClass must match the toplevel's WM class. GTK4 uses the GApplication id as the
+# Wayland app_id, NOT the executable name — verified with `hyprctl clients` on Hyprland,
+# which reports class "dk.yepz.webreader". Without the match the running window is not
+# associated with this entry: the taskbar shows it as an unknown app, and Hyprland rules
+# written against the wrong class silently never fire.
+StartupWMClass=dk.yepz.webreader
 
 # MimeType is the whole reason WebReader shows up as a browser. The two
 # x-scheme-handler entries are what xdg-settings, gio, and the "Default

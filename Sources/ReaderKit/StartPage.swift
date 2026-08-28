@@ -4,14 +4,62 @@ import Foundation
 /// Builds the start page shown at launch and via Home. Pure (no AppKit/WebKit) so it's
 /// unit-testable. Shares `OfflineFallback`'s visual language and follows light/dark.
 public enum StartPage {
+    /// The page's two platform-dependent sentences: the chord that opens a copied link,
+    /// and how links get here at all before anything has been read.
+    ///
+    /// This is page copy, so it lives here rather than on `Platform`. The empty-recents
+    /// line names *this app's* command-line form and its own registration as the system's
+    /// link handler — nothing another program on the same OS would word the same way —
+    /// while `Platform` stays what its own comment says it is: how a page renders on a
+    /// given machine. What this does share with `Platform` is the reason for being a value
+    /// rather than `#if os(Linux)`: the copy must follow the machine the page is
+    /// *displayed* on, and both variants have to stay assertable from whichever OS runs
+    /// the suite.
+    ///
+    /// Both strings are ours rather than user input and one of them carries markup, so
+    /// they are written already-escaped here and never passed through `HTML.escape`.
+    private struct Copy {
+        /// The clipboard-open chord, as a single `<kbd>` — the treatment this hint has
+        /// always used, because a chord is one key cap and not three.
+        let openChord: String
+        /// The empty-recents paragraph's inner HTML. Its line break and the continuation
+        /// indent are part of the macOS page's bytes, which a regression test pins, so the
+        /// wrap stays where it was instead of being reflowed here.
+        let emptyRecents: String
+
+        init(_ platform: Platform) {
+            switch platform {
+            case .macOS:
+                openChord = "⇧⌘O"
+                emptyRecents = """
+                    No articles yet. Route links here from your browser picker
+                          (e.g. Choosy), or open one from the command line with <code>open</code>.
+                    """
+            case .linux:
+                // No application is named: the browser chooser is whichever handler dialog
+                // the desktop puts up, and this app appears in it because of its .desktop
+                // file. Choosy is a Mac app, and no Linux equivalent is universal enough to
+                // name — "browser chooser" is both true and stable. `webreader <url>` is
+                // the command the Linux host actually installs.
+                openChord = "Ctrl+Shift+O"
+                emptyRecents = """
+                    No articles yet. Route links here from your browser chooser,
+                          or open one from the command line with <code>webreader &lt;url&gt;</code>.
+                    """
+            }
+        }
+    }
+
     /// The built-in page a handler-only app opens to. It's the app's entire front door, so
     /// besides naming the app it offers everything needed to start reading: a URL field
-    /// (with the ⇧⌘O shortcut as a hint), the recents list, and the appearance controls —
-    /// the same chrome as the reader page, reading the same persisted settings (#91).
+    /// (with the clipboard-open chord as a hint), the recents list, and the appearance
+    /// controls — the same chrome as the reader page, reading the same persisted
+    /// settings (#91).
     ///
-    /// `platform` selects the font stacks, defaulting to macOS so the AppKit host needs no
-    /// argument; a GTK host passes `.linux`. `palette` is the desktop palette for
-    /// `Theme.auto`, nil by default so the `prefers-color-scheme` fallback stands.
+    /// `platform` selects the font stacks and the page's platform-dependent copy (see
+    /// `Copy`), defaulting to macOS so the AppKit host needs no argument; a GTK host
+    /// passes `.linux`. `palette` is the desktop palette for `Theme.auto`, nil by default
+    /// so the `prefers-color-scheme` fallback stands.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
@@ -20,13 +68,13 @@ public enum StartPage {
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
+        let copy = Copy(platform)
         // Recents are listed inline here rather than tucked in the popover: this page has
         // the whole window and nothing competing for it, and picking up where you left off
         // is the most likely reason you're looking at it.
         let recentsList = history.entries.isEmpty
             ? """
-            <p class="hint empty">No articles yet. Route links here from your browser picker
-                  (e.g. Choosy), or open one from the command line with <code>open</code>.</p>
+            <p class="hint empty">\(copy.emptyRecents)</p>
             """
             : """
             <h2 class="section">Recent articles</h2>
@@ -172,7 +220,7 @@ public enum StartPage {
                      aria-label="Address to open" placeholder="Paste or type a URL">
               <button type="submit">Open</button>
             </form>
-            <p class="hint">or press <kbd>⇧⌘O</kbd> to open a copied link</p>
+            <p class="hint">or press <kbd>\(copy.openChord)</kbd> to open a copied link</p>
             <p id="error" hidden role="alert">That doesn't look like a link this app can open.</p>
             </div>
             <div class="lists">

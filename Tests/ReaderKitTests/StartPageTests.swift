@@ -83,6 +83,52 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"))
     }
 
+    // MARK: - Platform copy
+
+    func testLinuxHintNamesTheLinuxChord() {
+        // The GTK host binds Ctrl+Shift+O. ⇧⌘O is not a chord that exists on Linux, and a
+        // hint teaching a key the user cannot press is worse than no hint at all.
+        let html = StartPage.html(appName: "Reader", platform: .linux)
+        XCTAssertTrue(html.contains("<kbd>Ctrl+Shift+O</kbd>"))
+        XCTAssertFalse(html.contains("⇧⌘O"))
+        // No Mac modifier glyph anywhere on the page, not just in the hint.
+        XCTAssertFalse(html.contains("⌘"))
+    }
+
+    func testLinuxEmptyRecentsNamesTheLinuxRoute() {
+        // Choosy is a Mac application and `open` is a Mac command, so neither belongs on a
+        // Linux page: there, links arrive from the desktop's own browser chooser (the app
+        // is in it because of its .desktop file) and the command is `webreader <url>`.
+        let html = StartPage.html(appName: "Reader", platform: .linux)
+        XCTAssertTrue(html.contains("No articles yet"))
+        XCTAssertTrue(html.contains("browser chooser"))
+        XCTAssertTrue(html.contains("<code>webreader &lt;url&gt;</code>"))
+        XCTAssertFalse(html.contains("Choosy"))
+    }
+
+    func testMacCopyIsByteForByteWhatItAlwaysWas() {
+        // Regression guard for the shipping Mac app: threading `platform` through this copy
+        // must not reflow or reword a character of it, whitespace included — the empty
+        // paragraph's line break and its six-space continuation are part of the page.
+        let html = StartPage.html(appName: "Reader", platform: .macOS)
+        XCTAssertTrue(html.contains(
+            "<p class=\"hint\">or press <kbd>⇧⌘O</kbd> to open a copied link</p>"))
+        XCTAssertTrue(html.contains("""
+            <p class="hint empty">No articles yet. Route links here from your browser picker
+                  (e.g. Choosy), or open one from the command line with <code>open</code>.</p>
+            """))
+    }
+
+    func testTheDefaultPlatformIsStillMacOSToTheByte() {
+        // Every AppKit call site omits `platform:`, so the default *is* the Mac app's page.
+        // Comparing the two whole documents keeps that honest without this test having to
+        // pin bytes it has no opinion about.
+        var history = ReaderHistory()
+        history.record(title: "Something", url: "https://x.test/s")
+        XCTAssertEqual(StartPage.html(appName: "Reader", history: history),
+                       StartPage.html(appName: "Reader", history: history, platform: .macOS))
+    }
+
     // MARK: - Suggestions
 
     func testSuggestionSectionIsPresentButHiddenUntilTheHostFillsIt() {

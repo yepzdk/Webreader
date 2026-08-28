@@ -23,8 +23,9 @@ import ReaderKit
 /// places that leave it for `async` work come home through `onGTKMainLoop`, never `MainActor`.
 final class ReaderHost {
     /// The name the generated pages print. A constant, not a bundle lookup: there is no
-    /// bundle on Linux. The *window* title is `Application`'s business — `onTitleChange("")`
-    /// asks it for its own default rather than duplicating it here.
+    /// bundle on Linux. The *window* title is `Application`'s business and is read off the
+    /// document on screen (see `titleChanged()`), so the window's own default lives there
+    /// rather than being a copy of this.
     private static let appName = "WebReader"
 
     /// The `<meta name="generator">` content of the current document, or "" — how a restored
@@ -58,8 +59,10 @@ final class ReaderHost {
     /// is how switching desktop theme reaches the next page we draw.
     private let palette: () -> ReaderPalette?
 
-    /// Set by `Application` so the window title can follow the article. `""` means "no
-    /// article" — the window falls back to its own default rather than to a copy of it here.
+    /// Set by `Application` so the window title follows the document on screen. Fed from
+    /// exactly one place — the view's `notify::title`, in `titleChanged()` — so the bar can
+    /// never disagree with what is rendered. `""` means "this page has no title of its own"
+    /// and the window falls back to its own default rather than to a copy of it here.
     var onTitleChange: ((String) -> Void)?
 
     // MARK: - Page state
@@ -129,6 +132,10 @@ final class ReaderHost {
         wr_connect_load_changed(view, Self.onLoadChanged, me)
         wr_connect_load_failed(view, Self.onLoadFailed, me)
         wr_connect_decide_policy(view, Self.onDecidePolicy, me)
+        // The window title, and the only thing that sets it: WebKit clears this property on
+        // every commit and notifies again once the new document names itself, so the title on
+        // the compositor's bar always belongs to the page actually on screen.
+        wr_connect_notify(UnsafeMutableRawPointer(view), "title", Self.onTitleNotify, me)
 
         for name in Self.messageNames {
             let binding = MessageBinding(host: self, name: name)
@@ -155,6 +162,10 @@ final class ReaderHost {
 
     private static let onDecidePolicy: WRDecidePolicyFunc = { _, decision, type, data in
         ReaderHost.host(data).decidePolicy(decision, type)
+    }
+
+    private static let onTitleNotify: WRNotifyFunc = { _, _, data in
+        ReaderHost.host(data).titleChanged()
     }
 
     private static let onScriptMessage: WRScriptMessageFunc = { _, value, data in
@@ -213,7 +224,6 @@ final class ReaderHost {
     func goHome() {
         failedURL = nil
         pendingFailure = nil
-        onTitleChange?("")
         loadHTML(StartPage.html(appName: Self.appName,
                                 settings: ReaderStore.settings(store: store),
                                 history: ReaderStore.history(store: store),
@@ -229,7 +239,6 @@ final class ReaderHost {
         suggestionTask = nil
         failedURL = nil
         pendingFailure = nil
-        onTitleChange?("")
         loadHTML(SettingsPage.html(appName: Self.appName,
                                    settings: ReaderStore.settings(store: store),
                                    suggestions: ReaderStore.suggestions(store: store),
@@ -323,13 +332,14 @@ final class ReaderHost {
                 // title from the last rendering belongs to a different article. Drop it
                 // immediately — a rating clicked before the lookup returns must learn nothing
                 // rather than the previous headline's terms — then fill it in for THIS page
-                // only, since a newer navigation may land while the lookup is in flight.
+                // only, since a newer navigation may land while the lookup is in flight. This
+                // is the rating's own copy of the headline; the *window* title was already set
+                // by this load's `notify::title`.
                 self.readerArticleTitle = nil
                 self.evaluateJavaScript("document.title") { title in
                     guard self.readerSourceURL == url else { return }
                     let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
                     self.readerArticleTitle = trimmed
-                    self.onTitleChange?(trimmed ?? "")
                 }
                 // The restored document still shows the rating baked in when it was first
                 // rendered; it may have changed since.
@@ -374,7 +384,6 @@ final class ReaderHost {
                                    rating: ReaderStore.topics(store: store).rating(for: key),
                                    platform: .linux,
                                    palette: palette())
-        onTitleChange?(article.title)
         loadHTML(html, base: source, as: .reader)
     }
 
@@ -385,6 +394,24 @@ final class ReaderHost {
             .rating(for: URLCleaner.clean(url).absoluteString)
         let value = rating.map { "'\($0.rawValue)'" } ?? "null"
         evaluateJavaScript("window.readerSetRating && window.readerSetRating(\(value), true)")
+    }
+
+    // MARK: - Title
+
+    /// The document's `<title>` changed — including to nothing, since WebKit clears the
+    /// property on every commit, which is exactly what stops a new page from inheriting the
+    /// last one's headline.
+    ///
+    /// The single writer of the window title. Our own generated documents all carry a
+    /// `<title>` — the article's headline, the app name, "Settings — …" — so the reader,
+    /// start, settings and offline pages come through here too instead of pushing a title
+    /// from their call sites: two writers for one value is how it went stale.
+    private func titleChanged() {
+        // Borrowed `const gchar *`, NULL until WebKit has a title for the document: copied
+        // into a Swift string, never freed. Whitespace-only titles trim to "", which asks
+        // `Application` for its own default.
+        let title = webkit_web_view_get_title(view).map { String(cString: $0) } ?? ""
+        onTitleChange?(title.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     // MARK: - Load lifecycle
@@ -571,7 +598,6 @@ final class ReaderHost {
                 return
             }
         }
-        onTitleChange?("")
         loadHTML(OfflineFallback.html(appName: Self.appName, host: failedURL?.host, kind: kind,
                                       platform: .linux, palette: palette()),
                  base: nil, as: .fallback)

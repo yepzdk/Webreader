@@ -105,11 +105,13 @@ xdg-settings set default-web-browser dk.yepz.webreader.desktop
 
 ## Hyprland
 
-`StartupWMClass=webreader` matches the toplevel's WM class, so window rules can
-target it directly:
+`StartupWMClass=dk.yepz.webreader` matches the toplevel's WM class. GTK4 uses the
+GApplication id as the Wayland app_id, not the executable name, so the class is the
+reverse-DNS id even though the command is `webreader` — confirmed with `hyprctl clients`.
+Window rules target it directly:
 
 ```
-windowrulev2 = float, class:^(webreader)$
+windowrulev2 = float, class:^(dk\.yepz\.webreader)$
 ```
 
 The host's accelerators are all `Ctrl`-based, so none of them collide with

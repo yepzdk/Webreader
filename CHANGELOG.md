@@ -8,9 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Groundwork for a Linux app (#16): reader font stacks are now chosen per platform, so a
-  Linux host gets faces that actually resolve there instead of falling through to Liberation.
-  `ReaderKit` builds and tests on Linux.
+- **A Linux app** (#16). WebReader now runs on Linux as a GTK4 + WebKitGTK application,
+  developed against Arch/Omarchy on Hyprland. It registers as an `http`/`https` handler, so
+  the browser chooser and `xdg-open` route links to it, and opens them in the same reader
+  page as the Mac — same appearance settings, same recents, same suggestions. Installing it
+  does not change your default browser.
+- The Linux app has no menu bar; the nine host commands are `Ctrl`-based accelerators,
+  chosen to stay clear of Hyprland's `Super` bindings, and they are listed on the settings
+  page since there is nowhere else to read them. `webreader --clipboard` opens a URL from the
+  clipboard and is worth a Hyprland binding, because it is most useful when the app is not
+  focused.
+- On Linux the reader's automatic theme follows the active Omarchy theme rather than a
+  system light/dark switch. Explicit themes still pin their own palette.
+- Reader font stacks are now chosen per platform, so Linux gets faces that actually resolve
+  there (Noto Serif, Adwaita Sans) instead of falling through to Liberation.
 
 ### Changed
 - Hiding boilerplate is now part of the reader itself: select a line and a **Hide text**

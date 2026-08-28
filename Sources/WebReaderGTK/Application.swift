@@ -208,9 +208,12 @@ final class Application {
         return host
     }
 
-    /// The window title follows the article: with no menu bar and no title bar of our own,
-    /// the compositor's bar is the only place the headline can show. Falls back to the app
-    /// name, which is what the AppKit host shows permanently.
+    /// The window title follows the document on screen — `ReaderHost` reports the web view's
+    /// `<title>` and nothing else, which is why an article headline, a non-article page and
+    /// the settings page each name themselves. With no menu bar and no title bar of our own,
+    /// the compositor's bar and window switcher are the only places that headline can show.
+    /// `""` — WebKit has no title for the page — falls back to the app name, which is what
+    /// the AppKit host shows permanently.
     private func setWindowTitle(_ title: String) {
         guard let window else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)

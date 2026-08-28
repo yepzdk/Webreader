@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import ReaderKit
 
@@ -6,15 +7,24 @@ import XCTest
 // palette leaves every byte of the CSS as the AppKit host has always emitted it — the
 // macOS app passes nothing and must not notice this change at all.
 
+/// The live Omarchy "last-horizon" theme (dark), resolved the way `OmarchyTheme` resolves
+/// it. `--muted` is the theme's foreground blended toward its background, not the theme's
+/// own `muted` key — that key is `#584e51`, a UI dim colour equal to this theme's
+/// `selection`, and it measures 2.45:1 against `#0c0b0c`.
+private let lastHorizon = ReaderPalette(bg: "#0c0b0c", fg: "#FAFCFB", muted: "#9b9c9c",
+                                        accent: "#b59790", border: "rgba(250,252,251,0.16)",
+                                        surface: "rgba(250,252,251,0.08)", isDark: true)
+
+/// Catppuccin Latte, a shipped Omarchy theme declaring `mode = "light"`, so `isDark` and
+/// the blend are both exercised in the other direction. Its own foreground is only 7.06:1
+/// on its background, which is what makes the blend stop short of the full 40%.
+private let catppuccinLatte = ReaderPalette(bg: "#eff1f5", fg: "#4c4f69", muted: "#696c82",
+                                            accent: "#1e66f5", border: "rgba(76,79,105,0.12)",
+                                            surface: "rgba(76,79,105,0.05)", isDark: false)
+
 final class ReaderPaletteTests: XCTestCase {
-    // The live Omarchy "last-horizon" theme, resolved the way `OmarchyTheme` resolves it.
-    private let dark = ReaderPalette(bg: "#0c0b0c", fg: "#FAFCFB", muted: "#584e51",
-                                     accent: "#b59790", border: "rgba(250,252,251,0.16)",
-                                     surface: "rgba(250,252,251,0.08)", isDark: true)
-    // A light one, so `isDark` is exercised in both directions.
-    private let light = ReaderPalette(bg: "#eff1f5", fg: "#4c4f69", muted: "#8c8fa1",
-                                      accent: "#1e66f5", border: "rgba(76,79,105,0.12)",
-                                      surface: "rgba(76,79,105,0.05)", isDark: false)
+    private let dark = lastHorizon
+    private let light = catppuccinLatte
 
     private func settings(_ theme: ReaderSettings.Theme) -> ReaderSettings {
         var s = ReaderSettings()
@@ -30,7 +40,7 @@ final class ReaderPaletteTests: XCTestCase {
         // rather than being appended after them.
         XCTAssertTrue(css.hasPrefix("""
         :root {
-          --bg: #0c0b0c; --fg: #FAFCFB; --muted: #584e51; --accent: #b59790;
+          --bg: #0c0b0c; --fg: #FAFCFB; --muted: #9b9c9c; --accent: #b59790;
           --border: rgba(250,252,251,0.16); --surface: rgba(250,252,251,0.08);
           color-scheme: dark;
           --reader-size: 17px;
@@ -41,7 +51,7 @@ final class ReaderPaletteTests: XCTestCase {
 
     func testColorSchemeFollowsIsDark() {
         XCTAssertTrue(ReaderChrome.themeCSS(ReaderSettings(), palette: light).contains("""
-          --bg: #eff1f5; --fg: #4c4f69; --muted: #8c8fa1; --accent: #1e66f5;
+          --bg: #eff1f5; --fg: #4c4f69; --muted: #696c82; --accent: #1e66f5;
           --border: rgba(76,79,105,0.12); --surface: rgba(76,79,105,0.05);
           color-scheme: light;
         """))
@@ -137,9 +147,7 @@ final class ReaderPaletteTests: XCTestCase {
 final class ReaderPalettePageTests: XCTestCase {
     private let article = Article(title: "T", byline: "By A", siteName: "S",
                                   content: "<p>x</p>")
-    private let palette = ReaderPalette(bg: "#0c0b0c", fg: "#FAFCFB", muted: "#584e51",
-                                        accent: "#b59790", border: "rgba(250,252,251,0.16)",
-                                        surface: "rgba(250,252,251,0.08)", isDark: true)
+    private let palette = lastHorizon
 
     private func pagesWithPalette() -> [String: String] {
         [
@@ -188,7 +196,7 @@ final class ReaderPalettePageTests: XCTestCase {
                                         kind: .offline, palette: palette)
         XCTAssertTrue(html.contains("""
           :root {
-            --bg: #0c0b0c; --fg: #FAFCFB; --muted: #584e51; --accent: #b59790;
+            --bg: #0c0b0c; --fg: #FAFCFB; --muted: #9b9c9c; --accent: #b59790;
             --accent-fg: #ffffff; --border: rgba(250,252,251,0.16);
             color-scheme: dark;
           }
@@ -210,5 +218,82 @@ final class ReaderPalettePageTests: XCTestCase {
             }
           }
         """))
+    }
+}
+
+/// WCAG 2.1 contrast, so "is this readable" can be asserted rather than eyeballed.
+///
+/// A second implementation of the maths in `OmarchyTheme.secondaryText(fg:bg:)`, which is
+/// where the host derives `--muted`. The two cannot share one: that helper lives in the
+/// `WebReaderGTK` host target, which these tests do not link, and `ReaderKit` is
+/// Foundation-only and performs no colour maths of its own. They meet here instead, on the
+/// palettes the host produces — which is the only place the answer actually matters.
+private enum WCAG {
+    /// Contrast ratio between two `#rrggbb` colours: 1 (identical) to 21 (black on white).
+    /// AA for normal text is 4.5.
+    static func contrast(_ a: String, on b: String) -> Double {
+        let (first, second) = (luminance(a), luminance(b))
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+    }
+
+    private static func luminance(_ hex: String) -> Double {
+        let digits = Array(hex.dropFirst())
+        let linear = stride(from: 0, to: 6, by: 2).map { index -> Double in
+            let channel = Double(Int(String(digits[index ... index + 1]), radix: 16) ?? 0) / 255
+            return channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+}
+
+/// `--muted` is secondary body *text* — feed hostnames under each start-page headline,
+/// bylines, phrase counts — so it has to be readable, not merely dimmer.
+///
+/// The host used to fill it from Omarchy's `muted` key, which is a UI dim colour, and on
+/// the live `last-horizon` theme that put every hostname at 2.45:1 on `#0c0b0c`. Nothing
+/// caught it because nothing measured it. These tests measure it.
+final class ReaderPaletteContrastTests: XCTestCase {
+    /// WCAG AA for normal text. `--muted` is 11px on the start page, so this is the floor
+    /// that applies — the 3:1 large-text allowance is not available to it.
+    private let minimum = 4.5
+
+    func testTheContrastHelperMatchesTheKnownExtremes() {
+        XCTAssertEqual(WCAG.contrast("#000000", on: "#ffffff"), 21, accuracy: 0.001)
+        XCTAssertEqual(WCAG.contrast("#0c0b0c", on: "#0c0b0c"), 1, accuracy: 0.001)
+        // The stock dark palette, which the blend is calibrated against.
+        XCTAssertEqual(WCAG.contrast("#9a9aa0", on: "#1c1c1e"), 6.08, accuracy: 0.01)
+    }
+
+    func testSecondaryTextClearsAAOnTheLiveDarkTheme() {
+        let ratio = WCAG.contrast(lastHorizon.muted, on: lastHorizon.bg)
+        XCTAssertGreaterThanOrEqual(ratio, minimum, "last-horizon --muted is \(ratio):1")
+    }
+
+    func testSecondaryTextClearsAAOnALightTheme() {
+        // The blend is a proportional mix toward the background, so it needs no light/dark
+        // branch — but a light theme is where the foreground has the least headroom to
+        // spend, so it is the direction that has to be checked rather than assumed.
+        let ratio = WCAG.contrast(catppuccinLatte.muted, on: catppuccinLatte.bg)
+        XCTAssertGreaterThanOrEqual(ratio, minimum, "catppuccin-latte --muted is \(ratio):1")
+    }
+
+    func testBodyTextClearsAAOnBothThemes() {
+        // `--fg` comes straight from the theme and is nothing this code derives; asserting
+        // it keeps the `--muted` results above honest by showing the headroom they started
+        // from, and would flag a fixture typo that quietly made the blend look good.
+        for palette in [lastHorizon, catppuccinLatte] {
+            XCTAssertGreaterThanOrEqual(WCAG.contrast(palette.fg, on: palette.bg), minimum,
+                                        palette.bg)
+        }
+    }
+
+    func testTheOldMutedKeyMappingFailsTheSameAssertion() {
+        // The exact pairing that shipped: Omarchy's `muted` key on its `background`, for
+        // the theme this box runs. If a future change reads that key again, the two tests
+        // above go red — this one states why, and fails if the defect is ever "fixed" by
+        // relaxing the threshold instead.
+        let ratio = WCAG.contrast("#584e51", on: "#0c0b0c")
+        XCTAssertEqual(ratio, 2.45, accuracy: 0.01)
+        XCTAssertLessThan(ratio, minimum)
     }
 }
