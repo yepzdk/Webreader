@@ -54,6 +54,97 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertEqual(Suggestions.rank(items, read: [], languages: nil).count, 1)
     }
 
+    // MARK: - Blocked outlets
+
+    func testNormalizedHostIsOneDefinition() {
+        XCTAssertEqual(Suggestions.normalizedHost("WWW.Extrabladet.DK"), "extrabladet.dk")
+        XCTAssertEqual(Suggestions.normalizedHost("https://www.dr.dk/nyheder"), "dr.dk")
+        XCTAssertEqual(Suggestions.normalizedHost("dr.dk."), "dr.dk")
+        // What a row displays is exactly what a block stores.
+        let row = FeedItem(title: "T", url: "https://www.extrabladet.dk/a/1", source: "F")
+        var settings = SuggestionSettings(sources: [])
+        settings.block(host: row.host)
+        XCTAssertEqual(settings.blockedHosts, ["extrabladet.dk"])
+    }
+
+    func testBlockedOutletsAreDroppedFromSuggestions() {
+        let items = [
+            item("Ugly headline", "https://www.extrabladet.dk/a/1"),
+            item("Something else", "https://dr.dk/b/2"),
+        ]
+        let ranked = Suggestions.rank(items, read: [], blockedHosts: ["extrabladet.dk"])
+        XCTAssertEqual(ranked.map(\.url), ["https://dr.dk/b/2"])
+    }
+
+    func testBlockingMatchesTheWholeHostNotASuffix() {
+        let items = [item("Innocent", "https://noget-extrabladet.dk/a")]
+        XCTAssertEqual(Suggestions.rank(items, read: [], blockedHosts: ["extrabladet.dk"]).count, 1)
+    }
+
+    func testBlockedHostsRoundTripAndUnblock() {
+        var settings = SuggestionSettings(sources: [])
+        settings.block(host: "https://www.extrabladet.dk/forside")
+        XCTAssertEqual(SuggestionSettings.fromJSON(settings.json).blockedHosts, ["extrabladet.dk"])
+        settings.unblock(host: "EXTRABLADET.dk")
+        XCTAssertTrue(SuggestionSettings.fromJSON(settings.json).blockedHosts.isEmpty)
+    }
+
+    // MARK: - More / less like this
+
+    func testPreferringATopicLiftsSimilarHeadlines() {
+        let items = [
+            item("Ny rapport om vindmøller i Nordsøen", "https://a.test/vind", daysAgo: 5),
+            item("Superligaen: dramatisk sejr til AGF", "https://a.test/agf", daysAgo: 0),
+        ]
+        // Nothing read: newest first puts the football story on top.
+        XCTAssertEqual(Suggestions.rank(items, read: []).first?.url, "https://a.test/agf")
+        var topics = TopicPreferences()
+        topics.prefer("Vindmøller og havvind i Nordsøen")
+        XCTAssertEqual(Suggestions.rank(items, read: [], topics: topics).first?.url, "https://a.test/vind")
+    }
+
+    func testAvoidingATopicPushesItDown() {
+        let items = [
+            item("Superligaen: dramatisk sejr til AGF", "https://a.test/agf", daysAgo: 0),
+            item("Ny rapport om vindmøller", "https://a.test/vind", daysAgo: 5),
+        ]
+        var topics = TopicPreferences()
+        topics.avoid("Superligaen fodbold AGF")
+        XCTAssertEqual(Suggestions.rank(items, read: [], topics: topics).first?.url, "https://a.test/vind")
+    }
+
+    func testNoPreferencesLeavesRankingUntouched() {
+        // Regression guard: the feature must be inert until the user uses it.
+        let items = (0..<5).map { item("Overskrift nummer \($0) om noget", "https://a.test/\($0)", daysAgo: Double($0)) }
+        let read = [article("Noget om vindmøller", "Vindmøller og havvind i Nordsøen")]
+        XCTAssertEqual(Suggestions.rank(items, read: read).map(\.url),
+                       Suggestions.rank(items, read: read, topics: TopicPreferences()).map(\.url))
+    }
+
+    func testWeightsClampAndTheMapIsCapped() {
+        var topics = TopicPreferences()
+        for _ in 0..<20 { topics.prefer("vindmøller") }
+        XCTAssertEqual(topics.weights.values.first, TopicPreferences.clamp)
+        // Opposing clicks cancel out and the neutral term is forgotten, not stored as 0.
+        var mixed = TopicPreferences()
+        mixed.prefer("havvind")
+        mixed.avoid("havvind")
+        mixed.avoid("havvind")
+        XCTAssertEqual(mixed.weights["havvin"], -0.5)
+        for i in 0..<(TopicPreferences.limit + 50) { topics.prefer("emne\(i)ord") }
+        XCTAssertLessThanOrEqual(topics.weights.count, TopicPreferences.limit)
+    }
+
+    func testTopicPreferencesRoundTripTolerantly() {
+        var topics = TopicPreferences()
+        topics.prefer("Vindmøller i Nordsøen")
+        XCTAssertEqual(TopicPreferences.fromJSON(topics.json), topics)
+        XCTAssertTrue(TopicPreferences.fromJSON("{ not json").weights.isEmpty)
+        XCTAssertTrue(TopicPreferences.fromJSON(nil).weights.isEmpty)
+        // A hand-edited blob can't push a weight past the clamp.
+        XCTAssertEqual(TopicPreferences.fromJSON("{\"vind\":99}").weights["vind"], TopicPreferences.clamp)
+    }
+
     // MARK: - Feed parsing
 
     private let rss = """

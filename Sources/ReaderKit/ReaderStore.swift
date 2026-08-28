@@ -31,6 +31,7 @@ public enum ReaderStore {
         public static let zoom = "reader.zoom"
         public static let hiddenPhrases = "reader.hiddenPhrases"
         public static let suggestions = "reader.suggestions"
+        public static let topics = "reader.topics"
         /// Marker set once the one-time import from the webwrap-generated app has run.
         public static let legacyImported = "reader.legacyImported"
     }
@@ -85,6 +86,15 @@ public enum ReaderStore {
 
     public static func setSuggestions(_ settings: SuggestionSettings, store: KeyValueStore) {
         store.set(settings.json, forKey: Key.suggestions)
+    }
+
+    /// Never stored → no preferences. User data like the rest: `resetAppearance` leaves it.
+    public static func topics(store: KeyValueStore) -> TopicPreferences {
+        TopicPreferences.fromJSON(store.string(forKey: Key.topics))
+    }
+
+    public static func setTopics(_ topics: TopicPreferences, store: KeyValueStore) {
+        store.set(topics.json, forKey: Key.topics)
     }
 
     // MARK: - Page zoom

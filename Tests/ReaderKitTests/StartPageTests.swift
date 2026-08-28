@@ -97,6 +97,37 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("post('readerOpen', row.dataset.url)"))
     }
 
+    func testListsShareAGridSoTheyCanSitSideBySide() {
+        // A 1200pt window left half the page empty with the lists stacked.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("class=\"lists\""))
+        XCTAssertTrue(html.contains("grid-template-columns: 1fr 1fr"))
+        // Grid children must be allowed to shrink or long titles stop ellipsizing.
+        XCTAssertTrue(html.contains(".lists > * { min-width: 0; }"))
+        // The URL field stays narrow and centred regardless.
+        XCTAssertTrue(html.contains("class=\"intro\""))
+    }
+
+    func testSuggestedRowsCarryFeedbackAndBlockControls() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("readerTopicFeedback"))
+        XCTAssertTrue(html.contains("readerBlockHost"))
+        XCTAssertTrue(html.contains("'More like this'"))
+        XCTAssertTrue(html.contains("'Less like this'"))
+        // Controls are revealed on hover but must stay keyboard-reachable.
+        XCTAssertTrue(html.contains(".row-actions:focus-within"))
+    }
+
+    func testActionsConfirmWithAToast() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"readerToast\""))
+        XCTAssertTrue(html.contains("role=\"status\""))
+        XCTAssertTrue(html.contains("window.readerToast"))
+        // Each message says what will happen from now on, not just what was clicked.
+        XCTAssertTrue(html.contains("More articles like this from now on."))
+        XCTAssertTrue(html.contains("No more articles from '"))
+    }
+
     // MARK: - Shared chrome
 
     func testCarriesTheSameChromeAsTheReader() {

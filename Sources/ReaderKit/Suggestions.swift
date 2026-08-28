@@ -38,10 +38,27 @@ public struct SuggestionSettings: Equatable, Sendable {
     /// Which languages may be suggested. nil = no filter (the initial state); a set filters
     /// items whose feed declares a language, and items with no declared language always pass.
     public var languages: Set<String>?
+    /// Outlets never to suggest, as normalized hosts ("extrabladet.dk"). Per host rather than
+    /// per source: an aggregator carries many outlets, and it's the outlet you don't want.
+    public var blockedHosts: Set<String>
 
-    public init(sources: [FeedSource] = SuggestionSettings.defaults, languages: Set<String>? = nil) {
+    public init(sources: [FeedSource] = SuggestionSettings.defaults, languages: Set<String>? = nil,
+                blockedHosts: Set<String> = []) {
         self.sources = sources
         self.languages = languages
+        self.blockedHosts = blockedHosts
+    }
+
+    /// Blocks an outlet. Normalized on the way in so a host from a row, a URL or a typed
+    /// string all land on the same key.
+    public mutating func block(host: String) {
+        let host = Suggestions.normalizedHost(host)
+        guard !host.isEmpty else { return }
+        blockedHosts.insert(host)
+    }
+
+    public mutating func unblock(host: String) {
+        blockedHosts.remove(Suggestions.normalizedHost(host))
     }
 
     /// Adds a resolved source. Returns false — nothing stored — when the feed URL is already
@@ -74,6 +91,7 @@ public struct SuggestionSettings: Equatable, Sendable {
             },
         ]
         if let languages { dict["languages"] = languages.sorted() }
+        if !blockedHosts.isEmpty { dict["blocked"] = blockedHosts.sorted() }
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         else { return "{}" }
         return String(decoding: data, as: UTF8.self)
@@ -97,6 +115,9 @@ public struct SuggestionSettings: Equatable, Sendable {
         if let languages = dict["languages"] as? [String] {
             settings.languages = Set(languages)
         }
+        if let blocked = dict["blocked"] as? [String] {
+            settings.blockedHosts = Set(blocked.map(Suggestions.normalizedHost).filter { !$0.isEmpty })
+        }
         return settings
     }
 }
@@ -112,11 +133,9 @@ public struct FeedItem: Equatable, Sendable {
     public let language: String?
     public let date: Date?
 
-    /// The outlet the row names: the article's own host, minus a leading "www.".
-    public var host: String {
-        let host = URL(string: url)?.host ?? source
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
+    /// The outlet the row names — and the exact string a block is stored under, so what the
+    /// user sees is what they block.
+    public var host: String { Suggestions.normalizedHost(URL(string: url)?.host ?? source) }
 
     public init(title: String, url: String, source: String, language: String? = nil, date: Date? = nil) {
         self.title = title
@@ -124,6 +143,68 @@ public struct FeedItem: Equatable, Sendable {
         self.source = source
         self.language = language
         self.date = date
+    }
+}
+
+/// What the reader has explicitly asked for more or less of — the ranking's one visible
+/// dial, fed by the More/Less controls on a suggested row.
+///
+/// Keyed by the same stemmed tokens the ranker uses, so a preference expressed on one
+/// headline transfers to related ones instead of pinning a single article.
+public struct TopicPreferences: Equatable, Sendable {
+    /// One click's worth of nudge. Asking for more is a stronger signal than asking for
+    /// less: "not this one right now" is a weaker statement than "yes, this".
+    public static let boost = 1.5
+    public static let damp = -1.0
+    /// How far repeated clicks can push one term, and how many terms are remembered.
+    public static let clamp = 3.0
+    public static let limit = 200
+
+    public private(set) var weights: [String: Double]
+
+    public init(weights: [String: Double] = [:]) { self.weights = weights }
+
+    public mutating func prefer(_ title: String) { apply(title, delta: Self.boost) }
+    public mutating func avoid(_ title: String) { apply(title, delta: Self.damp) }
+
+    private mutating func apply(_ title: String, delta: Double) {
+        let terms = Set(Suggestions.tokens(title))
+        guard !terms.isEmpty else { return }
+        for term in terms {
+            let value = (weights[term] ?? 0) + delta
+            weights[term] = min(max(value, -Self.clamp), Self.clamp)
+        }
+        // A term nudged back to neutral is not a preference — drop it rather than storing 0.
+        weights = weights.filter { $0.value != 0 }
+        guard weights.count > Self.limit else { return }
+        // Over the cap, the least-committed opinions go first.
+        let keep = weights.sorted { abs($0.value) > abs($1.value) }.prefix(Self.limit)
+        weights = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+    }
+
+    public var json: String {
+        guard let data = try? JSONSerialization.data(withJSONObject: weights, options: [.sortedKeys])
+        else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Tolerant like the rest of the stored state: nil/garbage means no preferences, and a
+    /// malformed entry is skipped rather than poisoning the map.
+    public static func fromJSON(_ string: String?) -> TopicPreferences {
+        guard let string, let data = string.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return TopicPreferences() }
+        var weights: [String: Double] = [:]
+        for (term, value) in raw {
+            guard let number = value as? Double ?? (value as? Int).map(Double.init),
+                  number != 0, number.isFinite, !term.isEmpty else { continue }
+            weights[term] = min(max(number, -clamp), clamp)
+        }
+        if weights.count > limit {
+            let keep = weights.sorted { abs($0.value) > abs($1.value) }.prefix(limit)
+            weights = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        }
+        return TopicPreferences(weights: weights)
     }
 }
 
@@ -329,6 +410,18 @@ public enum Suggestions {
     /// How many rows the start page shows. A short list you might actually read, not a feed.
     public static let limit = 8
 
+    /// The canonical form of an outlet's host: lowercased, no leading "www.", no trailing
+    /// dot. One definition, used by the row that displays a host and by the blocklist that
+    /// stores one — otherwise a stored block could silently fail to match what's shown.
+    public static func normalizedHost(_ raw: String) -> String {
+        var host = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        // Tolerate a whole URL being passed in ("https://www.dr.dk/nyheder").
+        if host.contains("://"), let parsed = URL(string: host)?.host { host = parsed }
+        while host.hasSuffix(".") { host.removeLast() }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        return host
+    }
+
     /// Tokens for the bag of words: lowercase, split on anything non-alphanumeric, short
     /// tokens dropped, then truncated to a stem so Danish/English inflections ("valget",
     /// "valgets") collide. Crude, but it costs nothing and beats exact matching.
@@ -380,12 +473,17 @@ public enum Suggestions {
                             read: [Article],
                             readURLs: Set<String> = [],
                             languages: Set<String>? = nil,
+                            blockedHosts: Set<String> = [],
+                            topics: TopicPreferences = TopicPreferences(),
                             limit: Int = Suggestions.limit) -> [FeedItem] {
         var candidates: [FeedItem] = []
         var seen = Set<String>()
         var seenTitles = Set<String>()
         for item in items {
             if let language = item.language, let languages, !languages.contains(language) { continue }
+            // Exact host, never a suffix: blocking "extrabladet.dk" must not also silence
+            // some unrelated "noget-extrabladet.dk".
+            if blockedHosts.contains(item.host) { continue }
             guard let url = URL(string: item.url) else { continue }
             let key = URLCleaner.clean(url).absoluteString
             guard !readURLs.contains(key), seen.insert(key).inserted else { continue }
@@ -423,7 +521,15 @@ public enum Suggestions {
         let scored = zip(candidates, candidateTokens).map { item, document -> (item: FeedItem, score: Double) in
             var weighted: [String: Double] = [:]
             for (term, frequency) in termFrequencies(document) { weighted[term] = frequency * idf(term) }
-            return (item, cosine(weighted, profile))
+            // Cosine is 0...1; the explicit nudge is scaled to be of comparable size — enough
+            // to move a headline several places, never enough to pin one topic to the top
+            // forever regardless of what's actually been read.
+            var nudge = 0.0
+            if !topics.weights.isEmpty, !document.isEmpty {
+                for term in Set(document) { nudge += (topics.weights[term] ?? 0) * idf(term) }
+                nudge /= Double(Set(document).count) * TopicPreferences.clamp
+            }
+            return (item, cosine(weighted, profile) + nudge)
         }
         return scored.sorted { left, right in
             if left.score != right.score { return left.score > right.score }

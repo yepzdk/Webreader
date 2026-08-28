@@ -67,6 +67,9 @@ final class ReaderStoreTests: XCTestCase {
         ReaderStore.setHistory(history, store: store)
         // An emptied source list is a deliberate choice; a reset must not resurrect wallnot.
         ReaderStore.setSuggestions(SuggestionSettings(sources: []), store: store)
+        var topics = TopicPreferences()
+        topics.prefer("Vindmøller i Nordsøen")
+        ReaderStore.setTopics(topics, store: store)
 
         ReaderStore.resetAppearance(store: store)
 
@@ -74,5 +77,15 @@ final class ReaderStoreTests: XCTestCase {
         XCTAssertEqual(ReaderStore.zoom(store: store), 1.0)
         XCTAssertEqual(ReaderStore.history(store: store), history)
         XCTAssertTrue(ReaderStore.suggestions(store: store).sources.isEmpty)
+        XCTAssertEqual(ReaderStore.topics(store: store), topics)
+    }
+
+    func testTopicPreferencesRoundTrip() {
+        let store = MemoryStore()
+        XCTAssertTrue(ReaderStore.topics(store: store).weights.isEmpty)
+        var topics = TopicPreferences()
+        topics.avoid("Superligaen fodbold")
+        ReaderStore.setTopics(topics, store: store)
+        XCTAssertEqual(ReaderStore.topics(store: store), topics)
     }
 }

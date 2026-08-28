@@ -78,6 +78,25 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertEqual(SettingsPage.languageName("zz"), "zz")
     }
 
+    func testBlockedSectionOnlyAppearsWhenSomethingIsBlocked() {
+        XCTAssertFalse(html().contains("Blocked outlets"))
+        var settings = SuggestionSettings()
+        settings.block(host: "www.extrabladet.dk")
+        let page = html(settings)
+        XCTAssertTrue(page.contains("Blocked outlets"))
+        // Stored and displayed in the normalized form the start page shows.
+        XCTAssertTrue(page.contains("data-host=\"extrabladet.dk\""))
+        XCTAssertTrue(page.contains("aria-label=\"Unblock extrabladet.dk\""))
+        XCTAssertTrue(page.contains("readerUnblockHost"))
+    }
+
+    func testBlockedHostsAreEscaped() {
+        var settings = SuggestionSettings()
+        settings.blockedHosts = ["evil\" onload=\"alert(1)"]
+        let page = html(settings)
+        XCTAssertFalse(page.contains("onload=\"alert(1)\""))
+    }
+
     func testNoEmojiInPage() {
         // Design convention: no emoji anywhere in the UI.
         let hasEmoji = html().unicodeScalars.contains { scalar in

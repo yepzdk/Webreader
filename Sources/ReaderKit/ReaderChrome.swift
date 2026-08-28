@@ -203,6 +203,53 @@ enum ReaderChrome {
         """
     }
 
+    /// A transient confirmation, bottom-centre: what just happened and what it will do. Used
+    /// by the start page's block and more/less controls, where the effect is either invisible
+    /// (a stored preference) or destructive-looking (a row vanishing).
+    ///
+    /// One live region reused for every message, so rapid clicks replace rather than stack.
+    static func toastCSS() -> String {
+        """
+        #readerToast {
+          position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(6px);
+          z-index: 20; max-width: calc(100vw - 32px);
+          padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
+          background: var(--bg); color: var(--fg);
+          font-family: \(ReaderSettings.FontFamily.sans.css); font-size: 12px; line-height: 1.4;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          opacity: 0; pointer-events: none;
+          transition: opacity 140ms ease, transform 140ms ease;
+        }
+        #readerToast[data-shown="true"] { opacity: 1; transform: translateX(-50%) translateY(0); }
+        @media (prefers-reduced-motion: reduce) {
+          #readerToast { transition: none; transform: translateX(-50%); }
+          #readerToast[data-shown="true"] { transform: translateX(-50%); }
+        }
+        """
+    }
+
+    static func toastMarkup() -> String {
+        "<div id=\"readerToast\" role=\"status\" aria-live=\"polite\"></div>"
+    }
+
+    /// Defines `window.readerToast(text)`. Text only — the message is set with `textContent`,
+    /// so a host name from a feed can never become markup.
+    static func toastScript() -> String {
+        """
+        (function () {
+          var node = document.getElementById('readerToast');
+          var timer = null;
+          window.readerToast = function (text) {
+            if (!node || !text) { return; }
+            node.textContent = text;
+            node.setAttribute('data-shown', 'true');
+            if (timer) { clearTimeout(timer); }
+            timer = setTimeout(function () { node.removeAttribute('data-shown'); }, 2600);
+          };
+        })();
+        """
+    }
+
     /// The reading-progress line: a hairline along the top edge that fills as the article
     /// scrolls, so a chromeless reader still answers "how much is left?" (#93).
     ///

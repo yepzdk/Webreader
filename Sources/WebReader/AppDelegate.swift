@@ -79,7 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // recents and hidden-text popovers, and the start page's URL field.
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
                      "readerUnhide", "readerOpenSettings", "readerHome", "readerAddSource",
-                     "readerRemoveSource", "readerSetLanguages"] {
+                     "readerRemoveSource", "readerSetLanguages", "readerBlockHost",
+                     "readerUnblockHost", "readerTopicFeedback"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -446,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let settings = ReaderStore.suggestions(store: store)
         guard !settings.sources.isEmpty else { return }
         let history = ReaderStore.history(store: store)
+        let topics = ReaderStore.topics(store: store)
         let cache = cache
         suggestionTask = Task { [weak self] in
             guard let self else { return }
@@ -461,7 +463,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             let ranked = Suggestions.rank(items, read: read,
                                           readURLs: Set(history.entries.map(\.url)),
-                                          languages: settings.languages)
+                                          languages: settings.languages,
+                                          blockedHosts: settings.blockedHosts,
+                                          topics: topics)
             guard !Task.isCancelled else { return }
             await MainActor.run { self.showSuggestions(ranked) }
         }
@@ -670,6 +674,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             // introducing a new language is added later.
             settings.languages = Set(codes) == Set(settings.availableLanguages) ? nil : Set(codes)
             ReaderStore.setSuggestions(settings, store: store)
+        case "readerBlockHost":
+            guard isShowingStartPage, let host = message.body as? String else { return }
+            var settings = ReaderStore.suggestions(store: store)
+            settings.block(host: host)
+            ReaderStore.setSuggestions(settings, store: store)
+            // Refill the slot the blocked row left behind. The fetcher's TTL cache means this
+            // re-ranks what's already in memory rather than hitting the network again.
+            loadSuggestions()
+        case "readerUnblockHost":
+            guard isShowingSettings, let host = message.body as? String else { return }
+            var settings = ReaderStore.suggestions(store: store)
+            settings.unblock(host: host)
+            ReaderStore.setSuggestions(settings, store: store)
+        case "readerTopicFeedback":
+            // Stored only — the list deliberately doesn't reshuffle under the cursor; the
+            // page's toast is what tells the user it landed.
+            guard isShowingStartPage, let body = message.body as? [String: Any],
+                  let title = body["title"] as? String, let direction = body["direction"] as? String,
+                  !title.isEmpty else { return }
+            var topics = ReaderStore.topics(store: store)
+            switch direction {
+            case "more": topics.prefer(title)
+            case "less": topics.avoid(title)
+            default: return
+            }
+            ReaderStore.setTopics(topics, store: store)
         case "readerOpenURL":
             // The start page's field, normalized like ⇧⌘O so bare "example.com/x" works.
             guard isShowingStartPage, let raw = message.body as? String else { return }

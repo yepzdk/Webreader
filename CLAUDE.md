@@ -92,6 +92,15 @@ Two SwiftPM targets, no dependencies:
   never a bare `</` replace: feed titles, article titles and learned phrases are other
   people's text, and `JSONSerialization` leaves U+2028/U+2029 raw — they end a JS statement
   even inside a string literal.
+- Suggestion feedback is deliberately quiet: More/Less stores a `TopicPreferences` weight and
+  does NOT re-rank the visible list (rows must not move under the cursor); blocking an outlet
+  removes the row and re-runs `loadSuggestions` to refill the slot from the fetcher's TTL
+  cache. Both confirm with `ReaderChrome`'s shared toast.
+- A blocked outlet is stored as `Suggestions.normalizedHost` — the same string
+  `FeedItem.host` displays, so what the user sees is what they blocked. Matching is
+  whole-host, never a suffix.
+- No feed inspected (wallnot, DR, Information, Rust Blog) carries `<category>`, so there are
+  no tag badges: any tag would be a machine-derived keyword dressed up as metadata.
 - The start page renders before suggestions exist: the section ships hidden and empty, the
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.

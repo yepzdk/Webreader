@@ -29,6 +29,19 @@ public enum SettingsPage {
                 }.joined(separator: "\n            "))
               </div>
         """
+        // Only shown once something is blocked: an empty section on first run is noise, and
+        // rows are added from the start page, not typed in here.
+        let blocked = suggestions.blockedHosts.sorted()
+        let blockedSection = blocked.isEmpty ? "" : """
+        <section id="blockedSection">
+                <h2 class="section">Blocked outlets</h2>
+                <p class="help">Never suggested. Block an outlet from a suggested article on
+                the start page.</p>
+                <div id="blocked">
+                  \(blocked.map(blockedRow).joined(separator: "\n              "))
+                </div>
+              </section>
+        """
         return """
         <!doctype html>
         <html lang="en"\(ReaderChrome.themeAttribute(settings))>
@@ -132,6 +145,8 @@ public enum SettingsPage {
 
             \(languageSection)
 
+            \(blockedSection)
+
             <button class="done" id="done">Done</button>
           </main>
           <script>
@@ -209,6 +224,22 @@ public enum SettingsPage {
               }
             });
 
+            var blocked = document.getElementById('blocked');
+            if (blocked) {
+              blocked.addEventListener('click', function (e) {
+                var button = e.target.closest('.source-remove');
+                if (!button) { return; }
+                var row = button.closest('.source');
+                post('readerUnblockHost', row.dataset.host);
+                row.remove();
+                // Last one gone: drop the whole section, heading and hint included, rather
+                // than leaving a titled empty box behind.
+                if (!blocked.querySelector('.source')) {
+                  document.getElementById('blockedSection').remove();
+                }
+              });
+            }
+
             var langs = document.querySelector('.langs');
             if (langs) {
               langs.addEventListener('change', function () {
@@ -256,6 +287,21 @@ public enum SettingsPage {
           </span>
           \(language)
           <button class="source-remove" type="button" aria-label="Remove \(HTML.escape(source.title))">
+            \(removeIcon)
+          </button>
+        </div>
+        """
+    }
+
+    /// A blocked outlet's row. Host text comes from a feed, so it is escaped like everything
+    /// else here.
+    private static func blockedRow(_ host: String) -> String {
+        """
+        <div class="source" data-host="\(HTML.escape(host))">
+          <span class="source-text">
+            <span class="source-title">\(HTML.escape(host))</span>
+          </span>
+          <button class="source-remove" type="button" aria-label="Unblock \(HTML.escape(host))">
             \(removeIcon)
           </button>
         </div>
