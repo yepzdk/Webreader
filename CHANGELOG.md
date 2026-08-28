@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Groundwork for a Linux app (#16): reader font stacks are now chosen per platform, so a
+  Linux host gets faces that actually resolve there instead of falling through to Liberation.
+  `ReaderKit` builds and tests on Linux.
+
+### Changed
+- Hiding boilerplate is now part of the reader itself: select a line and a **Hide text**
+  button appears beside it. The Edit-menu and right-click routes are gone — one way to do it,
+  and it works on a platform with no menu bar.
+- Both progress hairlines read one shared thickness constant instead of two hand-kept copies.
+
 ## [0.10.1] - 2026-08-28
 
 ### Fixed

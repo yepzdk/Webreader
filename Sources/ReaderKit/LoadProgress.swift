@@ -14,6 +14,11 @@ public enum LoadProgress: Equatable {
     /// The smallest visible fraction, so a freshly-started load shows a sliver immediately
     /// rather than a zero-width (invisible) bar that only appears once progress climbs.
     public static let minimumVisibleFraction = 0.08
+    /// Thickness, in px/pt, of both progress hairlines: the native page-load line and the
+    /// reader page's scroll-progress line. A literal 1px reads as nothing on a HiDPI display;
+    /// 2.5 registers as "loading". Exported so the CSS and every host read one value instead
+    /// of a third platform adding a third hand-kept copy.
+    public static let lineThickness: Double = 2.5
     /// At/above this, treat the load as finished (WebKit reports 1.0 on completion).
     static let completeThreshold = 1.0
 

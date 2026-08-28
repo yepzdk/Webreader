@@ -7,11 +7,14 @@ import Foundation
 /// page is the one thing that has nowhere else to live: a list of feeds, which is data the
 /// user manages rather than a control they nudge while reading.
 public enum SettingsPage {
+    /// `platform` selects the font stacks, defaulting to macOS so the AppKit host needs no
+    /// argument; a GTK host passes `.linux`.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
-                            suggestions: SuggestionSettings = SuggestionSettings()) -> String {
+                            suggestions: SuggestionSettings = SuggestionSettings(),
+                            platform: Platform = .macOS) -> String {
         let name = HTML.escape(appName)
-        let sans = ReaderSettings.FontFamily.sans.css
+        let sans = platform.sansStack
         let sourceRows = suggestions.sources.isEmpty
             ? "<p class=\"empty\">No sources. Suggestions stay empty until you add one.</p>"
             : suggestions.sources.map(row).joined(separator: "\n        ")
@@ -52,7 +55,7 @@ public enum SettingsPage {
         <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform), by: 10))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {

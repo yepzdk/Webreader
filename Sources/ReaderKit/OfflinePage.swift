@@ -57,8 +57,10 @@ public enum OfflineFallback {
         errorCode == -999 || errorCode == 102
     }
 
-    /// The fallback HTML. `appName` and `host` are HTML-escaped.
-    public static func html(appName: String, host: String?, kind: Kind) -> String {
+    /// The fallback HTML. `appName` and `host` are HTML-escaped. `platform` selects the
+    /// sans stack and defaults to macOS, so the AppKit host needs no argument.
+    public static func html(appName: String, host: String?, kind: Kind,
+                            platform: Platform = .macOS) -> String {
         let headline = HTML.escape(kind.headline)
         let message = HTML.escape(kind.message(host: host))
         return """
@@ -84,7 +86,7 @@ public enum OfflineFallback {
           body {
             background: var(--bg);
             color: var(--fg);
-            font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+            font: 15px/1.5 \(platform.sansStack);
             display: flex; align-items: center; justify-content: center;
             -webkit-font-smoothing: antialiased;
           }

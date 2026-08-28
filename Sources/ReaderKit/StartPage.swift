@@ -8,12 +8,16 @@ public enum StartPage {
     /// besides naming the app it offers everything needed to start reading: a URL field
     /// (with the ⇧⌘O shortcut as a hint), the recents list, and the appearance controls —
     /// the same chrome as the reader page, reading the same persisted settings (#91).
+    ///
+    /// `platform` selects the font stacks, defaulting to macOS so the AppKit host needs no
+    /// argument; a GTK host passes `.linux`.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
-                            hidden: HiddenPhrases = HiddenPhrases()) -> String {
+                            hidden: HiddenPhrases = HiddenPhrases(),
+                            platform: Platform = .macOS) -> String {
         let name = HTML.escape(appName)
-        let sans = ReaderSettings.FontFamily.sans.css
+        let sans = platform.sansStack
         // Recents are listed inline here rather than tucked in the popover: this page has
         // the whole window and nothing competing for it, and picking up where you left off
         // is the most likely reason you're looking at it.
@@ -38,7 +42,7 @@ public enum StartPage {
         <meta name="generator" content="WebReader Start">
         <title>\(name)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform), by: 10))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {
@@ -149,8 +153,8 @@ public enum StartPage {
             border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
           }
           #startSettings:hover { color: var(--fg); }
-          \(ReaderChrome.indent(ReaderChrome.controlsCSS(), by: 10))
-          \(ReaderChrome.indent(ReaderChrome.toastCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
@@ -185,7 +189,8 @@ public enum StartPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+                                                             platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
           (function () {
             var form = document.getElementById('open');

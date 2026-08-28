@@ -37,7 +37,10 @@ enum ReaderChrome {
     /// The palette custom properties: light defaults, the dark media query, and the four
     /// explicit `[data-theme]` palettes. The attribute selectors deliberately come last so
     /// they outrank both the defaults and the media query.
-    static func themeCSS(_ settings: ReaderSettings) -> String {
+    ///
+    /// `platform` selects the reading font stack and defaults to macOS, so the AppKit host
+    /// needs no argument; the Linux host passes `.linux`.
+    static func themeCSS(_ settings: ReaderSettings, platform: Platform = .macOS) -> String {
         """
         :root {
           --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
@@ -45,7 +48,7 @@ enum ReaderChrome {
           --reader-size: \(settings.fontSize)px;
           --reader-leading: \(settings.lineHeight.css);
           --reader-width: \(settings.width.css);
-          --reader-font: \(settings.fontFamily.css);
+          --reader-font: \(settings.fontFamily.css(on: platform));
         }
         @media (prefers-color-scheme: dark) {
           :root {
@@ -79,11 +82,11 @@ enum ReaderChrome {
     }
 
     /// CSS for the chrome controls: the button row, both popovers, the appearance segments
-    /// and swatches, and the recents rows. Chrome UI, so it keeps a fixed sans stack and
-    /// fixed sizes regardless of the reading settings.
-    static func controlsCSS() -> String {
-        let sans = ReaderSettings.FontFamily.sans.css
-        let serif = ReaderSettings.FontFamily.serif.css
+    /// and swatches, and the recents rows. Chrome UI, so it keeps the platform's sans stack
+    /// and fixed sizes regardless of the reading settings.
+    static func controlsCSS(platform: Platform = .macOS) -> String {
+        let sans = platform.sansStack
+        let serif = platform.serifStack
         return """
         .reader-controls {
           position: fixed; top: 14px; right: 14px; z-index: 10;
@@ -222,14 +225,14 @@ enum ReaderChrome {
     /// (a stored preference) or destructive-looking (a row vanishing).
     ///
     /// One live region reused for every message, so rapid clicks replace rather than stack.
-    static func toastCSS() -> String {
+    static func toastCSS(platform: Platform = .macOS) -> String {
         """
         #readerToast {
           position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(6px);
           z-index: 20; max-width: calc(100vw - 32px);
           padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
           background: var(--bg); color: var(--fg);
-          font-family: \(ReaderSettings.FontFamily.sans.css); font-size: 12px; line-height: 1.4;
+          font-family: \(platform.sansStack); font-size: 12px; line-height: 1.4;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
           opacity: 0; pointer-events: none;
           transition: opacity 140ms ease, transform 140ms ease;
@@ -267,14 +270,15 @@ enum ReaderChrome {
     /// The reading-progress line: a hairline along the top edge that fills as the article
     /// scrolls, so a chromeless reader still answers "how much is left?" (#93).
     ///
-    /// 2.5px to match `HostDelegate.progressBarHeight` — the native page-load line uses the
-    /// same idiom, and the two can't share a constant across the Swift/CSS boundary, so
-    /// they're kept in step by hand. `z-index` sits below `.reader-controls` (10) so an open
-    /// popover is never crossed by a colored line.
+    /// Thickness is `LoadProgress.lineThickness`, the same constant the native page-load
+    /// line reads, so a new host can't drift. The two lines are deliberately *different
+    /// colours*: the native load line is accent-coloured, this one is `var(--fg)`, because
+    /// an accent hairline parked at 30% reads as a stuck load. `z-index` sits below
+    /// `.reader-controls` (10) so an open popover is never crossed by a colored line.
     static func progressCSS() -> String {
         """
         #readerProgress {
-          position: fixed; top: 0; left: 0; width: 100%; height: 2.5px; z-index: 9;
+          position: fixed; top: 0; left: 0; width: 100%; height: \(LoadProgress.lineThickness)px; z-index: 9;
           /* Foreground, not accent: the native page-load line is accent-colored, and a
              blue hairline sitting still at 30% reads as a stuck load. */
           background: var(--fg);
@@ -488,9 +492,9 @@ enum ReaderChrome {
     /// `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
     /// the start page has no article and passes nothing.
     static func controlsScript(settings: ReaderSettings, hidden: HiddenPhrases = HiddenPhrases(),
-                               hitsJSON: String = "{}") -> String {
-        let sans = ReaderSettings.FontFamily.sans.css
-        let serif = ReaderSettings.FontFamily.serif.css
+                               hitsJSON: String = "{}", platform: Platform = .macOS) -> String {
+        let sans = platform.sansStack
+        let serif = platform.serifStack
         return """
         (function () {
           \(indent(HiddenPhrases.hideScript, by: 2))

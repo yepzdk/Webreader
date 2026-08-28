@@ -43,6 +43,10 @@ Two SwiftPM targets, no dependencies:
     settings, history, and zoom. Strings only, so a KVS-backed store can drop in for sync.
   - `ReadabilityJS.swift` — vendored Readability 0.6.0 as string literals (Apache-2.0). To
     upgrade, replace both literals and bump `version`.
+  - `Platform.swift` — `Platform.macOS` / `.linux` and the serif/sans CSS font stacks each
+    one ships. A value, never `#if os(...)`: the page generators take `platform:` (defaulting
+    to `.macOS`, which is what keeps the AppKit host's call sites argument-free), so the
+    choice isn't tied to the compiling OS and the tests assert both.
 - **`Sources/WebReader`** — the AppKit host. `AppDelegate.swift` owns the window, `WKWebView`,
   menu, URL handling (`application(_:open:)` + the GetURL Apple Event), the reader state
   machine, offline fallback, and the script-message handlers. `ProgressLine.swift` is the
@@ -57,10 +61,16 @@ Two SwiftPM targets, no dependencies:
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
-  `readerClear`, `readerOpenURL`, `readerUnhide`, `readerOpenSettings`, `readerHome`,
-  `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`. Rename in both Swift and the
-  page scripts together. The host calls back via `window.readerSetHidden(list)`,
+  `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
+  `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
+  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`. Rename in both
+  Swift and the page scripts together. The host calls back via `window.readerSetHidden(list)`,
   `window.readerSetSuggestions(items)`, `window.readerSourceAdded/Rejected(…)`.
+- Hiding a phrase is a **page** affordance, not a menu item: selecting text in the reader
+  raises a Hide button that posts to `readerHide`. It was moved out of the Edit and context
+  menus for issue #16 — the Linux host has no menu bar — and `window.webkit.messageHandlers`
+  is the same API on WebKitGTK 6.0, so the page half ports unchanged. Don't reintroduce a
+  menu route; there would be two ways to do one thing.
 - Hidden phrases match a **whole block's text only** (never a substring, never inline
   elements) so a learned phrase can't rewrite prose. The stored list is seeded with
   `HiddenPhrases.defaults` the first time it's read and is plain user data afterwards — new
@@ -125,8 +135,10 @@ Two SwiftPM targets, no dependencies:
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
-- `ProgressLine.height` (2.5pt) and `ReaderChrome.progressCSS` (2.5px) are kept in step by
-  hand; they can't share a constant across the Swift/CSS boundary.
+- `ProgressLine.height` and `ReaderChrome.progressCSS` both read
+  `LoadProgress.lineThickness` — one constant, so a new host can't drift. The two lines are
+  deliberately *different colours* (accent for the native page load, `--fg` for the reader's
+  scroll progress) so an accent hairline parked mid-page never looks like a stuck load.
 
 ## Build & test
 

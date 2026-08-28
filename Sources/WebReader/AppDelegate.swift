@@ -9,7 +9,7 @@ import ReaderKit
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
                          WKScriptMessageHandler {
     private var window: NSWindow!
-    private var webView: ReaderWebView!
+    private var webView: WKWebView!
     private var progressLine: ProgressLine?
     private let store: KeyValueStore = DefaultsStore()
     private let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "WebReader"
@@ -87,11 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.applicationNameForUserAgent = Self.safariApplicationName
         // Our generated pages post here: the offline page's Try Again, the reader's Aa,
-        // recents and hidden-text popovers, and the start page's URL field.
+        // recents and hidden-text popovers, its floating Hide-text button, and the start
+        // page's URL field.
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
-                     "readerUnhide", "readerOpenSettings", "readerHome", "readerAddSource",
-                     "readerRemoveSource", "readerSetLanguages", "readerBlockHost",
-                     "readerUnblockHost", "readerTopicFeedback", "readerRate"] {
+                     "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
+                     "readerAddSource", "readerRemoveSource", "readerSetLanguages",
+                     "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -102,10 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if !window.setFrameUsingName("WebReaderMainWindow") { window.center() }
         window.setFrameAutosaveName("WebReaderMainWindow")
 
-        webView = ReaderWebView(frame: window.contentView!.bounds, configuration: config)
+        webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
-        webView.canHideSelection = { [weak self] in self?.isShowingReader ?? false }
-        webView.onHideSelection = { [weak self] in self?.hideSelectedText(nil) }
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -176,10 +175,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let copyURL = editMenu.addItem(withTitle: "Copy Current URL",
                                        action: #selector(copyCurrentURL(_:)), keyEquivalent: "c")
         copyURL.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(.separator())
-        // No shortcut: ⌘H, ⇧⌘H and ⌥⌘H are all taken. The reader's context menu offers it too.
-        editMenu.addItem(withTitle: "Hide Selected Text in Articles",
-                         action: #selector(hideSelectedText(_:)), keyEquivalent: "").target = self
         copyURL.target = self
 
         let viewMenu = NSMenu(title: "View")
@@ -226,8 +221,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return WebURL.isWebURL(url)
         case #selector(openFromClipboard(_:)):
             return WebURL.clipboardURL(from: NSPasteboard.general.string(forType: .string)) != nil
-        case #selector(hideSelectedText(_:)):
-            return isShowingReader
         default:
             return true
         }
@@ -295,23 +288,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     // MARK: - Reader
-
-    /// Learns the reader's current selection as a phrase to hide: strips it from the page
-    /// live and persists it for every article from now on. Beeps when there's nothing
-    /// usable — no selection, longer than a sentence, or already in the list.
-    @objc private func hideSelectedText(_ sender: Any?) {
-        guard isShowingReader else { NSSound.beep(); return }
-        webView.evaluateJavaScript("window.getSelection().toString()") { [weak self] result, _ in
-            guard let self else { return }
-            var phrases = ReaderStore.hiddenPhrases(store: self.store)
-            guard let text = result as? String, phrases.add(text) else {
-                NSSound.beep()
-                return
-            }
-            ReaderStore.setHiddenPhrases(phrases, store: self.store)
-            self.webView.evaluateJavaScript("window.readerSetHidden(\(phrases.scriptLiteral))")
-        }
-    }
 
     @objc private func toggleReader(_ sender: Any?) {
         if isShowingReader {
@@ -697,6 +673,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard ownPage else { return }
             ReaderStore.setHistory(ReaderHistory(), store: store)
             cache.prune(keeping: [])
+        case "readerHide":
+            // The reader page's floating affordance, where the Edit-menu item used to be:
+            // learns the selection as a phrase, strips it from the article live, and hides
+            // it in every article from now on. Beeps when the selection isn't usable — no
+            // text, longer than a sentence, or already stored.
+            guard ownPage, let text = message.body as? String else { return }
+            var phrases = ReaderStore.hiddenPhrases(store: store)
+            guard phrases.add(text) else {
+                NSSound.beep()
+                return
+            }
+            ReaderStore.setHiddenPhrases(phrases, store: store)
+            webView.evaluateJavaScript("window.readerSetHidden(\(phrases.scriptLiteral))")
         case "readerUnhide":
             guard ownPage, let phrase = message.body as? String else { return }
             var phrases = ReaderStore.hiddenPhrases(store: store)
