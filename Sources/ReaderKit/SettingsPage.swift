@@ -49,6 +49,7 @@ public enum SettingsPage {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="color-scheme" content="light dark">
+        <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))

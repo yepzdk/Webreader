@@ -35,6 +35,7 @@ public enum StartPage {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="color-scheme" content="light dark">
+        <meta name="generator" content="WebReader Start">
         <title>\(name)</title>
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))

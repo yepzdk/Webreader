@@ -97,6 +97,10 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertFalse(page.contains("onload=\"alert(1)\""))
     }
 
+    func testIdentifiesItselfForBackForwardRestoration() {
+        XCTAssertTrue(html().contains("<meta name=\"generator\" content=\"WebReader Settings\">"))
+    }
+
     func testNoEmojiInPage() {
         // Design convention: no emoji anywhere in the UI.
         let hasEmoji = html().unicodeScalars.contains { scalar in

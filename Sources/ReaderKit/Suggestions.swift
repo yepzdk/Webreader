@@ -169,7 +169,9 @@ public struct TopicPreferences: Equatable, Sendable {
     public private(set) var weights: [String: Double]
     /// The articles carrying an opinion, by cleaned URL — so the reader can show its buttons
     /// in the right state, and so a rating can be undone by replaying exactly its own terms.
-    /// Weights alone can't be reversed: clamping and the cap make them lossy.
+    /// The weights alone don't say which article contributed what, so without this a click
+    /// could not be taken back. (The replay itself is exact because totals accumulate
+    /// unclamped — see `apply` — though evicting a term at `limit` can still lose one.)
     public private(set) var ratings: [String: Rating]
 
     /// How many rated articles are remembered. The weights outlive this — forgetting the
@@ -374,7 +376,6 @@ private final class FeedParser: NSObject, XMLParserDelegate {
     private var text = ""
     /// Atom puts the item link in an attribute, so the text buffer is not the whole story.
     private var atomLink = ""
-    private var path: [String] = []
 
     /// A reading app's suggestion pool, not an archive — a huge feed is truncated.
     private static let maxItems = 100
@@ -406,7 +407,6 @@ private final class FeedParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement element: String, namespaceURI: String?,
                 qualifiedName: String?, attributes: [String: String] = [:]) {
         let name = element.lowercased()
-        path.append(name)
         text = ""
         switch name {
         case "rss", "rdf", "feed":
@@ -437,7 +437,6 @@ private final class FeedParser: NSObject, XMLParserDelegate {
                 qualifiedName: String?) {
         let name = element.lowercased()
         defer {
-            if !path.isEmpty { path.removeLast() }
             text = ""
         }
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)

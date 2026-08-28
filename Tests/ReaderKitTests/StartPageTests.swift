@@ -138,6 +138,13 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("No more articles from '"))
     }
 
+    func testGeneratedPagesIdentifyThemselves() {
+        // Back/forward restores our own pages without going through the method that built
+        // them, so the host re-reads what the document says it is.
+        XCTAssertTrue(StartPage.html(appName: "Reader")
+            .contains("<meta name=\"generator\" content=\"WebReader Start\">"))
+    }
+
     // MARK: - Shared chrome
 
     func testCarriesTheSameChromeAsTheReader() {

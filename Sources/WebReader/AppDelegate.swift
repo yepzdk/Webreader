@@ -45,7 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var pendingReaderRender = false
     private var readerSourceURL: URL?
     /// The title of the article currently rendered, so a like/dislike learns terms from the
-    /// headline rather than from the URL. Set with `readerSourceURL`, cleared with it.
+    /// headline rather than from the URL. Set when the reader renders, and cleared when
+    /// back/forward restores a reader document until that page's own title is read back —
+    /// rating with a stale title would file one article's terms under another's URL.
+    /// Only ever consulted while `isShowingReader`.
     private var readerArticleTitle: String?
 
     /// The suggestion sources' fetcher, and the in-flight ranking for the start page.
@@ -338,8 +341,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 self.isShowingReader = true
                 self.readerSourceURL = url
                 // Back/forward landed here rather than `renderReader`, so the title from the
-                // last rendering is stale — take the document's own, which is the article's.
+                // last rendering belongs to a different article. Drop it immediately — a
+                // rating clicked before the lookup returns must learn nothing rather than
+                // learn the previous headline's terms — then fill it in for THIS page only,
+                // since a newer navigation may land while the lookup is in flight.
+                self.readerArticleTitle = nil
                 self.webView.evaluateJavaScript("document.title") { title, _ in
+                    guard self.readerSourceURL == url else { return }
                     self.readerArticleTitle = (title as? String)?
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                 }
@@ -460,7 +468,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func loadSuggestions() {
         suggestionTask?.cancel()
         let settings = ReaderStore.suggestions(store: store)
-        guard !settings.sources.isEmpty else { return }
+        // No sources is precisely when the page's "add a source" empty state should show,
+        // so tell the page that rather than leaving the section hidden.
+        guard !settings.sources.isEmpty else {
+            showSuggestions([])
+            return
+        }
         let history = ReaderStore.history(store: store)
         let topics = ReaderStore.topics(store: store)
         let cache = cache
@@ -532,6 +545,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // rendering — except the reader document's own load, marked by `pendingReaderRender`.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if !pendingReaderRender { isShowingReader = false }
+        // Our generated pages are real history entries, so back/forward can navigate AWAY
+        // from one without going through any of the paths that reset these flags. Left set,
+        // they gate every message handler against the page actually on screen: the start
+        // page's field would go dead, and suggestions would never load.
+        isShowingSettings = false
+        isShowingStartPage = false
         // Whatever is loading isn't the start page any more; a late result must not land on it.
         suggestionTask?.cancel()
     }
@@ -557,7 +576,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if isShowingStartPage { loadSuggestions() }
         guard !isShowingReader, !isShowingFallback, !isShowingStartPage, !isShowingSettings,
               let url = webView.url, WebURL.isWebURL(url) else { return }
-        enterReader(from: url, manual: requested)
+        // Back/forward can restore one of our own pages without going through the method
+        // that built it — the flags are cleared on every navigation, so ask the document
+        // what it is before treating it as a website to extract. `about:blank`-based
+        // documents have no web URL and never reach here; the reader has its own sentinel
+        // inside `enterReader`.
+        webView.evaluateJavaScript(
+            "(document.querySelector('meta[name=\"generator\"]')||{}).content || ''"
+        ) { [weak self] result, _ in
+            guard let self, self.webView.url == url else { return }
+            switch result as? String {
+            case "WebReader Start":
+                self.isShowingStartPage = true
+                self.loadSuggestions()
+            case "WebReader Settings":
+                self.isShowingSettings = true
+            default:
+                self.enterReader(from: url, manual: requested)
+            }
+        }
     }
 
     // MARK: - Load failures
@@ -686,8 +723,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard isShowingSettings, let codes = message.body as? [String] else { return }
             var settings = ReaderStore.suggestions(store: store)
             // Everything ticked is the same as no filter — and stays right when a source
-            // introducing a new language is added later.
-            settings.languages = Set(codes) == Set(settings.availableLanguages) ? nil : Set(codes)
+            // introducing a new language is added later. Nothing ticked means the same:
+            // an empty set makes `rank` reject every item that declares a language, which
+            // would silence suggestions entirely (see the `readerRemoveSource` case).
+            let chosen = Set(codes)
+            settings.languages = chosen.isEmpty || chosen == Set(settings.availableLanguages)
+                ? nil : chosen
             ReaderStore.setSuggestions(settings, store: store)
         case "readerBlockHost":
             guard isShowingStartPage, let host = message.body as? String else { return }
@@ -758,7 +799,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         var settings = ReaderStore.suggestions(store: store)
         let languagesBefore = settings.availableLanguages
         guard settings.add(source) else {
-            rejectSource(message: "That source is already in the list.")
+            // `add` refuses a duplicate and a full list; saying the wrong one is worse than
+            // saying nothing, so tell them apart.
+            rejectSource(message: settings.sources.count >= SuggestionSettings.limit
+                ? "That is as many sources as this list holds (\(SuggestionSettings.limit))."
+                : "That source is already in the list.")
             return
         }
         ReaderStore.setSuggestions(settings, store: store)

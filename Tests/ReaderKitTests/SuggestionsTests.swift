@@ -215,6 +215,15 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertEqual(loud.influence(of: "vind"), TopicPreferences.clamp)
     }
 
+    func testEmptyLanguageSelectionMustBeStoredAsNoFilter() {
+        // The host converts an empty selection to nil; this pins WHY — an empty set is the
+        // "reject everything that declares a language" case, which would silence the list
+        // with no checkbox left to undo it.
+        let items = [item("Dansk", "https://a.test/da", language: "da")]
+        XCTAssertTrue(Suggestions.rank(items, read: [], languages: []).isEmpty)
+        XCTAssertEqual(Suggestions.rank(items, read: [], languages: nil).count, 1)
+    }
+
     // MARK: - Feed parsing
 
     private let rss = """

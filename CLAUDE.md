@@ -110,6 +110,11 @@ Two SwiftPM targets, no dependencies:
   whole-host, never a suffix.
 - No feed inspected (wallnot, DR, Information, Rust Blog) carries `<category>`, so there are
   no tag badges: any tag would be a machine-derived keyword dressed up as metadata.
+- Every generated page carries a `<meta name="generator">` — `WebReader` (reader, matched
+  EXACTLY by the extraction script), `WebReader Start`, `WebReader Settings`. They are real
+  back/forward entries, so `didStartProvisionalNavigation` clears the page flags and
+  `didFinish` re-establishes them by reading the marker; without that, ⌘[ off Settings left
+  every start-page handler gated shut.
 - The start page renders before suggestions exist: the section ships hidden and empty, the
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.
