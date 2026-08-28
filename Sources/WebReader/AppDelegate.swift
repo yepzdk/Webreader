@@ -463,8 +463,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // MARK: - Suggestions
 
     /// Fetches the sources, ranks them against what's been read, and hands the result to the
-    /// start page. Everything here is best-effort and off the main actor except the final
-    /// hand-off: the page is already on screen and stays usable whatever happens.
+    /// start page. Everything here is best-effort: the fetch and ranking run off the main
+    /// actor inside the task, and the page is already on screen and stays usable whatever
+    /// happens. Main-actor isolated because it reads the page flags and hands off to the
+    /// web view; every caller is already on the main thread.
+    @MainActor
     private func loadSuggestions() {
         suggestionTask?.cancel()
         let settings = ReaderStore.suggestions(store: store)
