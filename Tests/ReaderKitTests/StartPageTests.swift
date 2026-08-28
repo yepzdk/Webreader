@@ -73,6 +73,16 @@ final class StartPageTests: XCTestCase {
         XCTAssertFalse(html.contains("class=\"recents-inline\""))
     }
 
+    func testTitlesGetTwoLinesOnTheStartPage() {
+        // One line cuts most Danish headlines before they reveal the subject. The narrow
+        // recents popover keeps its single line — this is scoped to the page's own lists.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".recents-inline .recent-title, .suggestions .recent-title"))
+        XCTAssertTrue(html.contains("-webkit-line-clamp: 2;"))
+        // The shared one-line rule must still be there for the popover to inherit.
+        XCTAssertTrue(html.contains("display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"))
+    }
+
     // MARK: - Suggestions
 
     func testSuggestionSectionIsPresentButHiddenUntilTheHostFillsIt() {

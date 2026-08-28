@@ -104,6 +104,13 @@ public enum StartPage {
             border-bottom: 1px solid var(--border);
           }
           .recents-inline, .suggestions { display: flex; flex-direction: column; }
+          /* Two lines here, unlike the narrow recents popover: a single line cuts most Danish
+             headlines before they say what the article is about. Still clamped — a row is a
+             glance, not the article. */
+          .recents-inline .recent-title, .suggestions .recent-title {
+            white-space: normal;
+            display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+          }
           .empty { margin-top: 36px; }
           #suggested[hidden], .empty-suggestions[hidden] { display: none; }
           /* Suggested rows reuse the recents row markup, so they inherit its styling — the
