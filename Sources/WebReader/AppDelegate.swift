@@ -44,6 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var enterReaderForURL: URL?
     private var pendingReaderRender = false
     private var readerSourceURL: URL?
+    /// The title of the article currently rendered, so a like/dislike learns terms from the
+    /// headline rather than from the URL. Set with `readerSourceURL`, cleared with it.
+    private var readerArticleTitle: String?
 
     /// The suggestion sources' fetcher, and the in-flight ranking for the start page.
     /// Suggestions are strictly best-effort: the start page renders without them and the
@@ -80,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
                      "readerUnhide", "readerOpenSettings", "readerHome", "readerAddSource",
                      "readerRemoveSource", "readerSetLanguages", "readerBlockHost",
-                     "readerUnblockHost", "readerTopicFeedback"] {
+                     "readerUnblockHost", "readerTopicFeedback", "readerRate"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -334,6 +337,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if result as? String == Reader.ownPageSentinel {
                 self.isShowingReader = true
                 self.readerSourceURL = url
+                // Back/forward landed here rather than `renderReader`, so the title from the
+                // last rendering is stale — take the document's own, which is the article's.
+                self.webView.evaluateJavaScript("document.title") { title, _ in
+                    self.readerArticleTitle = (title as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                // The restored document still shows the rating baked in when it was first
+                // rendered; it may have changed since.
+                self.pushRating(for: url)
                 return
             }
             // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
@@ -360,6 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         isShowingSettings = false
         failedURL = nil
         readerSourceURL = source
+        readerArticleTitle = article.title
         // Record before rendering so the article being opened is the panel's top row.
         // The cleaned URL, because opening a row routes through `openIncoming`, which
         // cleans — recording the raw one would make the replay look like a new article.
@@ -370,7 +383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let html = ReaderPage.html(article: article,
                                    settings: ReaderStore.settings(store: store),
                                    history: history,
-                                   hidden: ReaderStore.hiddenPhrases(store: store))
+                                   hidden: ReaderStore.hiddenPhrases(store: store),
+                                   rating: ReaderStore.topics(store: store)
+                                       .rating(for: URLCleaner.clean(source).absoluteString))
         pendingReaderRender = true
         webView.loadHTMLString(html, baseURL: source)
     }
@@ -700,6 +715,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             default: return
             }
             ReaderStore.setTopics(topics, store: store)
+        case "readerRate":
+            // The reader's like/dislike. Keyed by the cleaned URL — the same key recents and
+            // the cache use, so reopening an article shows the opinion you left on it.
+            guard isShowingReader, let direction = message.body as? String,
+                  let rating = TopicPreferences.Rating(rawValue: direction),
+                  let source = readerSourceURL else { return }
+            // Terms come from the headline; without one there is nothing to learn.
+            guard let title = readerArticleTitle, !title.isEmpty else { return }
+            var topics = ReaderStore.topics(store: store)
+            let now = topics.setRating(rating, title: title,
+                                       url: URLCleaner.clean(source).absoluteString)
+            ReaderStore.setTopics(topics, store: store)
+            let value = now.map { "'\($0.rawValue)'" } ?? "null"
+            webView.evaluateJavaScript("window.readerSetRating && window.readerSetRating(\(value))")
         case "readerOpenURL":
             // The start page's field, normalized like ⇧⌘O so bare "example.com/x" works.
             guard isShowingStartPage, let raw = message.body as? String else { return }
@@ -711,6 +740,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         default:
             break
         }
+    }
+
+    /// Tells the reader page which rating to draw for `url`. Used when a restored (back or
+    /// forward) document's baked-in state may be out of date.
+    private func pushRating(for url: URL) {
+        let rating = ReaderStore.topics(store: store).rating(for: URLCleaner.clean(url).absoluteString)
+        let value = rating.map { "'\($0.rawValue)'" } ?? "null"
+        webView.evaluateJavaScript(
+            "window.readerSetRating && window.readerSetRating(\(value), true)")
     }
 
     /// Stores a resolved source and tells the settings page to show its row.

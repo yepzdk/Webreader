@@ -364,6 +364,47 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("right: 14px; z-index: 10;"))
     }
 
+    // MARK: - Rating the article being read
+
+    func testReaderOffersRatingButtons() {
+        let page = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                   content: "<p>x</p>"))
+        XCTAssertTrue(page.contains("id=\"readerMoreBtn\""))
+        XCTAssertTrue(page.contains("id=\"readerLessBtn\""))
+        XCTAssertTrue(page.contains("readerRate"))
+        // An opinion you can see and take back, not a fire-and-forget click.
+        XCTAssertTrue(page.contains("window.readerSetRating"))
+        XCTAssertTrue(page.contains("aria-pressed=\"false\""))
+        // Confirmation shares the start page's toast.
+        XCTAssertTrue(page.contains("id=\"readerToast\""))
+    }
+
+    func testCurrentRatingIsBakedIntoTheButtons() {
+        let article = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>")
+        // Unrated: neither button reads as pressed.
+        let neutral = ReaderPage.html(article: article)
+        XCTAssertTrue(neutral.contains("title=\"More like this\" aria-pressed=\"false\""))
+        XCTAssertTrue(neutral.contains("title=\"Less like this\" aria-pressed=\"false\""))
+
+        let liked = ReaderPage.html(article: article, rating: .more)
+        XCTAssertTrue(liked.contains("title=\"More like this\" aria-pressed=\"true\""))
+        XCTAssertTrue(liked.contains("title=\"Less like this\" aria-pressed=\"false\""))
+
+        let disliked = ReaderPage.html(article: article, rating: .less)
+        XCTAssertTrue(disliked.contains("title=\"More like this\" aria-pressed=\"false\""))
+        XCTAssertTrue(disliked.contains("title=\"Less like this\" aria-pressed=\"true\""))
+    }
+
+    func testStartPageHasNoRatingButtons() {
+        // There is no article to rate on the start page, so the shared chrome omits the
+        // buttons. The shared script still carries the handler — guarded on the buttons
+        // existing, like the progress bar — so it is inert here.
+        let page = StartPage.html(appName: "Reader")
+        XCTAssertFalse(page.contains("id=\"readerMoreBtn\""))
+        XCTAssertFalse(page.contains("id=\"readerLessBtn\""))
+        XCTAssertTrue(page.contains("if (moreBtn && lessBtn)"))
+    }
+
     func testIsACompleteStandaloneDocument() {
         // Loaded via loadHTMLString as its own document — the doctype keeps WebKit in
         // standards mode (see #76 for why the reader must be a separate document).

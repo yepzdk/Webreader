@@ -92,6 +92,11 @@ Two SwiftPM targets, no dependencies:
   never a bare `</` replace: feed titles, article titles and learned phrases are other
   people's text, and `JSONSerialization` leaves U+2028/U+2029 raw — they end a JS statement
   even inside a string literal.
+- A rating given in the reader is a toggle, so `TopicPreferences` stores `ratings`
+  (cleaned URL → more/less) beside the weights: replaying a rating's own terms is the only
+  way to undo it exactly, since the weights are clamped and capped (lossy). The reader page
+  bakes the current rating into `aria-pressed`, and `pushRating` refreshes it when
+  back/forward restores an already-rendered document.
 - Suggestion feedback is deliberately quiet: More/Less stores a `TopicPreferences` weight and
   does NOT re-rank the visible list (rows must not move under the cursor); blocking an outlet
   removes the row and re-runs `loadSuggestions` to refill the slot from the fetcher's TTL

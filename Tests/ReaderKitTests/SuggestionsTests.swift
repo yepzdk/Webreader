@@ -135,6 +135,50 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertLessThanOrEqual(topics.weights.count, TopicPreferences.limit)
     }
 
+    func testRatingAnArticleTogglesAndReverses() {
+        var topics = TopicPreferences()
+        let title = "Vindmøller i Nordsøen udbygges"
+        let url = "https://a.test/vind"
+        XCTAssertNil(topics.rating(for: url))
+
+        XCTAssertEqual(topics.setRating(.more, title: title, url: url), .more)
+        XCTAssertEqual(topics.rating(for: url), .more)
+        let liked = topics.weights
+
+        // Same button again clears it, and the weights return exactly to neutral.
+        XCTAssertNil(topics.setRating(.more, title: title, url: url))
+        XCTAssertNil(topics.rating(for: url))
+        XCTAssertTrue(topics.weights.isEmpty)
+
+        // Switching sides must not leave both contributions applied.
+        topics.setRating(.more, title: title, url: url)
+        XCTAssertEqual(topics.weights, liked)
+        topics.setRating(.less, title: title, url: url)
+        XCTAssertEqual(topics.rating(for: url), .less)
+        XCTAssertEqual(topics.weights["vindmø"], TopicPreferences.damp)
+    }
+
+    func testRatingsSurviveARoundTripAndOldBareWeightMapsStillLoad() {
+        var topics = TopicPreferences()
+        topics.setRating(.less, title: "Superligaen fodbold", url: "https://a.test/agf")
+        XCTAssertEqual(TopicPreferences.fromJSON(topics.json), topics)
+        XCTAssertEqual(TopicPreferences.fromJSON(topics.json).rating(for: "https://a.test/agf"), .less)
+        // The shape shipped before ratings existed.
+        let legacy = TopicPreferences.fromJSON("{\"vind\":1.5}")
+        XCTAssertEqual(legacy.weights["vind"], 1.5)
+        XCTAssertTrue(legacy.ratings.isEmpty)
+    }
+
+    func testARatedArticleStillInfluencesRanking() {
+        var topics = TopicPreferences()
+        topics.setRating(.more, title: "Vindmøller og havvind i Nordsøen", url: "https://a.test/read")
+        let items = [
+            item("Ny rapport om vindmøller", "https://a.test/vind", daysAgo: 5),
+            item("Superligaen: sejr til AGF", "https://a.test/agf", daysAgo: 0),
+        ]
+        XCTAssertEqual(Suggestions.rank(items, read: [], topics: topics).first?.url, "https://a.test/vind")
+    }
+
     func testTopicPreferencesRoundTripTolerantly() {
         var topics = TopicPreferences()
         topics.prefer("Vindmøller i Nordsøen")

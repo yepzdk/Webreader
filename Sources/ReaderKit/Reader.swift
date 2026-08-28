@@ -266,7 +266,8 @@ public enum ReaderPage {
     public static func html(article: Article,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
-                            hidden: HiddenPhrases = HiddenPhrases()) -> String {
+                            hidden: HiddenPhrases = HiddenPhrases(),
+                            rating: TopicPreferences.Rating? = nil) -> String {
         let title = HTML.escape(article.title)
         // Byline and site name merge into one muted meta line; either may be absent.
         let meta = [article.byline, article.siteName]
@@ -342,11 +343,13 @@ public enum ReaderPage {
              stack and fixed sizes regardless of the reading settings. */
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.toastCSS(), by: 10))
         </style>
         </head>
         <body>
           \(ReaderChrome.progressBar())
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.controls(history: history, showsRating: true,
+                                                      rating: rating), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>
@@ -354,10 +357,12 @@ public enum ReaderPage {
             </header>
             <article>\(article.content)</article>
           </main>
+          \(ReaderChrome.toastMarkup())
           <script>
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
                                                              hitsJSON: HTML.jsLiteral(hits)), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
           </script>
         </body>
         </html>

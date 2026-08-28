@@ -160,12 +160,55 @@ public struct TopicPreferences: Equatable, Sendable {
     public static let clamp = 3.0
     public static let limit = 200
 
-    public private(set) var weights: [String: Double]
+    /// Which way an article was rated. Also what the reader page's buttons render.
+    public enum Rating: String, Sendable { case more, less }
 
-    public init(weights: [String: Double] = [:]) { self.weights = weights }
+    public private(set) var weights: [String: Double]
+    /// The articles carrying an opinion, by cleaned URL — so the reader can show its buttons
+    /// in the right state, and so a rating can be undone by replaying exactly its own terms.
+    /// Weights alone can't be reversed: clamping and the cap make them lossy.
+    public private(set) var ratings: [String: Rating]
+
+    /// How many rated articles are remembered. The weights outlive this — forgetting the
+    /// oldest rating drops the ability to *toggle* that article, not its influence.
+    public static let ratingsLimit = 300
+
+    public init(weights: [String: Double] = [:], ratings: [String: Rating] = [:]) {
+        self.weights = weights
+        self.ratings = ratings
+    }
 
     public mutating func prefer(_ title: String) { apply(title, delta: Self.boost) }
     public mutating func avoid(_ title: String) { apply(title, delta: Self.damp) }
+
+    /// How `url` is currently rated, if at all.
+    public func rating(for url: String) -> Rating? { ratings[url] }
+
+    /// Applies `rating` to an article, or clears it when the same rating is set twice — the
+    /// toggle behind the reader's buttons. Returns the rating now in force (nil = cleared),
+    /// so the host can tell the page what to draw without re-reading the store.
+    @discardableResult
+    public mutating func setRating(_ rating: Rating, title: String, url: String) -> Rating? {
+        let current = ratings[url]
+        // Whatever was there is undone first, so switching sides never leaves both applied.
+        if let current {
+            apply(title, delta: current == .more ? -Self.boost : -Self.damp)
+            ratings[url] = nil
+        }
+        guard current != rating else { return nil }
+        apply(title, delta: rating == .more ? Self.boost : Self.damp)
+        ratings[url] = rating
+        if ratings.count > Self.ratingsLimit { forgetOldestRatings() }
+        return rating
+    }
+
+    /// Dictionaries are unordered, so "oldest" isn't knowable — drop an arbitrary excess
+    /// instead. The cap is a safety valve on storage, not a recency policy.
+    // ponytail: an ordered list of rated URLs would make this exact; not worth the bytes
+    // until someone rates 300 articles and complains a toggle went stale.
+    private mutating func forgetOldestRatings() {
+        for url in ratings.keys.prefix(ratings.count - Self.ratingsLimit) { ratings[url] = nil }
+    }
 
     private mutating func apply(_ title: String, delta: Double) {
         let terms = Set(Suggestions.tokens(title))
@@ -183,7 +226,8 @@ public struct TopicPreferences: Equatable, Sendable {
     }
 
     public var json: String {
-        guard let data = try? JSONSerialization.data(withJSONObject: weights, options: [.sortedKeys])
+        let dict: [String: Any] = ["weights": weights, "ratings": ratings.mapValues(\.rawValue)]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
@@ -192,8 +236,11 @@ public struct TopicPreferences: Equatable, Sendable {
     /// malformed entry is skipped rather than poisoning the map.
     public static func fromJSON(_ string: String?) -> TopicPreferences {
         guard let string, let data = string.data(using: .utf8),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return TopicPreferences() }
+        // The first shipped shape was a bare term->weight map; keep reading it so an early
+        // tester's preferences survive the upgrade.
+        let raw = (object["weights"] as? [String: Any]) ?? object
         var weights: [String: Double] = [:]
         for (term, value) in raw {
             guard let number = value as? Double ?? (value as? Int).map(Double.init),
@@ -204,7 +251,15 @@ public struct TopicPreferences: Equatable, Sendable {
             let keep = weights.sorted { abs($0.value) > abs($1.value) }.prefix(limit)
             weights = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
         }
-        return TopicPreferences(weights: weights)
+        var ratings: [String: Rating] = [:]
+        for (url, value) in (object["ratings"] as? [String: String]) ?? [:] {
+            guard !url.isEmpty, let rating = Rating(rawValue: value) else { continue }
+            ratings[url] = rating
+        }
+        if ratings.count > ratingsLimit {
+            ratings = Dictionary(uniqueKeysWithValues: ratings.prefix(ratingsLimit).map { ($0.key, $0.value) })
+        }
+        return TopicPreferences(weights: weights, ratings: ratings)
     }
 }
 
