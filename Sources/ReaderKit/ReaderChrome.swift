@@ -101,8 +101,22 @@ enum ReaderChrome {
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
         /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor. */
-        #readerRecentsBtn, #readerHiddenBtn { display: flex; align-items: center; padding: 5px 9px; }
-        #readerRecentsBtn svg, #readerHiddenBtn svg { display: block; }
+        #readerRecentsBtn, #readerHiddenBtn, #readerMoreBtn, #readerLessBtn {
+          display: flex; align-items: center; padding: 5px 9px;
+        }
+        #readerRecentsBtn svg, #readerHiddenBtn svg,
+        #readerMoreBtn svg, #readerLessBtn svg { display: block; }
+        /* Rating buttons: same box as the other icon controls. Pressed is the accent, the one
+           place in the chrome where a control is "on" rather than merely open. */
+        #readerMoreBtn, #readerLessBtn {
+          padding: 5px 9px; font-family: inherit;
+          color: var(--muted); background: var(--bg);
+          border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+        }
+        #readerMoreBtn:hover, #readerLessBtn:hover { color: var(--fg); }
+        #readerMoreBtn[aria-pressed="true"], #readerLessBtn[aria-pressed="true"] {
+          color: #fff; background: var(--accent); border-color: var(--accent);
+        }
         /* How many blocks this article lost. Inverted neutrals — black on white in light,
            white on black in dark, brown on cream in sepia — never the accent. */
         #readerHiddenBtn { position: relative; }
@@ -200,6 +214,53 @@ enum ReaderChrome {
         .swatch-sepia { background: #f4ecd8; }
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
+        """
+    }
+
+    /// A transient confirmation, bottom-centre: what just happened and what it will do. Used
+    /// by the start page's block and more/less controls, where the effect is either invisible
+    /// (a stored preference) or destructive-looking (a row vanishing).
+    ///
+    /// One live region reused for every message, so rapid clicks replace rather than stack.
+    static func toastCSS() -> String {
+        """
+        #readerToast {
+          position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(6px);
+          z-index: 20; max-width: calc(100vw - 32px);
+          padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
+          background: var(--bg); color: var(--fg);
+          font-family: \(ReaderSettings.FontFamily.sans.css); font-size: 12px; line-height: 1.4;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          opacity: 0; pointer-events: none;
+          transition: opacity 140ms ease, transform 140ms ease;
+        }
+        #readerToast[data-shown="true"] { opacity: 1; transform: translateX(-50%) translateY(0); }
+        @media (prefers-reduced-motion: reduce) {
+          #readerToast { transition: none; transform: translateX(-50%); }
+          #readerToast[data-shown="true"] { transform: translateX(-50%); }
+        }
+        """
+    }
+
+    static func toastMarkup() -> String {
+        "<div id=\"readerToast\" role=\"status\" aria-live=\"polite\"></div>"
+    }
+
+    /// Defines `window.readerToast(text)`. Text only — the message is set with `textContent`,
+    /// so a host name from a feed can never become markup.
+    static func toastScript() -> String {
+        """
+        (function () {
+          var node = document.getElementById('readerToast');
+          var timer = null;
+          window.readerToast = function (text) {
+            if (!node || !text) { return; }
+            node.textContent = text;
+            node.setAttribute('data-shown', 'true');
+            if (timer) { clearTimeout(timer); }
+            timer = setTimeout(function () { node.removeAttribute('data-shown'); }, 2600);
+          };
+        })();
         """
     }
 
@@ -310,9 +371,37 @@ enum ReaderChrome {
     /// The chrome markup: the recents button with its popover, the hidden-text button with
     /// its (script-filled) list, then the "Aa" button with the appearance popover. All carry
     /// hover tooltips and name their own panel, since the buttons themselves are unlabelled.
-    static func controls(history: ReaderHistory) -> String {
+    /// `rating` adds the like/dislike pair — the reader page passes the current article's
+    /// rating (nil = unrated); the start page omits it, since there is no article to rate.
+    static func controls(history: ReaderHistory,
+                         showsRating: Bool = false,
+                         rating: TopicPreferences.Rating? = nil) -> String {
+        let current = rating
+        let ratingControls = !showsRating ? "" : """
+        <div class="reader-control">
+            <button id="readerMoreBtn" aria-label="More articles like this"
+                    title="More like this" aria-pressed="\(current == .more)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M7 10v12"/>
+                <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="reader-control">
+            <button id="readerLessBtn" aria-label="Fewer articles like this"
+                    title="Less like this" aria-pressed="\(current == .less)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M17 14V2"/>
+                <path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>
+              </svg>
+            </button>
+          </div>
         """
+        return """
         <div class="reader-controls">
+          \(ratingControls)
           <div class="reader-control">
             <button id="readerRecentsBtn" aria-label="Recent articles"
                     title="Recent articles" aria-haspopup="true"
@@ -578,6 +667,31 @@ enum ReaderChrome {
             var open = popovers.filter(function (p) { return !p.panel.hidden; })[0];
             if (open) { setOpen(null); open.btn.focus(); }
           });
+          // Like / dislike the article being read. Present only on the reader page; the
+          // host owns the toggle, and calls back with the rating now in force so the two
+          // buttons can never both read as pressed.
+          var moreBtn = document.getElementById('readerMoreBtn');
+          var lessBtn = document.getElementById('readerLessBtn');
+          if (moreBtn && lessBtn) {
+            var rate = function (direction) {
+              try { window.webkit.messageHandlers.readerRate.postMessage(direction); }
+              catch (err) {}
+            };
+            moreBtn.addEventListener('click', function () { rate('more'); });
+            lessBtn.addEventListener('click', function () { rate('less'); });
+            // `silent` is set when the host is only restoring state (back/forward onto an
+            // already-rendered page) — nothing was clicked, so nothing is announced.
+            window.readerSetRating = function (rating, silent) {
+              moreBtn.setAttribute('aria-pressed', rating === 'more' ? 'true' : 'false');
+              lessBtn.setAttribute('aria-pressed', rating === 'less' ? 'true' : 'false');
+              if (!silent && window.readerToast) {
+                window.readerToast(rating === 'more' ? 'More articles like this from now on.'
+                  : rating === 'less' ? 'Fewer articles like this from now on.'
+                  : 'Preference cleared.');
+              }
+            };
+          }
+
           apply();
           window.readerSetHidden(HIDDEN);
         })();

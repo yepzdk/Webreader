@@ -134,6 +134,16 @@ public enum OfflineFallback {
 
 /// Minimal HTML-text escaping for values interpolated into the generated pages.
 public enum HTML {
+    /// JSON rendered as a JS expression for `evaluateJavaScript`. Two escapes
+    /// `JSONSerialization` does not do: `</` would close the host page's `<script>` element,
+    /// and U+2028/U+2029 terminate a JS statement even inside a string literal. Both are
+    /// reachable from text the app didn't write (a feed title, an article title).
+    public static func jsLiteral(_ json: String) -> String {
+        json.replacingOccurrences(of: "</", with: "<\\/")
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+    }
+
     public static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")

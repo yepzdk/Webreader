@@ -73,6 +73,78 @@ final class StartPageTests: XCTestCase {
         XCTAssertFalse(html.contains("class=\"recents-inline\""))
     }
 
+    func testTitlesGetTwoLinesOnTheStartPage() {
+        // One line cuts most Danish headlines before they reveal the subject. The narrow
+        // recents popover keeps its single line — this is scoped to the page's own lists.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".recents-inline .recent-title, .suggestions .recent-title"))
+        XCTAssertTrue(html.contains("-webkit-line-clamp: 2;"))
+        // The shared one-line rule must still be there for the popover to inherit.
+        XCTAssertTrue(html.contains("display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"))
+    }
+
+    // MARK: - Suggestions
+
+    func testSuggestionSectionIsPresentButHiddenUntilTheHostFillsIt() {
+        // The page must render and be usable before any feed is fetched, so the section
+        // ships empty and hidden; the host reveals it via the callback.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"suggested\" hidden"))
+        XCTAssertTrue(html.contains("class=\"suggestions\""))
+        XCTAssertTrue(html.contains("window.readerSetSuggestions"))
+    }
+
+    func testOffersAWayIntoSettings() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"startSettings\""))
+        XCTAssertTrue(html.contains("readerOpenSettings"))
+    }
+
+    func testSuggestedRowsShareTheRecentsClickPath() {
+        // Both lists use `.recent` rows; one delegated listener covers them.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".suggestions button[data-url]"))
+        XCTAssertTrue(html.contains("post('readerOpen', row.dataset.url)"))
+    }
+
+    func testListsShareAGridSoTheyCanSitSideBySide() {
+        // A 1200pt window left half the page empty with the lists stacked.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("class=\"lists\""))
+        XCTAssertTrue(html.contains("grid-template-columns: 1fr 1fr"))
+        // Grid children must be allowed to shrink or long titles stop ellipsizing.
+        XCTAssertTrue(html.contains(".lists > * { min-width: 0; }"))
+        // The URL field stays narrow and centred regardless.
+        XCTAssertTrue(html.contains("class=\"intro\""))
+    }
+
+    func testSuggestedRowsCarryFeedbackAndBlockControls() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("readerTopicFeedback"))
+        XCTAssertTrue(html.contains("readerBlockHost"))
+        XCTAssertTrue(html.contains("'More like this'"))
+        XCTAssertTrue(html.contains("'Less like this'"))
+        // Controls are revealed on hover but must stay keyboard-reachable.
+        XCTAssertTrue(html.contains(".row-actions:focus-within"))
+    }
+
+    func testActionsConfirmWithAToast() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("id=\"readerToast\""))
+        XCTAssertTrue(html.contains("role=\"status\""))
+        XCTAssertTrue(html.contains("window.readerToast"))
+        // Each message says what will happen from now on, not just what was clicked.
+        XCTAssertTrue(html.contains("More articles like this from now on."))
+        XCTAssertTrue(html.contains("No more articles from '"))
+    }
+
+    func testGeneratedPagesIdentifyThemselves() {
+        // Back/forward restores our own pages without going through the method that built
+        // them, so the host re-reads what the document says it is.
+        XCTAssertTrue(StartPage.html(appName: "Reader")
+            .contains("<meta name=\"generator\" content=\"WebReader Start\">"))
+    }
+
     // MARK: - Shared chrome
 
     func testCarriesTheSameChromeAsTheReader() {

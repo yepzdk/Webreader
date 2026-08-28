@@ -30,6 +30,8 @@ public enum ReaderStore {
         public static let history = "reader.history"
         public static let zoom = "reader.zoom"
         public static let hiddenPhrases = "reader.hiddenPhrases"
+        public static let suggestions = "reader.suggestions"
+        public static let topics = "reader.topics"
         /// Marker set once the one-time import from the webwrap-generated app has run.
         public static let legacyImported = "reader.legacyImported"
     }
@@ -72,6 +74,27 @@ public enum ReaderStore {
 
     public static func setHiddenPhrases(_ phrases: HiddenPhrases, store: KeyValueStore) {
         store.set(phrases.json, forKey: Key.hiddenPhrases)
+    }
+
+    // MARK: - Suggestions
+
+    /// Never stored → the shipped source (see `SuggestionSettings.fromJSON`). User data like
+    /// history and hidden phrases: `resetAppearance` leaves it alone.
+    public static func suggestions(store: KeyValueStore) -> SuggestionSettings {
+        SuggestionSettings.fromJSON(store.string(forKey: Key.suggestions))
+    }
+
+    public static func setSuggestions(_ settings: SuggestionSettings, store: KeyValueStore) {
+        store.set(settings.json, forKey: Key.suggestions)
+    }
+
+    /// Never stored → no preferences. User data like the rest: `resetAppearance` leaves it.
+    public static func topics(store: KeyValueStore) -> TopicPreferences {
+        TopicPreferences.fromJSON(store.string(forKey: Key.topics))
+    }
+
+    public static func setTopics(_ topics: TopicPreferences, store: KeyValueStore) {
+        store.set(topics.json, forKey: Key.topics)
     }
 
     // MARK: - Page zoom
