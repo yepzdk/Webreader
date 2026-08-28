@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The start page came up inert in 0.10.0: clicking a recent article did nothing and no
+  suggestions ever appeared.
+
 ## [0.10.0] - 2026-08-28
 
 ### Added
