@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-28
+
 ### Added
 - Suggested articles on the start page, ranked against what you have been reading. Ships
   with [wallnot.dk](https://wallnot.dk) — Danish articles without paywalls — as a source.
@@ -56,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/yepzdk/webreader/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/yepzdk/webreader/releases/tag/v0.9.0
