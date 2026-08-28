@@ -546,6 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // A new navigation means whatever it lands on is a fresh page, not our reader
     // rendering — except the reader document's own load, marked by `pendingReaderRender`.
+    @MainActor
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if !pendingReaderRender { isShowingReader = false }
         // Our generated pages are real history entries, so back/forward can navigate AWAY
@@ -561,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // Every real page that finishes loading is offered to the reader; pages that don't
     // extract stay as they are. The reader document's own didFinish just marks it as
     // showing; a toggle back to the original suppresses one round.
+    @MainActor
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if pendingReaderRender {
             pendingReaderRender = false
@@ -586,7 +588,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // inside `enterReader`.
         webView.evaluateJavaScript(
             "(document.querySelector('meta[name=\"generator\"]')||{}).content || ''"
-        ) { [weak self] result, _ in
+        ) { @MainActor [weak self] result, _ in
             guard let self, self.webView.url == url else { return }
             switch result as? String {
             case "WebReader Start":
@@ -602,11 +604,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: - Load failures
 
+    @MainActor
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         showFallbackIfNeeded(for: error)
     }
 
+    @MainActor
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         showFallbackIfNeeded(for: error)
     }
