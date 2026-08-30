@@ -8,7 +8,8 @@ are not used here.
 | --- | --- |
 | `dk.yepz.webreader.desktop` | Desktop entry. Registers WebReader as an `http`/`https` handler so it appears in `xdg-settings`, `gio mime`, and the browsers' default-application lists. |
 | `dk.yepz.webreader.png` | Application icon, 1024x1024. |
-| `PKGBUILD` | Arch source package (`makepkg -si`), suitable for the AUR. |
+| `PKGBUILD-git` | Arch **VCS** package `webreader-git`, built from the default branch. **This is the one that works today** — see below. |
+| `PKGBUILD` | Arch release package `webreader`, built from the `v0.11.0` tag. Not usable until that tag exists. |
 | `install-local.sh` | Build and install into `~/.local` for the current user, no root needed. |
 
 ## Local install
@@ -34,13 +35,62 @@ commands when it finishes. Uninstalling is deleting those four files.
 
 ## Arch package
 
+There are two PKGBUILDs, because the two AUR packages they correspond to are
+separate AUR repositories and `makepkg` only ever reads a file named exactly
+`PKGBUILD`. Keeping them as two plain files means each can be copied to its AUR
+repo verbatim, with no editing and no parameter to get wrong.
+
+| File | AUR package | Source | Usable now? |
+| --- | --- | --- | --- |
+| `PKGBUILD-git` | `webreader-git` | default branch, no tag | **yes** |
+| `PKGBUILD` | `webreader` | `v0.11.0` tag | no — tag does not exist yet |
+
+### Use `PKGBUILD-git` today
+
+The GTK4 / WebKitGTK host landed *after* `v0.10.1`, so no tag in the repository
+contains it — `git ls-tree -r --name-only v0.10.1 | grep WebReaderGTK` matches
+nothing. A release PKGBUILD pinned to any existing tag would clone a tree with
+no Linux host and fail with no binary to install. The VCS package is the
+standard AUR answer to that, and it is the variant that actually builds:
+
 ```sh
-cd Linux
-makepkg -si
+mkdir -p /tmp/webreader-git
+install -Dm644 Linux/PKGBUILD-git /tmp/webreader-git/PKGBUILD
+cd /tmp/webreader-git && makepkg
 ```
 
-`pkgname=webreader`, built from the `v0.10.1` git tag. Runtime dependencies are
-`gtk4` and `webkitgtk-6.0`, both in the official `extra` repository.
+Verified on Arch with `swift-bin` 6.3.3, `gtk4` and `webkitgtk-6.0` installed.
+It clones the default branch, computes `pkgver` from `git describe`, runs
+`swift build -c release --disable-sandbox`, and produces
+`webreader-git-0.10.1.r4.ga07ef2b-1-x86_64.pkg.tar.zst` (plus a `-debug`
+package, because Arch's default `makepkg.conf` enables `debug`). Install it with
+`makepkg -si` instead, or `pacman -U` the resulting file.
+
+`pkgver` is generated, not hand-written: `0.10.1.r4.ga07ef2b` is the Arch VCS
+convention of *last tag . commits since . short sha*, so the package version
+rises monotonically with every commit and `pacman` sees upgrades correctly. The
+package sets `provides=('webreader')` and `conflicts=('webreader')` so it and
+the release package are interchangeable and cannot be co-installed.
+
+### `PKGBUILD` waits on a `v0.11.0` tag
+
+The release PKGBUILD names `pkgver=0.11.0` — the first release that *will*
+contain the Linux host — rather than a version whose tag demonstrably lacks it.
+No tag has been fabricated and no checksum invented, so it fails fast and
+honestly today:
+
+```
+fatal: invalid reference: v0.11.0
+==> ERROR: Failure while creating working copy of webreader git repo
+```
+
+It needs no further changes; tagging and pushing `v0.11.0` is the only thing
+standing between it and a working `makepkg -si`.
+
+### Both variants
+
+Runtime dependencies are `gtk4` and `webkitgtk-6.0`, both in the official
+`extra` repository — nothing from the AUR is needed to *run* WebReader.
 
 The build dependency is the awkward part and worth stating plainly: WebReader
 is written in Swift, and Arch ships no Swift toolchain in the official
@@ -48,15 +98,30 @@ repositories, so `makedepends` includes `swift-bin` — an **AUR** package. That
 means building from source needs AUR access and about a gigabyte of toolchain
 that is useless once the build is done. The fix for users is a companion
 `webreader-bin` package shipping a prebuilt binary from a GitHub release, with
-no makedepends at all; it is named as the intended option at the top of the
-`PKGBUILD` but has not been written.
+no makedepends at all; it is named as the intended option at the top of both
+PKGBUILDs but has not been written — and it needs a GitHub release to exist
+first, which is the same `v0.11.0` tag the release PKGBUILD is waiting on.
 
-The package installs the binary to `/usr/bin/webreader`, the desktop entry to
-`/usr/share/applications/`, the icon to both hicolor and `/usr/share/pixmaps/`,
-and two licence files to `/usr/share/licenses/webreader/`: `LICENSE` (MIT, for
-WebReader itself) and `LICENSE.readability` (Apache-2.0, for the Mozilla
-Readability code vendored into `Sources/ReaderKit/ReadabilityJS.swift` and
-compiled into the shipped binary).
+Either package installs the same payload, confirmed against the built
+`.pkg.tar.zst` with `bsdtar -tf`:
+
+```
+usr/bin/webreader
+usr/share/applications/dk.yepz.webreader.desktop
+usr/share/icons/hicolor/1024x1024/apps/dk.yepz.webreader.png
+usr/share/licenses/webreader-git/LICENSE
+usr/share/licenses/webreader-git/LICENSE.readability
+usr/share/pixmaps/dk.yepz.webreader.png
+```
+
+`LICENSE` is MIT, for WebReader itself; `LICENSE.readability` is Apache-2.0, for
+the Mozilla Readability code vendored into
+`Sources/ReaderKit/ReadabilityJS.swift` and compiled into the shipped binary.
+The licences directory is named after the package, so it is
+`/usr/share/licenses/webreader/` for the release variant. The packaged binary is
+a stripped x86_64 PIE ELF linked against `libwebkitgtk-6.0.so.4`,
+`libjavascriptcoregtk-6.0.so.1` and `libgtk-4.so.1`, with no unresolved
+libraries.
 
 ## Icon provenance
 

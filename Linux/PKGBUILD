@@ -2,6 +2,15 @@
 #
 # Source package: builds WebReader from the tagged git source with SwiftPM.
 #
+# THIS PKGBUILD IS NOT YET USABLE. It targets v0.11.0, which is the first
+# release that will contain the Linux (GTK4 / WebKitGTK) host — that host landed
+# after v0.10.1, so no tag in the repository contains it today and `makepkg`
+# would clone a tree with no `Sources/WebReaderGTK` and no binary to install.
+# It activates unchanged the moment `v0.11.0` is tagged and pushed.
+#
+# Until then use `PKGBUILD-git` next to this file (AUR package `webreader-git`),
+# which builds from the default branch and is verified working.
+#
 # A note on the build dependency, because it is the real cost of this package:
 # WebReader is written in Swift, and Arch has no Swift toolchain in the
 # official repositories. `swift-bin` is an AUR package (a repack of the
@@ -20,7 +29,8 @@
 # [extra]. Nothing about installing this package changes your default browser.
 
 pkgname=webreader
-pkgver=0.10.1
+# First release containing the Linux host; the tag does not exist yet.
+pkgver=0.11.0
 pkgrel=1
 pkgdesc='Distraction-free reader view for the web (GTK4 / WebKitGTK)'
 arch=('x86_64')
