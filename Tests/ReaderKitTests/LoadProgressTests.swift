@@ -36,4 +36,19 @@ final class LoadProgressTests: XCTestCase {
         }
         XCTAssertEqual(fraction, 0.99, accuracy: 0.0001)
     }
+
+    func testScrollProgressCSSReadsTheSharedThickness() {
+        // The CSS is generated from the constant, so bumping it can't silently leave the
+        // reader page's hairline at the old thickness while the native line moves.
+        XCTAssertTrue(
+            ReaderChrome.progressCSS().contains("height: \(LoadProgress.lineThickness)px"))
+    }
+
+    func testScrollProgressLineIsForegroundNotAccent() {
+        // Deliberately a different colour from the accent-coloured native load line: an
+        // accent hairline parked mid-page reads as a stuck load.
+        let css = ReaderChrome.progressCSS()
+        XCTAssertTrue(css.contains("background: var(--fg);"))
+        XCTAssertFalse(css.contains("background: var(--accent)"))
+    }
 }

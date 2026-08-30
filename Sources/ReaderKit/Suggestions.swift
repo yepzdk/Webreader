@@ -1,4 +1,9 @@
 import Foundation
+// `XMLParser` ships in Foundation proper on Apple platforms but in a separate module under
+// swift-corelibs-foundation, so the Linux host (issue #16) needs this to see `Feed.parse`.
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 /// Where suggested articles come from: a feed the user has added (or the shipped default).
 /// `title` is the feed's own channel title, resolved once when the source is added, so the

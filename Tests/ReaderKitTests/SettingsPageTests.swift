@@ -120,4 +120,98 @@ final class SettingsPageTests: XCTestCase {
         let page = SettingsPage.html(appName: "WebReader", settings: settings)
         XCTAssertTrue(page.contains("<html lang=\"en\" data-theme=\"dark\">"))
     }
+
+    // MARK: - Keyboard shortcuts
+
+    /// The page as a given host would render it. `platform` is a value precisely so both
+    /// columns are reachable from whichever OS the suite runs on — no test here branches
+    /// on the compiling system.
+    private func page(_ platform: Platform) -> String {
+        SettingsPage.html(appName: "WebReader", platform: platform)
+    }
+
+    private let shortcutHeading = "<h2 class=\"section\">Keyboard shortcuts</h2>"
+
+    func testShortcutSectionPrintsTheChordsOfThePlatformItRendersFor() {
+        let linux = page(.linux)
+        XCTAssertTrue(linux.contains(shortcutHeading))
+        XCTAssertTrue(linux.contains("<kbd>Ctrl+Shift+R</kbd>"))
+        XCTAssertFalse(linux.contains("⇧⌘R"))
+
+        let mac = page(.macOS)
+        XCTAssertTrue(mac.contains(shortcutHeading))
+        XCTAssertTrue(mac.contains("<kbd>⇧⌘R</kbd>"))
+        XCTAssertFalse(mac.contains("Ctrl+Shift+R"))
+    }
+
+    func testEveryActionAndChordInTheTableReachesBothPages() {
+        // One table, two columns: a row that renders on one platform and not the other
+        // means it stopped being the single source the table exists to be.
+        for platform in Platform.allCases {
+            let rendered = page(platform)
+            for shortcut in SettingsPage.shortcuts {
+                XCTAssertTrue(rendered.contains("<dt>\(HTML.escape(shortcut.action))</dt>"),
+                              "\(shortcut.action) is missing from the \(platform.rawValue) page")
+                for chord in shortcut.chords(for: platform) {
+                    XCTAssertTrue(rendered.contains("<kbd>\(HTML.escape(chord))</kbd>"),
+                                  "\(chord) is missing from the \(platform.rawValue) page")
+                }
+            }
+        }
+    }
+
+    func testChordsMatchTheDocumentedShortcuts() {
+        // Pinned against the README table and `WebReaderGTK.Application.Command`, spelled
+        // out rather than derived, so a slip in the Swift table fails here instead of
+        // teaching the user a chord the host never registered.
+        let expected: [(action: String, macOS: String, linux: String)] = [
+            ("Open URL from clipboard", "⇧⌘O", "Ctrl+Shift+O"),
+            ("Toggle reader view", "⇧⌘R", "Ctrl+Shift+R"),
+            ("Home (start page)", "⇧⌘H", "Ctrl+Shift+H"),
+            ("Copy current URL", "⇧⌘C", "Ctrl+Shift+C"),
+            ("Settings", "⌘,", "Ctrl+,"),
+            ("Reload", "⌘R", "Ctrl+R"),
+            ("Zoom in / out / reset", "⌘+ / ⌘− / ⌘0", "Ctrl++ / Ctrl+− / Ctrl+0"),
+            ("Back / forward", "⌘[ / ⌘]", "Alt+← / Alt+→"),
+        ]
+        XCTAssertEqual(SettingsPage.shortcuts.count, expected.count)
+        for (shortcut, want) in zip(SettingsPage.shortcuts, expected) {
+            XCTAssertEqual(shortcut.action, want.action)
+            XCTAssertEqual(shortcut.chords(for: .macOS).joined(separator: " / "), want.macOS)
+            XCTAssertEqual(shortcut.chords(for: .linux).joined(separator: " / "), want.linux)
+        }
+    }
+
+    func testBackForwardNamesWebKitGTKOnLinux() {
+        // Alt+← is the web view's, not an accelerator the GTK host binds. Printing the
+        // chords without saying so would read as an app feature; omitting the row would
+        // read as a missing one.
+        let linux = page(.linux)
+        XCTAssertTrue(linux.contains("<dt>Back / forward</dt>"))
+        XCTAssertTrue(linux.contains("<kbd>Alt+←</kbd>"))
+        XCTAssertTrue(linux.contains("<kbd>Alt+→</kbd>"))
+        XCTAssertTrue(linux.contains("class=\"key-note\">Handled by WebKitGTK, not bound by the app.<"))
+        // macOS binds them itself, so there is nothing to explain there. The class is
+        // always in the stylesheet, so the markup is what has to be absent.
+        XCTAssertFalse(page(.macOS).contains("<span class=\"key-note\">"))
+        XCTAssertFalse(page(.macOS).contains("WebKitGTK"))
+    }
+
+    func testLinuxPageSaysWhyItCarriesTheList() {
+        XCTAssertTrue(page(.linux).contains("no menu bar"))
+        XCTAssertFalse(page(.macOS).contains("no menu bar"))
+    }
+
+    func testShortcutSectionIsStaticTextBelowTheControls() throws {
+        let rendered = page(.linux)
+        // Reference, not editor: no rebinding, so no host round-trip and no new handler.
+        XCTAssertFalse(rendered.contains("readerShortcut"))
+        XCTAssertFalse(rendered.contains("readerSetShortcut"))
+        // And it sits after the sections someone came to Settings to change.
+        let sources = try XCTUnwrap(rendered.range(of: "<h2 class=\"section\">Suggestion sources</h2>"))
+        let keys = try XCTUnwrap(rendered.range(of: shortcutHeading))
+        let done = try XCTUnwrap(rendered.range(of: "id=\"done\""))
+        XCTAssertTrue(sources.lowerBound < keys.lowerBound)
+        XCTAssertTrue(keys.lowerBound < done.lowerBound)
+    }
 }

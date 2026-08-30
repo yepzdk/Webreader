@@ -1,4 +1,8 @@
 import Foundation
+// Same split as `FoundationXML`: on Linux `URLSession` and friends live in a separate module.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Fetches the suggestion sources. The only networking in the app outside the web view, so
 /// it's deliberately small: a plain `URLSession`, a short in-memory TTL so returning to the

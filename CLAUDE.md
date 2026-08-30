@@ -43,11 +43,35 @@ Two SwiftPM targets, no dependencies:
     settings, history, and zoom. Strings only, so a KVS-backed store can drop in for sync.
   - `ReadabilityJS.swift` — vendored Readability 0.6.0 as string literals (Apache-2.0). To
     upgrade, replace both literals and bump `version`.
+  - `Platform.swift` — `Platform.macOS` / `.linux` and the serif/sans CSS font stacks each
+    one ships. A value, never `#if os(...)`: the page generators take `platform:` (defaulting
+    to `.macOS`, which is what keeps the AppKit host's call sites argument-free), so the
+    choice isn't tied to the compiling OS and the tests assert both.
+  - `ReaderPalette.swift` — the six colour roles (`--bg`, `--fg`, `--muted`, `--accent`,
+    `--border`, `--surface`) plus `isDark`, injected as `palette:` beside `platform:`.
+    Honoured **only** under `Theme.auto`; an explicit theme still pins its own palette.
+  - `FileStore.swift` — `KeyValueStore` over one atomically-written JSON file. `DefaultsStore`
+    is right on macOS, but corelibs-Foundation's `UserDefaults` location is not a stable
+    contract, so the Linux host uses this instead. Missing or corrupt file reads as empty.
 - **`Sources/WebReader`** — the AppKit host. `AppDelegate.swift` owns the window, `WKWebView`,
   menu, URL handling (`application(_:open:)` + the GetURL Apple Event), the reader state
   machine, offline fallback, and the script-message handlers. `ProgressLine.swift` is the
   native load-progress hairline. `LegacyImport.swift` is the one-time import from the
   webwrap-generated app's defaults domain (`dk.yepz.webwrap.webreader`).
+- **`Sources/CWebKitGTK`** — a header-only C shim, `shim.h` plus a module map. It exists
+  because Swift's ClangImporter cannot see function-like C macros (`g_signal_connect`,
+  `G_CALLBACK`, the `GTK_WIDGET()`/`WEBKIT_WEB_VIEW()` casts) or C varargs (`g_object_new`).
+  Every signal gets a typed `wr_connect_*` so the C compiler checks the callback signature
+  instead of Swift `unsafeBitCast`ing a function pointer. Flag enumerators need a wrapper too:
+  `GApplicationFlags` imports as a `RawRepresentable` struct, so `G_APPLICATION_HANDLES_OPEN`
+  is not in Swift scope — hence `wr_application_handles_open()`.
+- **`Sources/WebReaderGTK`** — the GTK4 + WebKitGTK 6.0 host (`webreader`), issue #16.
+  `Application.swift` owns the `GtkApplication` (`HANDLES_OPEN`, so a `.desktop` `%u` and
+  `xdg-open` arrive on the `open` signal), the window/overlay, the nine `GSimpleAction`
+  accelerators and zoom. `ReaderHost.swift` is the reader state machine and the script-message
+  handlers. `ProgressStrip.swift` is the load hairline. `OmarchyTheme.swift` and `XDG.swift`
+  are the platform services. There is **no menu bar**: the WM owns quit and the window verbs,
+  WebKitGTK owns the edit verbs, and the web shell already carries the rest.
 
 ### Rules that aren't obvious from the code
 
@@ -57,10 +81,16 @@ Two SwiftPM targets, no dependencies:
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
-  `readerClear`, `readerOpenURL`, `readerUnhide`, `readerOpenSettings`, `readerHome`,
-  `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`. Rename in both Swift and the
-  page scripts together. The host calls back via `window.readerSetHidden(list)`,
+  `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
+  `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
+  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`. Rename in both
+  Swift and the page scripts together. The host calls back via `window.readerSetHidden(list)`,
   `window.readerSetSuggestions(items)`, `window.readerSourceAdded/Rejected(…)`.
+- Hiding a phrase is a **page** affordance, not a menu item: selecting text in the reader
+  raises a Hide button that posts to `readerHide`. It was moved out of the Edit and context
+  menus for issue #16 — the Linux host has no menu bar — and `window.webkit.messageHandlers`
+  is the same API on WebKitGTK 6.0, so the page half ports unchanged. Don't reintroduce a
+  menu route; there would be two ways to do one thing.
 - Hidden phrases match a **whole block's text only** (never a substring, never inline
   elements) so a learned phrase can't rewrite prose. The stored list is seeded with
   `HiddenPhrases.defaults` the first time it's read and is plain user data afterwards — new
@@ -125,18 +155,55 @@ Two SwiftPM targets, no dependencies:
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
-- `ProgressLine.height` (2.5pt) and `ReaderChrome.progressCSS` (2.5px) are kept in step by
-  hand; they can't share a constant across the Swift/CSS boundary.
+- `ProgressLine.height` and `ReaderChrome.progressCSS` both read
+  `LoadProgress.lineThickness` — one constant, so a new host can't drift. The two lines are
+  deliberately *different colours* (accent for the native page load, `--fg` for the reader's
+  scroll progress) so an accent hairline parked mid-page never looks like a stuck load.
+- **The Linux `load_html` hazard.** `WKWebView` hands back a `WKNavigation` to identify a
+  load; WebKitGTK hands back nothing, and `webkit_web_view_load_html` reports the `base_uri`
+  you passed as the view's URI — so our own reader render is indistinguishable *by URI* from
+  a real navigation to that article. `PageState.willShow` immediately before the single
+  `load_html` call site is therefore the load-bearing mechanism, not a nicety. Related: on
+  Linux `load-failed` must return `TRUE` (or WebKit paints its own error page) and must not
+  render, because the `load-changed`/FINISHED that always follows would consume the state the
+  render just set — it records the failure and lets that FINISHED show the fallback.
+- `Theme.auto` on Linux follows the active Omarchy theme, read from
+  `~/.local/state/omarchy/current/theme/colors.toml` (the older `current/theme` symlink some
+  docs describe is gone). Omarchy's `muted` key is a **UI dim colour**, not a text colour —
+  mapping it onto `--muted` measured 2.45:1 on `last-horizon`, so secondary text is a
+  foreground→background blend stepped back until it clears WCAG AA instead. `--border` and
+  `--surface` have no Omarchy counterpart and are rgba overlays of the foreground. Off
+  Omarchy `current()` returns nil and the page falls back to `prefers-color-scheme`.
+- GTK4 uses the **GApplication id** as the Wayland `app_id`, so the window class is
+  `dk.yepz.webreader`, not `webreader`. `StartupWMClass` and any Hyprland `windowrule` must
+  use the id; the executable name silently never matches.
+- The Linux window title follows the document via `notify::title`, and that is the only
+  writer. macOS sets its title once and leaves it. Two writers is how it went stale.
 
 ## Build & test
 
 ```sh
 swift build
-swift test                       # XCTest; ReaderKit only — AppKit wiring is verified by hand
-Scripts/build-app.sh             # build/WebReader.app, ad-hoc signed
+swift test                       # XCTest; ReaderKit only — host wiring is verified by hand
+Scripts/build-app.sh             # macOS: build/WebReader.app, ad-hoc signed
 Scripts/build-app.sh --install   # …and replace /Applications/WebReader.app
 open -a build/WebReader.app https://example.com/article
+Linux/install-local.sh           # Linux: release build into ~/.local, registers the handler
+.build/debug/webreader https://example.com/article
 ```
+
+`Package.swift` guards the AppKit host behind `#if os(macOS)` and the `CWebKitGTK` +
+`WebReaderGTK` targets behind the `#else`, so `swift build`/`swift test` do the right thing on
+either OS and neither branch can break the other. On Linux, `Suggestions.swift` and
+`FeedFetcher.swift` need `FoundationXML`/`FoundationNetworking` — corelibs splits `XMLParser`
+and `URLSession` out of Foundation proper. Linux needs `gtk4` and `webkitgtk-6.0` (both in
+Arch `extra`) and a Swift toolchain, which on Arch is the AUR `swift-bin`.
+
+The GTK host has no test target, same as the AppKit host. Verify it by running it: the
+`GtkApplication` exports its action map on D-Bus, so
+`gdbus call --session --dest dk.yepz.webreader --object-path /dk/yepz/webreader --method
+org.gtk.Actions.Activate "settings" "[]" "{}"` drives an accelerator without synthesising key
+events, and `hyprctl clients` reports the window title, which follows the document.
 
 Bundle metadata lives in `App/Info.plist` (bundle id `dk.yepz.webreader`, http/https handler)
 and `App/AppIcon.icns`. There is no Xcode project yet; it arrives with the iOS target, at

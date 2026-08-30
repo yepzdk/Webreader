@@ -1,0 +1,13 @@
+// The shim header is the whole module: SwiftPM `systemLibrary` targets compile no sources,
+// and every wrapper in shim.h is `static inline`, so no separate C target is needed.
+// `[system]` also silences GTK's own header warnings, which are not ours to fix.
+module CWebKitGTK [system] {
+    header "shim.h"
+    link "webkitgtk-6.0"
+    link "javascriptcoregtk-6.0"
+    link "gtk-4"
+    link "gobject-2.0"
+    link "gio-2.0"
+    link "glib-2.0"
+    export *
+}

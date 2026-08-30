@@ -57,10 +57,43 @@ public enum OfflineFallback {
         errorCode == -999 || errorCode == 102
     }
 
-    /// The fallback HTML. `appName` and `host` are HTML-escaped.
-    public static func html(appName: String, host: String?, kind: Kind) -> String {
+    /// The fallback HTML. `appName` and `host` are HTML-escaped. `platform` selects the
+    /// sans stack and defaults to macOS, so the AppKit host needs no argument.
+    ///
+    /// This page has no appearance settings — there is nothing to read here, so there is
+    /// nothing to configure — which makes it permanently `auto`. A `palette` therefore
+    /// always applies when one is given, replacing the light defaults and the
+    /// `prefers-color-scheme` block both. Without one it follows the system exactly as
+    /// before. Its palette is spelled out here rather than taken from `ReaderChrome`
+    /// because it needs `--accent-fg` (the Try Again button) and no reading variables.
+    public static func html(appName: String, host: String?, kind: Kind,
+                            platform: Platform = .macOS,
+                            palette: ReaderPalette? = nil) -> String {
         let headline = HTML.escape(kind.headline)
         let message = HTML.escape(kind.message(host: host))
+        // The button label stays white on the accent in every palette: `ReaderPalette` has
+        // no foreground-on-accent role, and inventing one from a colour literal the host
+        // may have written as anything is guesswork the stock themes don't do either.
+        let theme = palette.map {
+            """
+            :root {
+              --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
+              --accent-fg: #ffffff; --border: \($0.border);
+              color-scheme: \($0.isDark ? "dark" : "light");
+            }
+            """
+        } ?? """
+        :root {
+          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
+          --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+        }
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
+            --accent-fg: #ffffff; --border: rgba(255,255,255,0.16);
+          }
+        }
+        """
         return """
         <!doctype html>
         <html lang="en">
@@ -69,22 +102,13 @@ public enum OfflineFallback {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>\(HTML.escape(appName))</title>
         <style>
-          :root {
-            --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-            --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
-          }
-          @media (prefers-color-scheme: dark) {
-            :root {
-              --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-              --accent-fg: #ffffff; --border: rgba(255,255,255,0.16);
-            }
-          }
+          \(ReaderChrome.indent(theme, by: 2))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {
             background: var(--bg);
             color: var(--fg);
-            font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+            font: 15px/1.5 \(platform.sansStack);
             display: flex; align-items: center; justify-content: center;
             -webkit-font-smoothing: antialiased;
           }

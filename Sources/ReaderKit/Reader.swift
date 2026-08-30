@@ -46,12 +46,17 @@ public struct Article: Codable, Equatable {
 public struct ReaderSettings: Equatable {
     public enum FontFamily: String, CaseIterable {
         case serif, sans
-        /// The CSS font stack. The serif stack matches the reader's original design;
-        /// sans matches the meta-line stack used elsewhere in the generated pages.
-        var css: String {
+        /// The CSS font stack for the platform the page will be displayed on. The macOS
+        /// stacks are the reader's original design; `Platform` explains why the choice is a
+        /// value rather than a compile-time branch.
+        ///
+        /// Deliberately undefaulted: every caller is a page fragment that already knows its
+        /// platform, so a site someone forgets to thread should fail to compile rather than
+        /// quietly render Apple faces on a machine that has none of them installed.
+        func css(on platform: Platform) -> String {
             switch self {
-            case .serif: return "ui-serif, \"New York\", Georgia, serif"
-            case .sans: return "-apple-system, BlinkMacSystemFont, \"Helvetica Neue\", Arial, sans-serif"
+            case .serif: return platform.serifStack
+            case .sans: return platform.sansStack
             }
         }
     }
@@ -78,8 +83,9 @@ public struct ReaderSettings: Equatable {
         }
     }
 
-    /// `auto` follows the system light/dark appearance (the original behavior); the
-    /// explicit themes pin a palette regardless of system appearance.
+    /// `auto` follows the host: the system light/dark appearance, or — where the host can
+    /// resolve one — the desktop's whole palette (`ReaderPalette`, #16). The explicit
+    /// themes pin their own palette regardless of either, which is what they are for.
     public enum Theme: String, CaseIterable {
         case auto, light, sepia, dark, black
     }
@@ -263,11 +269,20 @@ public enum ReaderPage {
     ///
     /// `hidden` is the phrase list for the third popover; the page also re-applies it live
     /// when the host learns a new phrase (`window.readerSetHidden`).
+    ///
+    /// `platform` selects the font stacks. It defaults to macOS so the AppKit host and its
+    /// call sites need no argument; a GTK host passes `.linux` and gets faces that actually
+    /// resolve there.
+    ///
+    /// `palette` is the desktop palette for `Theme.auto` and defaults to nil, which keeps
+    /// the `prefers-color-scheme` fallback the AppKit host relies on. See `ReaderPalette`.
     public static func html(article: Article,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
                             hidden: HiddenPhrases = HiddenPhrases(),
-                            rating: TopicPreferences.Rating? = nil) -> String {
+                            rating: TopicPreferences.Rating? = nil,
+                            platform: Platform = .macOS,
+                            palette: ReaderPalette? = nil) -> String {
         let title = HTML.escape(article.title)
         // Byline and site name merge into one muted meta line; either may be absent.
         let meta = [article.byline, article.siteName]
@@ -276,7 +291,7 @@ public enum ReaderPage {
             .map(HTML.escape)
             .joined(separator: " \u{00B7} ")
         let metaLine = meta.isEmpty ? "" : "<p class=\"meta\">\(meta)</p>"
-        let sans = ReaderSettings.FontFamily.sans.css
+        let sans = platform.sansStack
         // Hit counts are keyed by normalized phrase — plain ASCII/word text — but they came
         // from a page, so they take the same `</`-safe route as the phrase list.
         let hits = (try? JSONSerialization.data(withJSONObject: article.hiddenHits, options: [.sortedKeys]))
@@ -291,7 +306,8 @@ public enum ReaderPage {
         <meta name="generator" content="WebReader">
         <title>\(title)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
+                                                      palette: palette), by: 10))
           * { box-sizing: border-box; }
           html, body { margin: 0; }
           body {
@@ -333,17 +349,18 @@ public enum ReaderPage {
           article hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
           /* Inline quotations are wrapped in .q at extraction; a paragraph opening with one
              is .qp. Bordered by default; data-quotes="italic" swaps the treatment. Medium
-             weight needs a face that has one (New York does; Georgia falls back to regular,
-             and the border still carries the quote). */
+             weight needs a face that has one (New York and Noto Serif do; Georgia and
+             Liberation Serif fall back to regular, and the border still carries the quote). */
           article p.qp { padding-left: 14px; border-left: 3px solid var(--border); }
           article .q { font-weight: 500; }
           :root[data-quotes="italic"] article p.qp { padding-left: 0; border-left: 0; }
           :root[data-quotes="italic"] article .q { font-weight: inherit; font-style: italic; }
           /* Appearance ("Aa") popover and recents list. Chrome UI, so it keeps the sans
              stack and fixed sizes regardless of the reading settings. */
-          \(ReaderChrome.indent(ReaderChrome.controlsCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
-          \(ReaderChrome.indent(ReaderChrome.toastCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
@@ -360,9 +377,11 @@ public enum ReaderPage {
           \(ReaderChrome.toastMarkup())
           <script>
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
-                                                             hitsJSON: HTML.jsLiteral(hits)), by: 10))
+                                                             hitsJSON: HTML.jsLiteral(hits),
+                                                             platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
+          \(ReaderChrome.indent(HiddenPhrases.hideAffordanceJS(), by: 10))
           </script>
         </body>
         </html>

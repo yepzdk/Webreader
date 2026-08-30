@@ -1,0 +1,87 @@
+# Maintainer: yepzdk <https://github.com/yepzdk>
+#
+# Source package: builds WebReader from the tagged git source with SwiftPM.
+#
+# A note on the build dependency, because it is the real cost of this package:
+# WebReader is written in Swift, and Arch has no Swift toolchain in the
+# official repositories. `swift-bin` is an AUR package (a repack of the
+# official swift.org binary tarball), so building webreader from source pulls
+# in an AUR makedepend and roughly a gigabyte of toolchain that is of no use
+# after the build. Users on a plain `pacman`/`makepkg` workflow with no AUR
+# helper will feel that.
+#
+# The way to spare them is a companion `webreader-bin` package that ships a
+# prebuilt x86_64 binary from a GitHub release, depends only on gtk4 and
+# webkitgtk-6.0, and has no makedepends at all. That package is not written
+# yet; this comment exists so the option is on the record rather than
+# rediscovered later.
+#
+# Runtime deps are repo-only either way: gtk4 and webkitgtk-6.0 are both in
+# [extra]. Nothing about installing this package changes your default browser.
+
+pkgname=webreader
+pkgver=0.10.1
+pkgrel=1
+pkgdesc='Distraction-free reader view for the web (GTK4 / WebKitGTK)'
+arch=('x86_64')
+url='https://github.com/yepzdk/Webreader'
+license=('MIT')
+depends=('gtk4' 'webkitgtk-6.0')
+makedepends=('git' 'swift-bin')
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+# VCS source: the tag identifies the tree, so a checksum would be redundant.
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname"
+  swift build -c release --disable-sandbox
+}
+
+package() {
+  cd "$pkgname"
+
+  install -Dm755 ".build/release/webreader" "$pkgdir/usr/bin/webreader"
+
+  install -Dm644 "Linux/dk.yepz.webreader.desktop" \
+    "$pkgdir/usr/share/applications/dk.yepz.webreader.desktop"
+
+  # The only artwork in the repo is a 1024x1024 PNG extracted from
+  # App/AppIcon.icns. hicolor's index.theme stops at 512x512, so the themed
+  # copy alone is not guaranteed to be resolved by every icon loader; the
+  # /usr/share/pixmaps copy is the unthemed fallback the Icon Theme
+  # Specification always searches, and it makes the icon show up regardless.
+  install -Dm644 "Linux/dk.yepz.webreader.png" \
+    "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/dk.yepz.webreader.png"
+  install -Dm644 "Linux/dk.yepz.webreader.png" \
+    "$pkgdir/usr/share/pixmaps/dk.yepz.webreader.png"
+
+  # WebReader itself is MIT. The reader view is powered by Mozilla Readability
+  # (mozilla/readability 0.6.0), vendored as string constants in
+  # Sources/ReaderKit/ReadabilityJS.swift and therefore compiled into the
+  # binary we ship, so its Apache-2.0 terms travel with the package.
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 /dev/stdin \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.readability" <<'EOF'
+Portions of this software — the reader-view extraction code — are derived from
+Mozilla Readability (https://github.com/mozilla/readability), tag 0.6.0,
+originally Arc90 Inc's readability.js, Copyright (c) 2010 Arc90 Inc.
+
+That code is vendored into Sources/ReaderKit/ReadabilityJS.swift and is
+licensed under the Apache License, Version 2.0:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+The full Apache-2.0 text is available from the URL above and in
+/usr/share/licenses/common/APACHE/license.txt on Arch systems with the
+`licenses` package installed. The upstream copyright and licence header is
+preserved verbatim in the vendored source.
+
+All other parts of WebReader are MIT licensed; see LICENSE in this directory.
+EOF
+}

@@ -6,12 +6,22 @@ import Foundation
 /// Appearance is NOT here — it belongs in the Aa popover, next to the text it changes. This
 /// page is the one thing that has nowhere else to live: a list of feeds, which is data the
 /// user manages rather than a control they nudge while reading.
+///
+/// The keyboard shortcut reference at the bottom is here for the same reason, from the
+/// other direction: the GTK host has no menu bar, so there is nowhere else to read the
+/// chords off. It is static text, and `platform` picks which column of them to print.
 public enum SettingsPage {
+    /// `platform` selects the font stacks and the keyboard chords the shortcut section
+    /// lists, defaulting to macOS so the AppKit host needs no argument; a GTK host passes
+    /// `.linux`. `palette` is the desktop palette for `Theme.auto`, nil by default so the
+    /// `prefers-color-scheme` fallback stands.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
-                            suggestions: SuggestionSettings = SuggestionSettings()) -> String {
+                            suggestions: SuggestionSettings = SuggestionSettings(),
+                            platform: Platform = .macOS,
+                            palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
-        let sans = ReaderSettings.FontFamily.sans.css
+        let sans = platform.sansStack
         let sourceRows = suggestions.sources.isEmpty
             ? "<p class=\"empty\">No sources. Suggestions stay empty until you add one.</p>"
             : suggestions.sources.map(row).joined(separator: "\n        ")
@@ -52,7 +62,8 @@ public enum SettingsPage {
         <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
         <style>
-          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
+                                                      palette: palette), by: 10))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {
@@ -117,6 +128,22 @@ public enum SettingsPage {
           .langs { display: flex; flex-wrap: wrap; gap: 8px 18px; }
           .lang { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
           .lang input { accent-color: var(--accent); }
+          /* The shortcut reference: a list you read, so plain markup — nothing in it is a
+             control, which is why the section needs no script and no host of its own. The
+             columns carry no gap so the hairline is one rule across the row, as the source
+             rows above are; the chord column keeps its distance with padding instead. */
+          .keys { display: grid; grid-template-columns: 1fr auto; margin: 0; }
+          .keys dt, .keys dd {
+            margin: 0; padding: 10px 2px; font-size: 14px;
+            border-bottom: 1px solid var(--border);
+          }
+          .keys dd { padding-left: 16px; text-align: right; }
+          .key-note { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
+          kbd {
+            font-family: ui-monospace, SFMono-Regular, Menlo, "DejaVu Sans Mono", monospace;
+            font-size: 12px; padding: 1px 6px; white-space: nowrap;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+          }
           .done {
             margin-top: 36px; padding: 8px 14px;
             font-family: inherit; font-size: 13px; color: var(--fg);
@@ -147,6 +174,8 @@ public enum SettingsPage {
             \(languageSection)
 
             \(blockedSection)
+
+            \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
 
             <button class="done" id="done">Done</button>
           </main>
@@ -306,6 +335,86 @@ public enum SettingsPage {
             \(removeIcon)
           </button>
         </div>
+        """
+    }
+
+    /// A host command and the chords that invoke it, both platforms in the same row.
+    ///
+    /// The two sets genuinely differ — Linux stays on Ctrl so it never reaches for a key
+    /// Hyprland has already taken on Super — and two hand-written lists would be two
+    /// things to forget, so the page picks a column out of one table exactly as the font
+    /// stacks pick a stack out of `Platform`.
+    ///
+    /// Chords are held one per element rather than as a single "A / B / C" string so each
+    /// renders as its own `<kbd>` and the separator stays a rendering decision.
+    struct Shortcut {
+        let action: String
+        let macOS: [String]
+        let linux: [String]
+        /// Set where the chord belongs to the web view rather than to us, so the row can
+        /// say so instead of implying a binding the host never registers.
+        var linuxNote: String? = nil
+
+        func chords(for platform: Platform) -> [String] {
+            switch platform {
+            case .macOS: return macOS
+            case .linux: return linux
+            }
+        }
+
+        func note(for platform: Platform) -> String? {
+            switch platform {
+            case .macOS: return nil
+            case .linux: return linuxNote
+            }
+        }
+    }
+
+    /// Every host command, in the order the macOS menu bar lists them. The Linux column is
+    /// the accelerator table in `WebReaderGTK.Application.Command`; keep the two together.
+    static let shortcuts: [Shortcut] = [
+        Shortcut(action: "Open URL from clipboard", macOS: ["⇧⌘O"], linux: ["Ctrl+Shift+O"]),
+        Shortcut(action: "Toggle reader view", macOS: ["⇧⌘R"], linux: ["Ctrl+Shift+R"]),
+        Shortcut(action: "Home (start page)", macOS: ["⇧⌘H"], linux: ["Ctrl+Shift+H"]),
+        Shortcut(action: "Copy current URL", macOS: ["⇧⌘C"], linux: ["Ctrl+Shift+C"]),
+        Shortcut(action: "Settings", macOS: ["⌘,"], linux: ["Ctrl+,"]),
+        Shortcut(action: "Reload", macOS: ["⌘R"], linux: ["Ctrl+R"]),
+        Shortcut(action: "Zoom in / out / reset",
+                 macOS: ["⌘+", "⌘−", "⌘0"], linux: ["Ctrl++", "Ctrl+−", "Ctrl+0"]),
+        // Not a host action on Linux at all: the web view already does this, and listing
+        // the chords without saying whose they are would read as an app binding.
+        Shortcut(action: "Back / forward", macOS: ["⌘[", "⌘]"], linux: ["Alt+←", "Alt+→"],
+                 linuxNote: "Handled by WebKitGTK, not bound by the app."),
+    ]
+
+    /// The shortcut reference, in the chords of the platform the page is being rendered
+    /// for. Static markup on purpose: this is a list you consult, not a control you use,
+    /// so it costs neither a script message handler nor a line of host code on either side.
+    ///
+    /// It comes after the sources, languages and blocked outlets because those are what
+    /// someone opened Settings to change; a reference belongs below the things you act on.
+    static func shortcutSection(platform: Platform) -> String {
+        // The one sentence the section owes the reader, and on Linux it is the whole
+        // reason the section exists: the GTK host has no menu bar to read the chords off.
+        let help = platform == .linux
+            ? "The Linux app has no menu bar, so its keyboard shortcuts are listed here."
+            : "The same commands are in the menu bar; this is the whole list."
+        // Ours, not anyone's feed — but escaped along the same route as everything else on
+        // the page, so no reader has to work out why this one string is the exception.
+        let rows = shortcuts.map { shortcut -> String in
+            let keys = shortcut.chords(for: platform)
+                .map { "<kbd>\(HTML.escape($0))</kbd>" }
+                .joined(separator: " / ")
+            let note = shortcut.note(for: platform)
+                .map { "<span class=\"key-note\">\(HTML.escape($0))</span>" } ?? ""
+            return "<dt>\(HTML.escape(shortcut.action))</dt>\n<dd>\(keys)\(note)</dd>"
+        }
+        return """
+        <h2 class="section">Keyboard shortcuts</h2>
+        <p class="help">\(HTML.escape(help))</p>
+        <dl class="keys">
+          \(ReaderChrome.indent(rows.joined(separator: "\n"), by: 2))
+        </dl>
         """
     }
 

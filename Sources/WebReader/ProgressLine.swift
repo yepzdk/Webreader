@@ -6,9 +6,9 @@ import ReaderKit
 /// as soon as a load starts, grows with `estimatedProgress`, then fills and fades out.
 /// The fraction math is the pure `LoadProgress`; this is only the view and animation.
 final class ProgressLine {
-    /// A literal 1px reads as nothing on Retina; 2.5 registers as "loading". Matches the
-    /// reader page's own scroll-progress line (`ReaderChrome.progressCSS`).
-    private static let height: CGFloat = 2.5
+    /// One shared value with the reader page's own scroll-progress line
+    /// (`ReaderChrome.progressCSS`): both read `LoadProgress.lineThickness`.
+    private static let height = CGFloat(LoadProgress.lineThickness)
 
     private let bar = NSView()
     private unowned let container: NSView

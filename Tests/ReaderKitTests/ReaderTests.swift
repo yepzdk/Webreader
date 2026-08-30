@@ -329,7 +329,7 @@ final class ReaderPageTests: XCTestCase {
         // reads as a stuck load.
         XCTAssertTrue(html.contains("background: var(--fg);"))
         // Matches the native load line's height so the two read as one idiom.
-        XCTAssertTrue(html.contains("height: 2.5px;"))
+        XCTAssertTrue(html.contains("height: \(LoadProgress.lineThickness)px;"))
         // Decorative: a scroll fraction is nothing for a screen reader to announce.
         XCTAssertTrue(html.contains("aria-hidden=\"true\"></div>"))
     }
@@ -360,7 +360,7 @@ final class ReaderPageTests: XCTestCase {
     func testProgressBarSitsBelowThePopovers() {
         // An open popover must not be crossed by the colored line: controls are z-index 10.
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains("height: 2.5px; z-index: 9;"))
+        XCTAssertTrue(html.contains("height: \(LoadProgress.lineThickness)px; z-index: 9;"))
         XCTAssertTrue(html.contains("right: 14px; z-index: 10;"))
     }
 
@@ -412,5 +412,104 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.hasPrefix("<!doctype html>"))
         XCTAssertTrue(html.contains("<html lang=\"en\">"))
         XCTAssertTrue(html.hasSuffix("</html>"))
+    }
+
+    func testHideAffordanceIsWiredIntoThePage() {
+        // The floating "Hide text" button is created by its own script, so the page carries
+        // no markup for it — both halves have to be interpolated or it silently never
+        // appears. HiddenPhrasesTests owns its behaviour; this only guards the wiring.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("#readerHideBtn {"))
+        XCTAssertTrue(html.contains("messageHandlers.readerHide.postMessage"))
+    }
+}
+
+// MARK: - Per-platform font stacks (#16)
+
+/// `Platform` is a value rather than `#if os(...)` precisely so both platforms' stacks can
+/// be asserted from whichever OS runs the suite. None of these tests is conditional on the
+/// compiling OS; if one ever has to be, the abstraction has failed.
+final class PlatformFontStackTests: XCTestCase {
+    func testMacOSStacksAreUnchangedAppleFaces() {
+        XCTAssertEqual(Platform.macOS.serifStack, "ui-serif, \"New York\", Georgia, serif")
+        XCTAssertEqual(Platform.macOS.sansStack,
+                       "-apple-system, BlinkMacSystemFont, \"Helvetica Neue\", Arial, sans-serif")
+    }
+
+    func testLinuxStacksNameFacesThatResolveOnArch() {
+        // Noto Serif leads because it ships a real Bold, which the medium-weight quotation
+        // styling needs; Liberation is the everywhere-installed fallback behind it.
+        XCTAssertEqual(Platform.linux.serifStack, "\"Noto Serif\", \"Liberation Serif\", serif")
+        // Adwaita Sans is GTK4's UI font — the Linux counterpart to -apple-system.
+        XCTAssertEqual(Platform.linux.sansStack, "\"Adwaita Sans\", \"Noto Sans\", sans-serif")
+    }
+
+    func testLinuxStacksNameNoAppleFaces() {
+        // An unresolvable name is not a fallback, it's noise: on a stock Arch box every
+        // Apple entry falls through to Liberation, so the chosen type is silently lost.
+        for stack in [Platform.linux.serifStack, Platform.linux.sansStack] {
+            XCTAssertFalse(stack.contains("-apple-system"))
+            XCTAssertFalse(stack.contains("BlinkMacSystemFont"))
+            XCTAssertFalse(stack.contains("New York"))
+            XCTAssertFalse(stack.contains("Helvetica Neue"))
+        }
+    }
+
+    func testFontFamilyResolvesThroughTheGivenPlatform() {
+        XCTAssertEqual(ReaderSettings.FontFamily.serif.css(on: .macOS), Platform.macOS.serifStack)
+        XCTAssertEqual(ReaderSettings.FontFamily.sans.css(on: .macOS), Platform.macOS.sansStack)
+        XCTAssertEqual(ReaderSettings.FontFamily.serif.css(on: .linux), Platform.linux.serifStack)
+        XCTAssertEqual(ReaderSettings.FontFamily.sans.css(on: .linux), Platform.linux.sansStack)
+    }
+}
+
+/// The generated pages honour the platform they're asked for, and default to macOS so the
+/// AppKit host's call sites keep compiling untouched.
+final class PlatformPageTests: XCTestCase {
+    private let article = Article(title: "T", byline: "By A", siteName: "S",
+                                  content: "<p>x</p>")
+
+    func testReaderPageDefaultsToTheMacOSStacks() {
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("--reader-font: \(Platform.macOS.serifStack);"))
+        XCTAssertTrue(html.contains(Platform.macOS.sansStack))
+    }
+
+    func testLinuxReaderPageCarriesBothLinuxStacksAndNoAppleOne() {
+        let html = ReaderPage.html(article: article, platform: .linux)
+        // The reading font baked into the palette, and the chrome/meta sans beside it.
+        XCTAssertTrue(html.contains("--reader-font: \(Platform.linux.serifStack);"))
+        XCTAssertTrue(html.contains(Platform.linux.sansStack))
+        XCTAssertFalse(html.contains("-apple-system"))
+        XCTAssertFalse(html.contains("BlinkMacSystemFont"))
+        XCTAssertFalse(html.contains("Helvetica Neue"))
+    }
+
+    func testLinuxSerifStackReachesThePopoverFontMap() {
+        // The "Aa" popover re-sets --reader-font from its own FONTS map, so a stack that is
+        // only right in the stylesheet reverts to Apple faces the moment a setting is
+        // nudged. This is the assertion that would have caught that.
+        let html = ReaderPage.html(article: article, platform: .linux)
+        XCTAssertTrue(html.contains("var FONTS = { serif: '\(Platform.linux.serifStack)', "
+                                    + "sans: '\(Platform.linux.sansStack)' };"))
+    }
+
+    func testOfflinePageHonoursThePlatform() {
+        let mac = OfflineFallback.html(appName: "Reader", host: "example.com", kind: .offline)
+        XCTAssertTrue(mac.contains("font: 15px/1.5 \(Platform.macOS.sansStack);"))
+        let linux = OfflineFallback.html(appName: "Reader", host: "example.com", kind: .offline,
+                                         platform: .linux)
+        XCTAssertTrue(linux.contains("font: 15px/1.5 \(Platform.linux.sansStack);"))
+        XCTAssertFalse(linux.contains("-apple-system"))
+    }
+
+    func testStartAndSettingsPagesHonourThePlatform() {
+        let start = StartPage.html(appName: "Reader", platform: .linux)
+        XCTAssertTrue(start.contains(Platform.linux.sansStack))
+        XCTAssertFalse(start.contains("-apple-system"))
+
+        let settings = SettingsPage.html(appName: "Reader", platform: .linux)
+        XCTAssertTrue(settings.contains(Platform.linux.sansStack))
+        XCTAssertFalse(settings.contains("-apple-system"))
     }
 }
