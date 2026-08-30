@@ -238,7 +238,10 @@ final class Application {
         case settings = "settings"
 
         /// `gtk_accelerator_parse` syntax: character keys are spelled by keyval name, so
-        /// `plus`, `minus` and `comma` rather than the symbols.
+        /// `plus`, `minus` and `comma` rather than the symbols. All nine parse — checked
+        /// against `gtk_shortcut_trigger_parse_string`, which shares that parser — and none
+        /// needs a `<Shift>` it does not name: where a layout puts `+` behind Shift, GDK
+        /// reports Shift as *consumed* by the translation and drops it before matching.
         var accelerator: String {
             switch self {
             case .toggleReader: return "<Control><Shift>r"
@@ -255,9 +258,24 @@ final class Application {
     }
 
     /// One `GSimpleAction` per command on the application's `GActionMap`, each with its
-    /// accelerator. This — rather than a `GtkShortcutController` — is the path that fires
-    /// while the web view holds focus, because application accels are handled at the global
-    /// capture stage; a shortcut controller is for widget-local chords.
+    /// accelerator. No `GtkShortcutController` is built here and none is needed, because
+    /// this *is* the shortcut-controller path: `gtk_window_set_application` gives every
+    /// window a `gtk_shortcut_controller_new_for_model` over the application's accels,
+    /// scoped `GTK_SHORTCUT_SCOPE_GLOBAL` in `GTK_PHASE_CAPTURE` (gtkwindow.c). Capture
+    /// runs from the window *down* to the focus widget, so an application accel is matched
+    /// before the `WebKitWebView` is offered the key. Runtime-verified on Hyprland: all
+    /// nine chords fire with the view focused, and installing a second global controller by
+    /// hand changes nothing — `gtk_shortcut_trigger_parse_string` builds the same
+    /// `GtkKeyvalTrigger`, matched by the same `gdk_key_event_matches`, and GTK stops at the
+    /// first shortcut that handles the key, so neither does it double-fire.
+    ///
+    /// A `<Shift>` chord that looks dead under `wtype` is an artifact of that injector, not
+    /// a bug here. `wtype` uploads a synthetic keymap whose letter key carries the
+    /// *unshifted* keysym at every level, so `wtype -M ctrl -M shift -k r` delivers keyval
+    /// `r` with Shift set where a real Ctrl+Shift+R delivers `R`; `gdk_key_event_matches`
+    /// upper-cases the accel's keyval whenever the accel carries Shift, so it looks for `R`
+    /// and the injected `r` cannot match. Verify these chords with a real key press or with
+    /// `hyprctl dispatch 'hl.dsp.send_shortcut{ mods = "CTRL SHIFT", key = "r" }'`.
     private func registerCommands() {
         // One handler for all of them, dispatching on the action's own name, so the table
         // above stays the single place a binding is described.

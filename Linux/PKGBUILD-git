@@ -1,0 +1,118 @@
+# Maintainer: yepzdk <https://github.com/yepzdk>
+#
+# VCS package: builds WebReader from the tip of the default branch with SwiftPM.
+#
+# THIS IS THE VARIANT THAT WORKS TODAY. The Linux (GTK4 / WebKitGTK) host landed
+# after v0.10.1, so no existing tag contains it — `git ls-tree -r --name-only
+# v0.10.1 | grep WebReaderGTK` matches nothing. The release PKGBUILD next to this
+# file targets v0.11.0 and only becomes usable once that tag exists. Until then,
+# build this one.
+#
+# For the AUR this file is the `webreader-git` package and belongs in its own AUR
+# repository, renamed to `PKGBUILD`. `makepkg` only reads a file with that exact
+# name, so build it as:
+#
+#     install -Dm644 PKGBUILD-git /some/scratch/dir/PKGBUILD && cd /some/scratch/dir && makepkg
+#
+# A note on the build dependency, because it is the real cost of this package:
+# WebReader is written in Swift, and Arch has no Swift toolchain in the official
+# repositories. `swift-bin` is an AUR package (a repack of the official swift.org
+# binary tarball), so building webreader from source pulls in an AUR makedepend
+# and roughly a gigabyte of toolchain that is of no use after the build. Users on
+# a plain `pacman`/`makepkg` workflow with no AUR helper will feel that. The way
+# to spare them is a companion `webreader-bin` package that ships a prebuilt
+# x86_64 binary from a GitHub release and has no makedepends at all; that package
+# is not written yet, and it needs a release to exist first.
+#
+# Runtime deps are repo-only: gtk4 and webkitgtk-6.0 are both in [extra].
+# Nothing about installing this package changes your default browser.
+
+pkgname=webreader-git
+_pkgname=webreader
+pkgver=0.10.1.r4.ga07ef2b
+pkgrel=1
+pkgdesc='Distraction-free reader view for the web (GTK4 / WebKitGTK) - git tip'
+arch=('x86_64')
+url='https://github.com/yepzdk/Webreader'
+license=('MIT')
+depends=('gtk4' 'webkitgtk-6.0')
+makedepends=('git' 'swift-bin')
+provides=('webreader')
+conflicts=('webreader')
+# No `#fragment=`: this tracks the default branch, which is where the Linux host
+# lives. A checksum on a moving target would be meaningless.
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  # Arch VCS convention: 0.10.1.r4.ga07ef2b — last tag, commits since, short sha.
+  # `git describe` fails outright in a clone with no reachable tag, so fall back
+  # to the tagless r<count>.<sha> form rather than emitting an empty pkgver.
+  local desc
+  if desc=$(git describe --long --tags 2>/dev/null); then
+    printf '%s' "$desc" | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  fi
+}
+
+build() {
+  cd "$_pkgname"
+  # --disable-sandbox: SwiftPM's sandbox is macOS-only in effect, but the flag
+  # also stops it from trying to sandbox plugin/manifest evaluation, which is the
+  # part that trips over makepkg's read-only expectations. Harmless here, and it
+  # keeps the command identical to the one CI and install-local.sh use.
+  swift build -c release --disable-sandbox
+}
+
+package() {
+  cd "$_pkgname"
+
+  # Package.swift names the Linux executable product `webreader` (lowercase) so
+  # the .desktop Exec= line and Hyprland binds invoke it directly.
+  install -Dm755 ".build/release/webreader" "$pkgdir/usr/bin/webreader"
+
+  install -Dm644 "Linux/dk.yepz.webreader.desktop" \
+    "$pkgdir/usr/share/applications/dk.yepz.webreader.desktop"
+
+  # The only artwork in the repo is a 1024x1024 PNG extracted from
+  # App/AppIcon.icns. hicolor's index.theme stops at 512x512, so the themed copy
+  # alone is not guaranteed to be resolved by every icon loader; the
+  # /usr/share/pixmaps copy is the unthemed fallback the Icon Theme
+  # Specification always searches, and it makes the icon show up regardless.
+  install -Dm644 "Linux/dk.yepz.webreader.png" \
+    "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/dk.yepz.webreader.png"
+  install -Dm644 "Linux/dk.yepz.webreader.png" \
+    "$pkgdir/usr/share/pixmaps/dk.yepz.webreader.png"
+
+  # WebReader itself is MIT. The reader view is powered by Mozilla Readability
+  # (mozilla/readability 0.6.0), vendored as string constants in
+  # Sources/ReaderKit/ReadabilityJS.swift and therefore compiled into the binary
+  # we ship, so its Apache-2.0 terms travel with the package.
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 /dev/stdin \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.readability" <<'EOF'
+Portions of this software — the reader-view extraction code — are derived from
+Mozilla Readability (https://github.com/mozilla/readability), tag 0.6.0,
+originally Arc90 Inc's readability.js, Copyright (c) 2010 Arc90 Inc.
+
+That code is vendored into Sources/ReaderKit/ReadabilityJS.swift and is
+licensed under the Apache License, Version 2.0:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+The full Apache-2.0 text is available from the URL above and in
+/usr/share/licenses/common/APACHE/license.txt on Arch systems with the
+`licenses` package installed. The upstream copyright and licence header is
+preserved verbatim in the vendored source.
+
+All other parts of WebReader are MIT licensed; see LICENSE in this directory.
+EOF
+}
