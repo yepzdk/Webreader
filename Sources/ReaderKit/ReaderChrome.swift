@@ -642,6 +642,18 @@ enum ReaderChrome {
             'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
             '<path d="M18 6 6 18M6 6l12 12"/></svg>';
 
+          // The only thing in the app that ever sets a thumbnail's src. Rows are rendered
+          // carrying `data-src` and nothing else, so while article images are off the page
+          // asks the publishers for nothing at all — which is what the start page did before
+          // thumbnails existed. Called by `apply`, and again by the start page whenever the
+          // host delivers suggestion rows, which arrive long after this has first run.
+          window.readerRevealThumbs = function () {
+            if (root.getAttribute('data-thumbs') === 'off') { return; }
+            document.querySelectorAll('.recent-thumb').forEach(function (img) {
+              if (!img.getAttribute('src') && img.dataset.src) { img.src = img.dataset.src; }
+            });
+          };
+
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
             root.style.setProperty('--reader-font', FONTS[s.fontFamily]);
@@ -651,17 +663,11 @@ enum ReaderChrome {
             else { root.setAttribute('data-theme', s.theme); }
             if (s.quoteStyle === 'italic') { root.setAttribute('data-quotes', 'italic'); }
             else { root.removeAttribute('data-quotes'); }
-            // Recents thumbnails: the attribute drives the layout (as data-quotes does), and
-            // the src is set here rather than baked into the markup — so with the setting off
-            // the page never asks the publishers for anything, and turning it back on still
-            // works without a re-render.
+            // Article thumbnails: the attribute drives the layout, exactly as data-quotes
+            // does, and `readerRevealThumbs` is the one thing that ever sets a src.
             if (s.startPageImages === 'off') { root.setAttribute('data-thumbs', 'off'); }
-            else {
-              root.removeAttribute('data-thumbs');
-              document.querySelectorAll('.recent-thumb').forEach(function (img) {
-                if (!img.getAttribute('src')) { img.src = img.dataset.src; }
-              });
-            }
+            else { root.removeAttribute('data-thumbs'); }
+            window.readerRevealThumbs();
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });

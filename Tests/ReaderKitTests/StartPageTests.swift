@@ -238,6 +238,34 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(ReaderChrome.recentsRows(history, thumbnails: true).contains("recent-thumb"))
     }
 
+    func testSuggestionRowsGetTheSameThumbnailAsRecents() {
+        let html = StartPage.html(appName: "Reader")
+        // Built by the host callback, since suggestions arrive after the page does.
+        XCTAssertTrue(html.contains("thumb.className = 'recent-thumb'"))
+        XCTAssertTrue(html.contains("thumb.dataset.src = item.image"))
+        XCTAssertTrue(html.contains("thumb.referrerPolicy = 'no-referrer'"))
+        // Never a direct src: whether a thumbnail fetches is decided in one place.
+        XCTAssertFalse(html.contains("thumb.src = item.image"))
+        XCTAssertTrue(html.contains("window.readerRevealThumbs()"))
+    }
+
+    func testOnlyOneFunctionEverTurnsAThumbnailIntoAFetch() {
+        // The invariant behind "images off means the page requests nothing": rows render with
+        // data-src alone, and `readerRevealThumbs` refuses while the setting is off. A second
+        // place setting .src would silently reintroduce the requests.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerRevealThumbs = function ()"))
+        XCTAssertTrue(html.contains("if (root.getAttribute('data-thumbs') === 'off') { return; }"))
+        XCTAssertEqual(html.components(separatedBy: "img.src = img.dataset.src").count - 1, 1)
+    }
+
+    func testSuggestionsReserveTheColumnOnlyWhenTheBatchHasImages() {
+        // Same rule as the server-rendered recents list, so a batch of imageless suggestions
+        // is laid out exactly as it was before thumbnails existed.
+        XCTAssertTrue(StartPage.html(appName: "Reader")
+            .contains("list.classList.toggle('has-thumbs'"))
+    }
+
     func testTheImagesToggleIsOnTheStartPageOnly() {
         let html = StartPage.html(appName: "Reader")
         XCTAssertTrue(html.contains("data-key=\"startPageImages\""))

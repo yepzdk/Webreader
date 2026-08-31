@@ -167,19 +167,22 @@ public enum StartPage {
             white-space: normal;
             display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
           }
-          /* Thumbnails (#25). A grid rather than a flex line, and only in a list that has at
-             least one image: the text column is pinned, so a row whose article named no image
-             still lines its title up with the rest instead of starting 74px to their left.
-             A list with no images at all is laid out exactly as it always was. Scoped to the
-             inline list — the reader's 280px popover has no room and never asks for them. */
-          .recents-inline.has-thumbs .recent {
+          /* Thumbnails (#25), for recents and suggestions alike. A grid rather than a flex
+             line, and only in a list carrying `has-thumbs` — set by the server for recents and
+             by the host's callback for suggestions, in both cases only when something in that
+             list actually has an image. The text column is pinned, so a row whose article
+             named no image still lines its title up with the rest instead of starting 74px to
+             their left, and a list with no images at all is laid out exactly as it always was.
+             This CSS ships on the start page only, so the reader's 280px recents popover —
+             which never carries the class — is untouched either way. */
+          .has-thumbs .recent {
             display: grid; grid-template-columns: 64px 1fr; gap: 0 10px; align-items: start;
           }
-          .recents-inline.has-thumbs .recent-thumb { grid-row: 1 / span 2; }
+          .has-thumbs .recent-thumb { grid-row: 1 / span 2; }
           /* Pinned, or auto-placement would drop an imageless row's title into the 64px
              column and squeeze it. */
-          .recents-inline.has-thumbs .recent-title,
-          .recents-inline.has-thumbs .recent-host { grid-column: 2; }
+          .has-thumbs .recent-title,
+          .has-thumbs .recent-host { grid-column: 2; }
           /* 64x40 rather than a square: a lead image is usually landscape, and this is about
              the height two clamped title lines already take, so rows barely grow. */
           .recent-thumb {
@@ -189,7 +192,7 @@ public enum StartPage {
           /* Article images off: no image, no reserved column, and nothing fetched — the
              appearance script is the only thing that ever sets a src. */
           :root[data-thumbs="off"] .recent-thumb { display: none; }
-          :root[data-thumbs="off"] .recents-inline.has-thumbs .recent { display: block; }
+          :root[data-thumbs="off"] .has-thumbs .recent { display: block; }
           .empty { margin-top: 36px; }
           #suggested[hidden], .empty-suggestions[hidden] { display: none; }
           /* Suggested rows reuse the recents row markup, so they inherit its styling — the
@@ -346,6 +349,19 @@ public enum StartPage {
                 row.className = 'recent';
                 row.type = 'button';
                 row.dataset.url = item.url;
+                // The same thumbnail a recents row gets, and built the same way: the element
+                // carries `data-src` only, so whether it ever fetches is decided in one place
+                // (`readerRevealThumbs`, called below) rather than here.
+                if (item.image) {
+                  var thumb = document.createElement('img');
+                  thumb.className = 'recent-thumb';
+                  thumb.alt = '';
+                  thumb.loading = 'lazy';
+                  thumb.referrerPolicy = 'no-referrer';
+                  thumb.dataset.src = item.image;
+                  thumb.onerror = function () { thumb.remove(); };
+                  row.appendChild(thumb);
+                }
                 var title = document.createElement('span');
                 title.className = 'recent-title';
                 title.textContent = item.title;
@@ -366,6 +382,13 @@ public enum StartPage {
                 wrap.appendChild(actions);
                 list.appendChild(wrap);
               });
+              // Reserve the thumbnail column only when this batch actually brought images,
+              // exactly as the server-rendered recents list does.
+              list.classList.toggle('has-thumbs',
+                (items || []).some(function (item) { return !!item.image; }));
+              // These rows were built after the appearance script last ran, so they need the
+              // one function allowed to turn a data-src into a fetch.
+              if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
               empty.hidden = (items || []).length > 0;
               section.hidden = false;
             };

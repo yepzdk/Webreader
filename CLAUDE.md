@@ -187,6 +187,29 @@ Two SwiftPM targets, no dependencies:
   `ReaderChrome.themeCSS` renders its stylesheet from those values and the native covers read
   the same ones, so a cover cannot be a different colour from the page behind it. Same
   arrangement as `LoadProgress.lineThickness`. A test pins the CSS against the palette.
+- Suggestion thumbnails come from the **feed**, not from the article: a suggested piece has
+  not been visited, so there is no document to read an `og:image` from, and fetching every
+  candidate's page for a thumbnail would be one request per row to publishers the reader
+  never opened. `media:thumbnail` / `media:content` / an image `enclosure` first, then the
+  first `<img>` in the item's summary — Information, The Verge and The New Stack carry no
+  structured tag at all, while The Guardian and Ars Technica carry nothing else. Coverage is
+  genuinely uneven and **wallnot.dk, the shipped default, publishes no images whatsoever**,
+  so imageless rows are the normal case, not an edge case.
+- `Feed.bestImage` picks the **smallest** declared width at or above 128px (a 64px row at 2x),
+  not the first or the largest: The Guardian ships 140/460/700 per item and Ars a 1152px hero,
+  so first-wins is either soft or several hundred KB a row. Measured: 5 KB for the Guardian's
+  140 against 236 KB for The Verge's undeclared original.
+- Feed image URLs go through `unescapeAmpersands`, because The Verge escapes `&` numerically
+  *inside* already-escaped summary HTML — `&amp;` alone leaves `?quality=90&#038;strip=all`,
+  which hands the server a parameter called `#038;strip`.
+- An `<img>` declaring width or height of 1 is skipped: that is a tracking beacon, not a
+  picture.
+- `window.readerRevealThumbs` is the **only** thing that ever sets a thumbnail's `src`, and it
+  refuses while `data-thumbs="off"`. Rows render carrying `data-src` alone — server-side for
+  recents, in the host callback for suggestions — so "images off" really means the page makes
+  no requests. Suggestion rows must still be *built* with the element while the setting is
+  off, or toggling back on leaves a reserved column with nothing to put in it; a test pins
+  that there is exactly one assignment of `src` in the page.
 - A recents row's thumbnail is the article's own `og:image`, captured from the **live**
   document (Readability's result has no image field, and the vendored copy is not ours to
   patch) and stored on `ReaderHistory.Entry`, not in `ArticleCache` — the cache is evictable,

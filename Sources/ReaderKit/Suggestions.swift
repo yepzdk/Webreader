@@ -137,17 +137,25 @@ public struct FeedItem: Equatable, Sendable {
     public let source: String
     public let language: String?
     public let date: Date?
+    /// The article's image as the feed itself declared it, absolute and http(s), or nil when
+    /// the feed named none (#25). Feeds are the only thing we have to go on here: a suggested
+    /// article has not been visited, so there is no document to read an `og:image` from, and
+    /// fetching every candidate's page just for a thumbnail would mean a request per row to
+    /// publishers the reader has not opened.
+    public let image: String?
 
     /// The outlet the row names — and the exact string a block is stored under, so what the
     /// user sees is what they block.
     public var host: String { Suggestions.normalizedHost(URL(string: url)?.host ?? source) }
 
-    public init(title: String, url: String, source: String, language: String? = nil, date: Date? = nil) {
+    public init(title: String, url: String, source: String, language: String? = nil,
+                date: Date? = nil, image: String? = nil) {
         self.title = title
         self.url = url
         self.source = source
         self.language = language
         self.date = date
+        self.image = image
     }
 }
 
@@ -312,6 +320,49 @@ public enum Feed {
                       items: parser.items)
     }
 
+    /// The first `<img>` source in a feed item's summary HTML — Information, The Verge and
+    /// The New Stack put the lead image there and carry no structured image tag at all.
+    ///
+    /// Images declaring a width or height of 1 are skipped: that is the shape of a tracking
+    /// beacon (FeedBurner's, among others), not of an article's picture.
+    static func firstImage(inHTML html: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: "<img\\b[^>]*>",
+                                                   options: [.caseInsensitive])
+        else { return nil }
+        for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            guard let range = Range(match.range, in: html) else { continue }
+            let tag = String(html[range])
+            if numeric("width", in: tag) == 1 || numeric("height", in: tag) == 1 { continue }
+            if let src = attribute("src", in: tag), !src.isEmpty { return src }
+        }
+        return nil
+    }
+
+    /// Picks the image best suited to a 64x40 thumbnail from a feed item's candidates: the
+    /// smallest the feed declares that is still wide enough for a HiDPI row, else the widest
+    /// on offer. The Guardian ships three widths per item (140, 460, 700) and Ars Technica a
+    /// 1152px hero, so "whichever came first" is either visibly soft or several hundred KB
+    /// per row.
+    ///
+    /// A candidate without a declared width loses only to one that qualifies, so a feed that
+    /// declares no sizes still gets a thumbnail.
+    static func bestImage(_ candidates: [(url: String, width: Int?)]) -> String? {
+        let sized = candidates.compactMap { candidate in candidate.width.map { (candidate.url, $0) } }
+        if let fit = sized.filter({ $0.1 >= thumbnailMinimumWidth }).min(by: { $0.1 < $1.1 }) {
+            return fit.0
+        }
+        if let widest = sized.max(by: { $0.1 < $1.1 }) { return widest.0 }
+        return candidates.first?.url
+    }
+
+    /// A 64px row at 2x. Anything narrower is visibly soft.
+    static let thumbnailMinimumWidth = 128
+
+    /// The value of an integer attribute, e.g. `width="1"`.
+    private static func numeric(_ name: String, in tag: String) -> Int? {
+        attribute(name, in: tag).flatMap { Int($0) }
+    }
+
     /// The base language code: "da-DK" → "da". Feeds spell this inconsistently.
     static func baseLanguage(_ raw: String) -> String {
         String(raw.lowercased().prefix { $0 != "-" && $0 != "_" })
@@ -355,10 +406,23 @@ public enum Feed {
         else { return nil }
         for group in 2...3 {
             if let range = Range(match.range(at: group), in: tag) {
-                return String(tag[range]).replacingOccurrences(of: "&amp;", with: "&")
+                return unescapeAmpersands(String(tag[range]))
             }
         }
         return nil
+    }
+
+    /// Every spelling of an escaped ampersand a feed might use, decoded — the only entity that
+    /// actually turns up inside a URL, and it separates query parameters, so leaving it
+    /// encoded hands the server a parameter called `#038;strip`. The Verge's feed escapes it
+    /// numerically inside already-escaped summary HTML, so `&amp;` alone is not enough.
+    private static func unescapeAmpersands(_ value: String) -> String {
+        guard value.contains("&"),
+              let regex = try? NSRegularExpression(pattern: "&(?:amp;|#0*38;|#[xX]0*26;)",
+                                                   options: [.caseInsensitive])
+        else { return value }
+        return regex.stringByReplacingMatches(
+            in: value, range: NSRange(value.startIndex..., in: value), withTemplate: "&")
     }
 }
 
@@ -381,6 +445,13 @@ private final class FeedParser: NSObject, XMLParserDelegate {
     private var text = ""
     /// Atom puts the item link in an attribute, so the text buffer is not the whole story.
     private var atomLink = ""
+    /// Every image the current item declared through a structured tag, with the width the
+    /// feed claimed for it. Collected rather than first-wins, because feeds ship several
+    /// sizes and only one of them suits a thumbnail (`Feed.bestImage`).
+    private var itemImages: [(url: String, width: Int?)] = []
+    /// The lead image found in the item's summary HTML, used only when no structured tag
+    /// offered one.
+    private var itemBodyImage: String?
 
     /// A reading app's suggestion pool, not an archive — a huge feed is truncated.
     private static let maxItems = 100
@@ -423,10 +494,25 @@ private final class FeedParser: NSObject, XMLParserDelegate {
             itemLink = ""
             atomLink = ""
             itemDate = nil
+            itemImages = []
+            itemBodyImage = nil
         case "link" where inItem:
             // Atom: <link rel="alternate" href="…">. Prefer alternate, else the first link.
             let rel = attributes["rel"] ?? "alternate"
             if let href = attributes["href"], rel == "alternate", atomLink.isEmpty { atomLink = href }
+        // Media RSS. The Guardian declares neither `type` nor `medium`, so these are taken as
+        // images unless they say otherwise; a URL that turns out not to be one removes itself
+        // from the page (`onerror`) rather than leaving a broken glyph.
+        case "media:thumbnail", "media:content":
+            guard inItem, let url = attributes["url"] else { break }
+            let kind = (attributes["medium"] ?? attributes["type"] ?? "image").lowercased()
+            guard kind == "image" || kind.hasPrefix("image/") else { break }
+            itemImages.append((url, attributes["width"].flatMap { Int($0) }))
+        // An enclosure carries podcasts and video too, so here the type has to say image.
+        case "enclosure":
+            guard inItem, let url = attributes["url"],
+                  (attributes["type"] ?? "").lowercased().hasPrefix("image/") else { break }
+            itemImages.append((url, attributes["width"].flatMap { Int($0) }))
         default:
             break
         }
@@ -453,6 +539,10 @@ private final class FeedParser: NSObject, XMLParserDelegate {
                 if itemLink.isEmpty, value.hasPrefix("http") { itemLink = value }
             case "pubdate", "published", "updated", "date":
                 if itemDate == nil { itemDate = Self.date(from: value) }
+            case "description", "summary", "content", "content:encoded":
+                // Escaped or CDATA-wrapped HTML; either way the buffer holds real markup by
+                // the time it gets here.
+                if itemBodyImage == nil { itemBodyImage = Feed.firstImage(inHTML: value) }
             case "item", "entry":
                 inItem = false
                 let link = itemLink.isEmpty ? atomLink : itemLink
@@ -461,7 +551,7 @@ private final class FeedParser: NSObject, XMLParserDelegate {
                       items.count < Self.maxItems else { return }
                 items.append(FeedItem(title: itemTitle, url: url.absoluteString,
                                       source: channelTitle, language: channelLanguage.map(Feed.baseLanguage),
-                                      date: itemDate))
+                                      date: itemDate, image: resolvedImage()))
             default:
                 break
             }
@@ -472,6 +562,19 @@ private final class FeedParser: NSObject, XMLParserDelegate {
         case "language": if channelLanguage == nil, !value.isEmpty { channelLanguage = value }
         default: break
         }
+    }
+
+    /// The current item's thumbnail: the best structured candidate, else the summary's lead
+    /// image. Absolutised against the feed (feeds do carry relative image paths) and limited
+    /// to http(s) — the value is somebody else's markup and nothing else belongs in an
+    /// `<img src>`.
+    private func resolvedImage() -> String? {
+        guard let raw = Feed.bestImage(itemImages) ?? itemBodyImage,
+              let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines),
+                            relativeTo: feedURL)?.absoluteURL,
+              url.scheme == "http" || url.scheme == "https"
+        else { return nil }
+        return url.absoluteString
     }
 
     private static func date(from value: String) -> Date? {

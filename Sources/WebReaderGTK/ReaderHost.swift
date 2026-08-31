@@ -907,7 +907,11 @@ final class ReaderHost {
     private func showSuggestions(_ items: [FeedItem]) {
         // The page may have been replaced while the feeds were in flight.
         guard isShowingStartPage else { return }
-        let rows = items.map { ["title": $0.title, "url": $0.url, "source": $0.host] }
+        let rows: [[String: String]] = items.map { item in
+            var row = ["title": item.title, "url": item.url, "source": item.host]
+            if let image = item.image { row["image"] = image }
+            return row
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [])
         else { return }
         let literal = HTML.jsLiteral(String(decoding: data, as: UTF8.self))
