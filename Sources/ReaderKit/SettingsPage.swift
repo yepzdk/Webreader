@@ -7,6 +7,11 @@ import Foundation
 /// page is the one thing that has nowhere else to live: a list of feeds, which is data the
 /// user manages rather than a control they nudge while reading.
 ///
+/// Getting back out is the top-left nav slot every other page uses (`ReaderChrome.navHome`),
+/// not a button at the end of the document. There used to be a "Done" below the shortcut
+/// table; it committed nothing — every change here posts the moment it is made — and on a page
+/// with a few sources it sat below the fold, so the only way home was off screen (#15).
+///
 /// The keyboard shortcut reference at the bottom is here for the same reason, from the
 /// other direction: the GTK host has no menu bar, so there is nowhere else to read the
 /// chords off. It is static text, and `platform` picks which column of them to print.
@@ -64,6 +69,7 @@ public enum SettingsPage {
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body {
@@ -144,16 +150,10 @@ public enum SettingsPage {
             font-size: 12px; padding: 1px 6px; white-space: nowrap;
             background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
           }
-          .done {
-            margin-top: 36px; padding: 8px 14px;
-            font-family: inherit; font-size: 13px; color: var(--fg);
-            background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-            cursor: pointer;
-          }
-          .done:hover { background: var(--surface); }
         </style>
         </head>
         <body>
+          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
           <main>
             <h1>Settings</h1>
             <p class="lede">Sources feed the suggestions on the start page.</p>
@@ -176,8 +176,6 @@ public enum SettingsPage {
             \(blockedSection)
 
             \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
-
-            <button class="done" id="done">Done</button>
           </main>
           <script>
           (function () {
@@ -278,10 +276,6 @@ public enum SettingsPage {
                 post('readerSetLanguages', checked.map(function (input) { return input.value; }));
               });
             }
-
-            document.getElementById('done').addEventListener('click', function () {
-              post('readerHome', '');
-            });
 
             // Called by the host once it has fetched (or failed to fetch) the address.
             window.readerSourceAdded = function (source) {

@@ -158,8 +158,8 @@ Two SwiftPM targets, no dependencies:
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.
 - The chrome is **two fixed corners on one baseline**: `.reader-controls` top-right, and
-  `.reader-nav` top-left holding exactly one button (Home on the reader and
-  offline pages, Settings on the start page, which *is* home). Both declare `top: 14px` and
+  `.reader-nav` top-left holding exactly one button (Home on the reader, settings and offline
+  pages; Settings on the start page, which *is* home). Both declare `top: 14px` and
   share one `buttonBox` declaration, so a button on one side cannot drift from the other; a
   test pins both. The nav slot is deliberately NOT a second `.reader-controls` —
   `controlsScript` dismisses an open popover on any click outside that class, and reusing it
@@ -168,6 +168,10 @@ Two SwiftPM targets, no dependencies:
 - `readerHome` is reachable from any page of ours **and** the offline page (`ownPage ||
   isShowingFallback`), not just Settings. Try Again retries the URL that failed, so without
   Home the offline page was a dead end — and on Linux there is no menu bar to escape through.
+- The settings page has **no "Done"**. It had one, after the shortcut table, and with a handful
+  of sources it sat below the fold: the only route home was off screen. It also committed
+  nothing — every change on that page posts the moment it is made — so the label promised a
+  transaction that does not exist. The nav slot is the one way out, as on every other page.
 - The loading cover is **native, not a generated page**. A `loadHTMLString` cover would be a
   real back/forward entry between every pair of pages; `PageState.navigationStarted()`
   early-returns while a load of ours is pending, so the real navigation's completion would be

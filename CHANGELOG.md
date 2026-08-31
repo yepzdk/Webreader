@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rows, the appearance controls — instead of stopping at the URL field.
 
 ### Added
-- **A way home** (#15). The reader, and the offline page, now carry a Home button in the
+- **A way home** (#15). The reader, settings and offline pages now carry a Home button in the
   top-left corner, aligned with the controls opposite it. On the start page that slot holds
-  Settings, which moves up from the bottom-left corner.
+  Settings, which moves up from the bottom-left corner. Settings loses its "Done" button: it
+  sat below the fold and committed nothing, since changes there apply as you make them.
 - **A loading screen** (#24). While a page loads, WebReader shows a plain "Loading" screen
   with the progress line at the top instead of letting the original site paint itself only
   to be replaced by the reader a moment later. A highlight travels across the word while the
