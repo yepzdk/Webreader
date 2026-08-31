@@ -22,6 +22,16 @@ public enum LoadProgress: Equatable {
     /// What the loading cover says while a page is on its way (#24). One string, so the two
     /// hosts' native covers can't word it differently.
     public static let coverLabel = "Loading"
+    /// Point size of that label. Matches `OfflineFallback`'s headline, the app's other
+    /// full-window message, so the two read as the same kind of screen.
+    public static let coverLabelSize: Double = 20
+    /// Seconds for one pass of the highlight across the label. Slow enough to read as "still
+    /// working" rather than as a flicker.
+    public static let coverShimmerPeriod: Double = 1.6
+    /// Width of the highlight ramp, as a multiple of the label's own width. The label is
+    /// painted in `--muted` and the band that travels over it in `--fg`; both hosts derive
+    /// their gradient from these two numbers, so neither can shimmer at its own speed.
+    public static let coverShimmerSpread: Double = 1.25
     /// At/above this, treat the load as finished (WebKit reports 1.0 on completion).
     static let completeThreshold = 1.0
 

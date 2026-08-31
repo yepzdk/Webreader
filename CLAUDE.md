@@ -224,6 +224,26 @@ Two SwiftPM targets, no dependencies:
   text column pinned: an article that named no image still lines its title up with the rest.
   A flex row would have moved `.recent-host` from below the title to beside it, and `float`
   cannot work because the clamped title is a `-webkit-box`.
+- A row in such a list whose article named no image gets `thumbnailPlaceholder` — the same box
+  in `--surface` with a quiet picture glyph — not a gap. Coverage is uneven by nature, so
+  lists normally mix the two and a blank column reads as a failed load. A list where *nothing*
+  has an image gets neither images nor placeholders and is laid out exactly as before, which
+  is also the state right after upgrading. A failed image swaps itself for the placeholder
+  rather than leaving the browser's broken-image glyph.
+- The placeholder markup is one Swift constant, handed to the page script through
+  `HTML.jsString` so the server-rendered recents rows and the host-delivered suggestion rows
+  cannot drift. `HTML.jsLiteral` is NOT interchangeable: it takes an already-serialised
+  expression and does not quote, so a bare string through it emits raw markup mid-statement
+  (which is exactly the `SyntaxError` it caused first time round).
+- The cover's label is a `CAGradientLayer` masked by a `CATextLayer` on macOS and cairo text
+  filled with a moving linear gradient on Linux, both driven by `LoadProgress.coverLabelSize`
+  / `coverShimmerPeriod` / `coverShimmerSpread` so neither host shimmers at its own speed.
+  Sweeping the stops past both ends works because a gradient layer (and `CAIRO_EXTEND_PAD`)
+  holds its end colours, so the word stays fully painted in `--muted` and only the `--fg`
+  band moves. The CSS equivalent, `background-clip: text`, goes *transparent* past the ends
+  and has to tile the gradient to avoid the word vanishing — worth knowing if this is ever
+  ported to a page. Both hosts hold the label still when the system asks for reduced motion,
+  and stop the animation when the cover comes down.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
 - `ProgressLine.height` and `ReaderChrome.progressCSS` both read
   `LoadProgress.lineThickness` — one constant, so a new host can't drift. The two lines are

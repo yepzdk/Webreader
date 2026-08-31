@@ -2,71 +2,82 @@ import CWebKitGTK
 import ReaderKit
 
 /// The plain screen shown in place of a site while it loads (#24). The GTK counterpart of the
-/// AppKit host's `LoadingCover`: solid page background, the word "Loading" in the secondary
-/// text colour, and nothing else — the top-edge progress hairline carries the rest.
+/// AppKit host's `LoadingCover`: the page background, and the word "Loading" in the secondary
+/// text colour with a brighter band travelling across it — which is what says "still working"
+/// on a screen that is otherwise completely still. The top-edge progress hairline carries the
+/// rest.
 ///
-/// Native rather than a generated page for the reasons spelled out in the AppKit
-/// counterpart, and with one more that is specific to this host: `webkit_web_view_load_html`
-/// reports the `base_uri` as the view's URI, so an extra own-document load is exactly the
-/// hazard `PageState.willShow` exists to disambiguate. An overlay child sidesteps the whole
-/// question.
+/// Native rather than a generated page for the reasons spelled out in the AppKit counterpart,
+/// and with one more specific to this host: `webkit_web_view_load_html` reports the `base_uri`
+/// as the view's URI, so an extra own-document load is exactly the hazard `PageState.willShow`
+/// exists to disambiguate. An overlay child sidesteps the question.
 ///
-/// A single `GtkLabel`, not a box wrapping one: with `hexpand`/`vexpand` set and the default
-/// FILL alignment the label spans the overlay, and a label already centres its own text.
-///
-/// Must be kept alive for the window's lifetime, like `ProgressStrip`.
+/// A `GtkDrawingArea` drawn with cairo rather than a `GtkLabel`: the shimmer needs the text
+/// filled with a moving gradient, which no label property offers. Same shape as
+/// `ProgressStrip` — a draw function plus a `g_timeout` — and the same lifetime rule: it must
+/// be kept alive for the window's lifetime, because `self` reaches the callbacks unretained.
 final class LoadingCover {
     /// How long the cover waits before revealing the page regardless. Extraction has no
     /// timeout and neither does WebKit's FINISHED: a page that never settles must not leave
     /// "Loading" on screen for good.
     private static let patienceMS: UInt32 = 10_000
+    /// Repaint cadence of the shimmer, matching `ProgressStrip`'s fade.
+    private static let frameMS: UInt32 = 16
 
-    private static let cssClass = "webreader-loading-cover"
-
-    private let label: UnsafeMutablePointer<GtkWidget>
-    /// This cover's own provider, reloaded on every `show` so the cover matches the theme the
-    /// page it precedes will paint. Added to the display once — adding per show would stack
-    /// duplicate providers, which is what `ProgressStrip.installStyle` guards against.
-    private let provider: OpaquePointer
-    /// The watchdog's `g_timeout_add` id, 0 when none is armed.
+    private let area: UnsafeMutablePointer<GtkWidget>
+    /// The `g_timeout_add` ids, 0 when not armed.
     private var watchdog: UInt32 = 0
+    private var ticker: UInt32 = 0
+
+    /// Where the highlight is in its cycle: 0 puts it entirely off the label's left edge,
+    /// `1 + spread` entirely off the right, so one cycle is one clean pass.
+    private var phase: Double = 0
+    private var background = GdkRGBA()
+    private var base = GdkRGBA()
+    private var highlight = GdkRGBA()
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
     /// that changes what's on screen, so they must be idempotent.
     private(set) var isVisible = false
 
     init(overlay: OpaquePointer) {
-        let label = gtk_label_new(LoadProgress.coverLabel)!
-        self.label = label
-        gtk_widget_add_css_class(label, Self.cssClass)
+        let area = gtk_drawing_area_new()!
+        self.area = area
         // Fill the overlay rather than hug the text, so the site behind is covered edge to
-        // edge; the label centres the word itself.
-        gtk_widget_set_hexpand(label, 1)
-        gtk_widget_set_vexpand(label, 1)
-        gtk_widget_set_visible(label, 0)
+        // edge; the draw function centres the word itself. `measure-overlay` stays at its
+        // FALSE default, so this never influences the window's minimum size.
+        gtk_widget_set_hexpand(area, 1)
+        gtk_widget_set_vexpand(area, 1)
+        gtk_widget_set_visible(area, 0)
 
-        provider = OpaquePointer(gtk_css_provider_new()!)
-        gtk_style_context_add_provider_for_display(
-            gdk_display_get_default(),
-            wr_style_provider(UnsafeMutableRawPointer(provider)),
-            UInt32(GTK_STYLE_PROVIDER_PRIORITY_APPLICATION))
+        let this = Unmanaged.passUnretained(self).toOpaque()
+        gtk_drawing_area_set_draw_func(
+            UnsafeMutableRawPointer(area).assumingMemoryBound(to: GtkDrawingArea.self),
+            { _, cr, width, height, data in
+                guard let cr, let data else { return }
+                Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue()
+                    .draw(cr, width: Double(width), height: Double(height))
+            }, this, nil)
 
         // Added before `ProgressStrip`, so the hairline is the later overlay child and stays
         // painted on top of this.
-        gtk_overlay_add_overlay(wr_overlay(UnsafeMutableRawPointer(overlay)), label)
+        gtk_overlay_add_overlay(wr_overlay(UnsafeMutableRawPointer(overlay)), area)
     }
+
+    // MARK: - Visibility
 
     /// Covers the web view, painted from `palette` so the page it precedes doesn't arrive as
     /// a change of colour.
     func show(palette: ReaderPalette) {
-        gtk_css_provider_load_from_string(
-            UnsafeMutablePointer<GtkCssProvider>(provider),
-            """
-            .\(Self.cssClass) { background-color: \(palette.bg); color: \(palette.muted); }
-            """)
-        gtk_widget_set_visible(label, 1)
+        background = Self.colour(palette.bg)
+        base = Self.colour(palette.muted)
+        highlight = Self.colour(palette.fg)
+        phase = 0
+        gtk_widget_set_visible(area, 1)
         isVisible = true
-        cancelWatchdog()
+        gtk_widget_queue_draw(area)
+        startShimmer()
+        cancel(&watchdog)
         watchdog = g_timeout_add(Self.patienceMS, { data in
             guard let data else { return 0 }
             let cover = Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue()
@@ -80,16 +91,12 @@ final class LoadingCover {
     /// screen — a rendered page of ours, an extraction that declined, a failed load, the
     /// reader toggle — and from the watchdog.
     func hide() {
-        cancelWatchdog()
+        cancel(&watchdog)
+        // Nothing to look at, so stop spending frames on it.
+        cancel(&ticker)
         guard isVisible else { return }
         isVisible = false
-        gtk_widget_set_visible(label, 0)
-    }
-
-    private func cancelWatchdog() {
-        guard watchdog != 0 else { return }
-        g_source_remove(watchdog)
-        watchdog = 0
+        gtk_widget_set_visible(area, 0)
     }
 
     /// The palette the cover should wear for `settings`, given the desktop's own palette (nil
@@ -100,5 +107,79 @@ final class LoadingCover {
         if settings.theme == .auto, let desktop { return desktop }
         return ReaderPalette.stock(for: settings.theme,
                                    prefersDark: wr_prefers_dark_theme() != 0)
+    }
+
+    // MARK: - Shimmer
+
+    private func startShimmer() {
+        // Someone who has asked the desktop for less movement gets the word, held still.
+        guard wr_animations_enabled() != 0, ticker == 0 else { return }
+        ticker = g_timeout_add(Self.frameMS, { data in
+            guard let data else { return 0 }
+            return Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue().tick()
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    /// Returns `G_SOURCE_CONTINUE`/`G_SOURCE_REMOVE` — spelled as their values, since GLib
+    /// defines them as macros the Swift importer can't see.
+    private func tick() -> Int32 {
+        guard isVisible else { ticker = 0; return 0 }
+        let span = 1 + LoadProgress.coverShimmerSpread
+        phase += span * (Double(Self.frameMS) / 1000) / LoadProgress.coverShimmerPeriod
+        if phase > span { phase -= span }
+        gtk_widget_queue_draw(area)
+        return 1
+    }
+
+    private func cancel(_ source: inout UInt32) {
+        guard source != 0 else { return }
+        g_source_remove(source)
+        source = 0
+    }
+
+    // MARK: - Painting
+
+    private func draw(_ cr: OpaquePointer, width: Double, height: Double) {
+        cairo_set_source_rgb(cr, background.red, background.green, background.blue)
+        cairo_paint(cr)
+
+        // cairo's "toy" text API rather than Pango: one word in the UI font, and pulling in
+        // PangoCairo would mean another shim for one call.
+        cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD)
+        cairo_set_font_size(cr, LoadProgress.coverLabelSize)
+        var extents = cairo_text_extents_t()
+        cairo_text_extents(cr, LoadProgress.coverLabel, &extents)
+        guard extents.width > 0 else { return }
+        let x = (width - extents.width) / 2 - extents.x_bearing
+        let y = (height - extents.height) / 2 - extents.y_bearing
+
+        // The gradient spans `spread` label-widths and slides with `phase`, with the three
+        // stops the AppKit host uses. EXTEND_PAD holds the base colour beyond both ends, so
+        // the word is fully painted at every moment and only the highlight travels.
+        let spread = LoadProgress.coverShimmerSpread * extents.width
+        let trailing = x + phase * extents.width
+        if let sweep = cairo_pattern_create_linear(trailing - spread, y, trailing, y) {
+            cairo_pattern_add_color_stop_rgb(sweep, 0, base.red, base.green, base.blue)
+            cairo_pattern_add_color_stop_rgb(sweep, 0.5, highlight.red, highlight.green,
+                                             highlight.blue)
+            cairo_pattern_add_color_stop_rgb(sweep, 1, base.red, base.green, base.blue)
+            cairo_pattern_set_extend(sweep, CAIRO_EXTEND_PAD)
+            cairo_set_source(cr, sweep)
+            cairo_pattern_destroy(sweep)
+        } else {
+            cairo_set_source_rgb(cr, base.red, base.green, base.blue)
+        }
+        cairo_move_to(cr, x, y)
+        cairo_show_text(cr, LoadProgress.coverLabel)
+    }
+
+    /// A `ReaderPalette` colour as a `GdkRGBA`. GTK parses the same CSS spellings the palette
+    /// is written in (`#rrggbb`, `rgba(…)`), so the host does not need a parser of its own.
+    private static func colour(_ css: String) -> GdkRGBA {
+        var rgba = GdkRGBA()
+        guard gdk_rgba_parse(&rgba, css) != 0 else {
+            return GdkRGBA(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+        }
+        return rgba
     }
 }

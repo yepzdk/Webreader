@@ -4,6 +4,23 @@ import XCTest
 // Tests for the pure progress-line state logic. The AppKit view + animation are
 // hand-verified, per the repo convention.
 
+final class CoverLabelTests: XCTestCase {
+    func testTheLabelMatchesTheOtherFullWindowMessage() {
+        // The offline page's headline is 20px; the loading cover is the same kind of screen,
+        // and both hosts read this rather than each picking a size.
+        XCTAssertEqual(LoadProgress.coverLabelSize, 20)
+        XCTAssertTrue(OfflineFallback.html(appName: "R", host: nil, kind: .offline)
+            .contains("font-size: 20px"))
+    }
+
+    func testTheShimmerIsOneSlowPass() {
+        // A spread wider than the label means the highlight starts and ends fully clear of
+        // it, so every cycle is one clean pass rather than a band parked mid-word.
+        XCTAssertGreaterThan(LoadProgress.coverShimmerSpread, 1)
+        XCTAssertGreaterThan(LoadProgress.coverShimmerPeriod, 1)
+    }
+}
+
 final class LoadProgressTests: XCTestCase {
     func testIdleOrZeroIsHidden() {
         XCTAssertEqual(LoadProgress.state(for: 0), .hidden)

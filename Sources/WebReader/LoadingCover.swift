@@ -21,7 +21,7 @@ final class LoadingCover {
     private static let patience: TimeInterval = 10
 
     private let view = NSView()
-    private let label = NSTextField(labelWithString: LoadProgress.coverLabel)
+    private let label = ShimmerLabel(LoadProgress.coverLabel)
     private var watchdog: Timer?
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
@@ -33,8 +33,6 @@ final class LoadingCover {
         view.wantsLayer = true
         view.isHidden = true
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 13)
-        label.alignment = .center
         view.addSubview(label)
         // Above the web view, so it hides the site; the progress line is added in front of
         // everything (see `ProgressLine`), so it stays visible over this.
@@ -57,8 +55,10 @@ final class LoadingCover {
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let palette = ReaderPalette.stock(for: theme, prefersDark: dark)
         view.layer?.backgroundColor = NSColor(css: palette.bg)?.cgColor
-        label.textColor = NSColor(css: palette.muted) ?? .secondaryLabelColor
+        label.paint(base: NSColor(css: palette.muted) ?? .secondaryLabelColor,
+                    highlight: NSColor(css: palette.fg) ?? .labelColor)
         view.isHidden = false
+        label.startShimmer()
         isVisible = true
         watchdog?.invalidate()
         watchdog = Timer.scheduledTimer(withTimeInterval: Self.patience, repeats: false) {
@@ -75,6 +75,107 @@ final class LoadingCover {
         guard isVisible else { return }
         isVisible = false
         view.isHidden = true
+        // Nothing to look at, so stop spending frames on it.
+        label.stopShimmer()
+    }
+}
+
+/// The cover's label: the word painted in the secondary text colour with a brighter band
+/// travelling across it, which is what says "still working" on a screen that is otherwise
+/// completely still.
+///
+/// A `CAGradientLayer` masked by a `CATextLayer`, rather than a `CATextLayer` in a solid
+/// colour: the gradient has to be clipped to the glyphs, and masking is the only way to get
+/// that without drawing text by hand. Sweeping the gradient's `locations` past both ends
+/// works because a `CAGradientLayer` pads with its end colours — so the word is fully
+/// painted in the base colour at every moment of the cycle and only the highlight moves.
+/// (The CSS equivalent, `background-clip: text`, goes transparent past the ends instead and
+/// has to tile the gradient to avoid it.)
+private final class ShimmerLabel: NSView {
+    private static let animationKey = "readerShimmer"
+
+    private let gradient = CAGradientLayer()
+    private let glyphs = CATextLayer()
+    private let text: String
+    private var size: NSSize = .zero
+
+    init(_ text: String) {
+        self.text = text
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.addSublayer(gradient)
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        gradient.locations = Self.locations(at: 0)
+        // The mask only needs coverage, so the colour is irrelevant as long as it is opaque.
+        glyphs.string = NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: CGFloat(LoadProgress.coverLabelSize),
+                                     weight: .semibold),
+            // -0.01em, the same tightening the offline page's headline uses.
+            .kern: -CGFloat(LoadProgress.coverLabelSize) * 0.01,
+            .foregroundColor: NSColor.black,
+        ])
+        glyphs.alignmentMode = .center
+        gradient.mask = glyphs
+        size = (glyphs.string as? NSAttributedString)?.size() ?? .zero
+        size.width.round(.up)
+        size.height.round(.up)
+        applyScale()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override var intrinsicContentSize: NSSize { size }
+
+    override func layout() {
+        super.layout()
+        gradient.frame = bounds
+        glyphs.frame = bounds
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyScale()
+    }
+
+    private func applyScale() {
+        let scale = window?.backingScaleFactor ?? 2
+        gradient.contentsScale = scale
+        glyphs.contentsScale = scale
+    }
+
+    /// Repaints for a theme. `base` is the resting colour of the whole word, `highlight` the
+    /// band that crosses it.
+    func paint(base: NSColor, highlight: NSColor) {
+        gradient.colors = [base.cgColor, highlight.cgColor, base.cgColor]
+    }
+
+    func startShimmer() {
+        // Someone who has asked the system for less movement gets the word, held still.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            gradient.removeAnimation(forKey: Self.animationKey)
+            gradient.locations = Self.locations(at: 0)
+            return
+        }
+        guard gradient.animation(forKey: Self.animationKey) == nil else { return }
+        let sweep = CABasicAnimation(keyPath: "locations")
+        sweep.fromValue = Self.locations(at: 0)
+        sweep.toValue = Self.locations(at: 1 + LoadProgress.coverShimmerSpread)
+        sweep.duration = LoadProgress.coverShimmerPeriod
+        sweep.repeatCount = .greatestFiniteMagnitude
+        gradient.add(sweep, forKey: Self.animationKey)
+    }
+
+    func stopShimmer() {
+        gradient.removeAnimation(forKey: Self.animationKey)
+    }
+
+    /// The three stops at a point in the cycle. `progress` runs from 0 (highlight entirely
+    /// off the left edge) to `1 + spread` (entirely off the right), so one cycle is one pass.
+    private static func locations(at progress: Double) -> [NSNumber] {
+        let spread = LoadProgress.coverShimmerSpread
+        return [progress - spread, progress - spread / 2, progress].map { NSNumber(value: $0) }
     }
 }
 

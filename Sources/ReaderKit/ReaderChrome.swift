@@ -416,20 +416,38 @@ enum ReaderChrome {
         }.joined(separator: "\n")
     }
 
-    /// A row's lead-image thumbnail, or nothing when the article named no image.
+    /// What fills a thumbnail slot when the article named no image: the same box, in the
+    /// row surface, with a quiet picture glyph.
     ///
-    /// Nothing, rather than a reserved empty box: every row stored before #25 has no image,
-    /// so reserving space would render the whole list as grey rectangles on first upgrade.
-    /// Rows fill in as articles are read.
+    /// A slot rather than a gap. Coverage is uneven by nature — an article need not name an
+    /// image and plenty of feeds name none — so a list will normally mix the two, and leaving
+    /// the column blank on those rows reads as a failed load rather than as a design.
     ///
-    /// The URL goes in `data-src`, not `src`: the setting is applied by the page script, and
-    /// with it off the page must fetch nothing — which is what the start page did before this
-    /// existed. `no-referrer` keeps the reading list from travelling back to the publisher,
-    /// and a broken image removes itself rather than leaving a placeholder glyph.
+    /// Only ever rendered into a list that carries `has-thumbs`; the CSS keeps it out of a
+    /// list where nothing has an image, so such a list looks exactly as it always did.
+    static let thumbnailPlaceholder =
+        "<span class=\"recent-thumb recent-thumb-empty\" aria-hidden=\"true\">"
+        + "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\""
+        + " stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\""
+        + " stroke-linejoin=\"round\">"
+        + "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/>"
+        + "<circle cx=\"9\" cy=\"9\" r=\"1.5\"/>"
+        + "<path d=\"m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21\"/>"
+        + "</svg></span>"
+
+    /// A row's lead-image thumbnail, or the placeholder when the article named none.
+    ///
+    /// The URL goes in `data-src`, not `src`: `readerRevealThumbs` is the only thing that ever
+    /// promotes one to a fetch, so with article images off the page requests nothing — which
+    /// is what the start page did before this existed. `no-referrer` keeps the reading list
+    /// from travelling back to the publisher, and an image that fails falls back to the
+    /// placeholder rather than leaving a broken glyph.
     private static func thumbnail(_ entry: ReaderHistory.Entry) -> String {
-        guard let image = entry.image, !image.isEmpty else { return "" }
+        guard let image = entry.image, !image.isEmpty else { return thumbnailPlaceholder }
         return "<img class=\"recent-thumb\" alt=\"\" loading=\"lazy\""
-            + " referrerpolicy=\"no-referrer\" onerror=\"this.remove()\""
+            + " referrerpolicy=\"no-referrer\""
+            + " onerror=\"this.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);"
+            + " this.remove()\""
             + " data-src=\"\(HTML.escape(image))\">"
     }
 

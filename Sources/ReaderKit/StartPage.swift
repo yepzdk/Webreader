@@ -72,14 +72,17 @@ public enum StartPage {
         // Recents are listed inline here rather than tucked in the popover: this page has
         // the whole window and nothing competing for it, and picking up where you left off
         // is the most likely reason you're looking at it.
+        // A list shows thumbnails only when something in it has an image; otherwise every row
+        // would carry an empty slot and the list would look worse than it did before #25.
+        let hasThumbs = history.entries.contains { $0.image != nil }
         let recentsList = history.entries.isEmpty
             ? """
             <p class="hint empty">\(copy.emptyRecents)</p>
             """
             : """
             <h2 class="section">Recent articles</h2>
-                  <div class="recents-inline\(history.entries.contains { $0.image != nil } ? " has-thumbs" : "")">
-                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history, thumbnails: true), by: 8))
+                  <div class="recents-inline\(hasThumbs ? " has-thumbs" : "")">
+                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history, thumbnails: hasThumbs), by: 8))
                   </div>
             """
         return """
@@ -189,6 +192,14 @@ public enum StartPage {
             width: 64px; height: 40px; object-fit: cover;
             border-radius: 4px; background: var(--surface);
           }
+          /* The empty slot. Only ever shown inside a list that has a column at all, so a
+             list where nothing has an image is laid out exactly as it was before #25. */
+          .recent-thumb-empty { display: none; }
+          .has-thumbs .recent-thumb-empty {
+            display: flex; align-items: center; justify-content: center;
+            color: var(--muted); opacity: 0.45;
+          }
+          .recent-thumb-empty svg { display: block; }
           /* Article images off: no image, no reserved column, and nothing fetched — the
              appearance script is the only thing that ever sets a src. */
           :root[data-thumbs="off"] .recent-thumb { display: none; }
@@ -263,6 +274,9 @@ public enum StartPage {
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
+          // The placeholder markup lives in Swift so the server-rendered recents rows and the
+          // host-delivered suggestion rows cannot drift apart. Ours, never feed text.
+          window.readerThumbPlaceholder = \(HTML.jsString(ReaderChrome.thumbnailPlaceholder));
           (function () {
             var form = document.getElementById('open');
             var field = document.getElementById('url');
@@ -339,6 +353,9 @@ public enum StartPage {
               var list = section.querySelector('.suggestions');
               var empty = section.querySelector('.empty-suggestions');
               list.textContent = '';
+              // Same rule as the server-rendered recents list: a column only where this batch
+              // actually brought images.
+              var thumbs = (items || []).some(function (item) { return !!item.image; });
               (items || []).forEach(function (item) {
                 var wrap = document.createElement('div');
                 wrap.className = 'suggestion';
@@ -352,15 +369,21 @@ public enum StartPage {
                 // The same thumbnail a recents row gets, and built the same way: the element
                 // carries `data-src` only, so whether it ever fetches is decided in one place
                 // (`readerRevealThumbs`, called below) rather than here.
-                if (item.image) {
+                if (thumbs && item.image) {
                   var thumb = document.createElement('img');
                   thumb.className = 'recent-thumb';
                   thumb.alt = '';
                   thumb.loading = 'lazy';
                   thumb.referrerPolicy = 'no-referrer';
                   thumb.dataset.src = item.image;
-                  thumb.onerror = function () { thumb.remove(); };
+                  thumb.onerror = function () {
+                    thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
+                    thumb.remove();
+                  };
                   row.appendChild(thumb);
+                } else if (thumbs) {
+                  // No image for this one, but the list has a column — fill the slot.
+                  row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
                 }
                 var title = document.createElement('span');
                 title.className = 'recent-title';
@@ -382,10 +405,7 @@ public enum StartPage {
                 wrap.appendChild(actions);
                 list.appendChild(wrap);
               });
-              // Reserve the thumbnail column only when this batch actually brought images,
-              // exactly as the server-rendered recents list does.
-              list.classList.toggle('has-thumbs',
-                (items || []).some(function (item) { return !!item.image; }));
+              list.classList.toggle('has-thumbs', thumbs);
               // These rows were built after the appearance script last ran, so they need the
               // one function allowed to turn a data-src into a fetch.
               if (window.readerRevealThumbs) { window.readerRevealThumbs(); }

@@ -170,6 +170,23 @@ public enum HTML {
             .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
     }
 
+    /// A Swift string as a quoted JS string literal, script-safe.
+    ///
+    /// `jsLiteral` takes an already-serialised expression (a JSON object, a number) and only
+    /// makes it safe to sit inside `<script>`; it does not quote. Interpolating a bare string
+    /// through it emits raw markup into the middle of a statement, so anything that is a
+    /// *value* rather than an expression comes through here.
+    public static func jsString(_ value: String) -> String {
+        // JSONSerialization encodes containers only, so the value rides in a one-element
+        // array and the brackets come back off — this way the quoting and escaping are
+        // Foundation's rather than hand-rolled.
+        guard let data = try? JSONSerialization.data(withJSONObject: [value], options: []) else {
+            return "\"\""
+        }
+        let array = String(decoding: data, as: UTF8.self)
+        return jsLiteral(String(array.dropFirst().dropLast()))
+    }
+
     public static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")

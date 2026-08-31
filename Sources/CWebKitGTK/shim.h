@@ -103,6 +103,22 @@ static inline int wr_prefers_dark_theme(void)
     return dark ? 1 : 0;
 }
 
+/**
+ * wr_animations_enabled:
+ *
+ * Reads `GtkSettings:gtk-enable-animations`, the desktop's "reduce motion" answer, which
+ * `g_object_get` can only deliver through varargs. The loading cover holds its label still
+ * rather than shimmering it when this is off.
+ */
+static inline int wr_animations_enabled(void)
+{
+    GtkSettings *settings = gtk_settings_get_default();
+    if (!settings) return 1;
+    gboolean enabled = TRUE;
+    g_object_get(settings, "gtk-enable-animations", &enabled, NULL);
+    return enabled ? 1 : 0;
+}
+
 /* ---------------------------------------------------------------------------------------
  * Signal callback signatures.
  *

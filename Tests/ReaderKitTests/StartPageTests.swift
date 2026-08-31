@@ -219,14 +219,52 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("referrerpolicy=\"no-referrer\""))
     }
 
-    func testARecentWithoutALeadImageGetsNoBox() {
-        // Every row stored before #25 has no image; reserving space would render the whole
-        // list as grey rectangles on first upgrade.
+    func testAListWhereNothingHasAnImageGetsNoColumnAtAll() {
+        // Every row stored before #25 has no image, so this is the state after upgrading.
+        // Neither an image nor a placeholder: the list looks exactly as it always did.
         var history = ReaderHistory()
         history.record(title: "Plain", url: "https://x.test/b")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertFalse(html.contains("<img class=\"recent-thumb\""))
         // The class is always in the stylesheet; what must be absent is the element.
-        XCTAssertFalse(StartPage.html(appName: "Reader", history: history)
-            .contains("<img class=\"recent-thumb\""))
+        XCTAssertFalse(html.contains("<span class=\"recent-thumb recent-thumb-empty\""))
+        XCTAssertFalse(html.contains("recents-inline has-thumbs"))
+    }
+
+    func testAnImagelessRowInAMixedListGetsThePlaceholder() {
+        // The reason the placeholder exists: coverage is uneven by nature, so lists normally
+        // mix the two, and a blank column on those rows reads as a failed load.
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("recents-inline has-thumbs"))
+        XCTAssertTrue(html.contains("recent-thumb recent-thumb-empty"))
+        XCTAssertTrue(html.contains("data-src=\"https://x.test/l.jpg\""))
+    }
+
+    func testAFailedImageFallsBackToThePlaceholder() {
+        // Otherwise a dead URL leaves the browser's broken-image glyph in the row.
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        XCTAssertTrue(StartPage.html(appName: "Reader", history: history)
+            .contains("this.insertAdjacentHTML('afterend', window.readerThumbPlaceholder)"))
+    }
+
+    func testBothListsRenderTheSamePlaceholderMarkup() {
+        // One Swift constant, handed to the page script as a quoted literal, so the
+        // server-rendered recents rows and the host-delivered suggestion rows cannot drift.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerThumbPlaceholder = \"<span class="))
+        XCTAssertTrue(html.contains("row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder)"))
+    }
+
+    func testThePlaceholderIsHiddenOutsideAThumbnailList() {
+        // It ships in the reader popover's row markup too if a caller ever asks for it; only
+        // a list with a column may show it.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".recent-thumb-empty { display: none; }"))
+        XCTAssertTrue(html.contains(".has-thumbs .recent-thumb-empty {"))
     }
 
     func testTheRecentsPopoverNeverGetsThumbnails() {

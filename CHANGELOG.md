@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Settings, which moves up from the bottom-left corner.
 - **A loading screen** (#24). While a page loads, WebReader shows a plain "Loading" screen
   with the progress line at the top instead of letting the original site paint itself only
-  to be replaced by the reader a moment later.
+  to be replaced by the reader a moment later. A highlight travels across the word while the
+  load is in flight, and holds still if the system asks for reduced motion.
 - **Article thumbnails** (#25). Recent and suggested articles on the start page show the
   article's own lead image where there is one — read from the page for recents, and from the
-  feed for suggestions. Turn them off under **Aa → No images**; with them off the page
+  feed for suggestions. Articles without one get a placeholder rather than a blank gap, so
+  rows stay lined up. Turn them off under **Aa → No images**; with them off the page
   requests nothing.
 - **A Linux app** (#16). WebReader now runs on Linux as a GTK4 + WebKitGTK application,
   developed against Arch/Omarchy on Hyprland. It registers as an `http`/`https` handler, so
