@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Keyboard focus** (#26). `Tab` now reaches the whole page on macOS — buttons, recents
+  rows, the appearance controls — instead of stopping at the URL field.
+
 ### Added
 - **A way home** (#15). The reader, and the offline page, now carry a Home button in the
   top-left corner, aligned with the controls opposite it. On the start page that slot holds

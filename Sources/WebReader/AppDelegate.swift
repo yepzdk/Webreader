@@ -95,6 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Without this, Tab in a WKWebView visits text fields and nothing else: every button,
+        // link, recents row and popover control is skipped, so the start page has exactly one
+        // tab stop and no focus ring is ever drawn. It defaults to NO, and macOS's own Full
+        // Keyboard Access is off by default too, so the app has to ask — this is not something
+        // to leave to the reader's system settings. WebKitGTK's counterpart
+        // (`enable-tabs-to-links`) already defaults to TRUE, which is why Linux behaves and
+        // macOS does not (#26).
+        config.preferences.tabFocusesLinks = true
         config.applicationNameForUserAgent = Self.safariApplicationName
         // Our generated pages post here: the offline page's Try Again, the reader's Aa,
         // recents and hidden-text popovers, its floating Hide-text button, and the start

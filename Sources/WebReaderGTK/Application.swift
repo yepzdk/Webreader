@@ -204,6 +204,12 @@ final class Application {
         // which is the order the WebKit header asks for — the reverse races the first
         // message against its own registration.
         host.connectSignals()
+        // Already TRUE by default here, unlike the AppKit host — stated anyway so the two
+        // hosts read the same and a future default cannot quietly take Tab away (#26).
+        if let settings = webkit_web_view_get_settings(view) {
+            webkit_settings_set_enable_tabs_to_links(settings, 1)
+        }
+
         // Zoom is a multiplier (1.0 = 100%). Applied before the first load so no page is
         // ever drawn at the wrong size for a frame.
         webkit_web_view_set_zoom_level(view, ReaderStore.zoom(store: store))
