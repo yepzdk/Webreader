@@ -69,6 +69,10 @@ Fetching suggestions contacts the sources themselves and nothing else; what you 
 
 **Paywalls.** To get full text from a site that paywalls logged-out visitors, log in once inside the app (⇧⌘R to the original page, sign in). The session persists.
 
+**Sync (Mac).** Settings (**⌘,**) has a **Sync** section — or **Sync…** in the WebReader menu — that keeps appearance settings and recents in step across Macs: pick a folder that already syncs between your devices (one inside your Nextcloud folder, iCloud Drive, Syncthing, anything) and every copy of WebReader pointed at it stays current. No account, no server address, no password: WebReader only writes files, and whatever syncs the folder moves them.
+
+Each device writes one small JSON file of its own and reads the others, so two devices reading at the same time can't collide (no "conflicted copy" files) and neither can overwrite the other's list — recents merge, newest first, and clearing history clears it everywhere, including on a device that was switched off at the time. Appearance is last-writer-wins; page zoom stays local, since it depends on the screen. The sheet shows when the last sync happened, which other devices it can see, and what went wrong if the folder is missing. The Linux app doesn't offer sync yet.
+
 | macOS | Linux | Action |
 |---|---|---|
 | ⇧⌘O | Ctrl+Shift+O | Open URL from clipboard |

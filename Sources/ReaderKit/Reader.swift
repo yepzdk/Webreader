@@ -43,8 +43,8 @@ public struct Article: Codable, Equatable {
 /// The reader's appearance settings, adjustable from the in-reader "Aa" popover and
 /// persisted per app. Plain persisted state like page zoom — there is no baked plist
 /// default to layer over. Pure so decoding/encoding is unit-testable.
-public struct ReaderSettings: Equatable {
-    public enum FontFamily: String, CaseIterable {
+public struct ReaderSettings: Equatable, Sendable {
+    public enum FontFamily: String, CaseIterable, Sendable {
         case serif, sans
         /// The CSS font stack for the platform the page will be displayed on. The macOS
         /// stacks are the reader's original design; `Platform` explains why the choice is a
@@ -61,7 +61,7 @@ public struct ReaderSettings: Equatable {
         }
     }
 
-    public enum Width: String, CaseIterable {
+    public enum Width: String, CaseIterable, Sendable {
         case narrow, normal, wide
         var css: String {
             switch self {
@@ -72,7 +72,7 @@ public struct ReaderSettings: Equatable {
         }
     }
 
-    public enum LineHeight: String, CaseIterable {
+    public enum LineHeight: String, CaseIterable, Sendable {
         case compact, normal, relaxed
         var css: String {
             switch self {
@@ -86,13 +86,13 @@ public struct ReaderSettings: Equatable {
     /// `auto` follows the host: the system light/dark appearance, or — where the host can
     /// resolve one — the desktop's whole palette (`ReaderPalette`, #16). The explicit
     /// themes pin their own palette regardless of either, which is what they are for.
-    public enum Theme: String, CaseIterable {
+    public enum Theme: String, CaseIterable, Sendable {
         case auto, light, sepia, dark, black
     }
 
     /// How inline quotations (»…«, “…”) are set: a left border on the paragraph with the
     /// quote in medium weight, or plain italics.
-    public enum QuoteStyle: String, CaseIterable {
+    public enum QuoteStyle: String, CaseIterable, Sendable {
         case bordered, italic
     }
 
@@ -134,10 +134,10 @@ public struct ReaderSettings: Equatable {
         return settings
     }
 
-    /// The settings as a JSON string — the storage format, and (JSON being valid JS)
-    /// what the reader page's script is seeded with.
-    public var json: String {
-        let dict: [String: Any] = [
+    /// The storage format as a `JSONSerialization` object, so a sync device file can nest
+    /// it without round-tripping through a string.
+    public var jsonObject: [String: Any] {
+        [
             "fontSize": fontSize,
             "fontFamily": fontFamily.rawValue,
             "width": width.rawValue,
@@ -145,7 +145,13 @@ public struct ReaderSettings: Equatable {
             "theme": theme.rawValue,
             "quoteStyle": quoteStyle.rawValue,
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
+    }
+
+    /// The settings as a JSON string — the storage format, and (JSON being valid JS)
+    /// what the reader page's script is seeded with.
+    public var json: String {
+        guard let data = try? JSONSerialization.data(withJSONObject: jsonObject,
+                                                    options: [.sortedKeys])
         else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }

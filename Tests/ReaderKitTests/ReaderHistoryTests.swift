@@ -81,4 +81,29 @@ final class ReaderHistoryTests: XCTestCase {
             .joined(separator: ",")
         XCTAssertEqual(ReaderHistory.fromJSON("[\(rows)]").entries.count, ReaderHistory.limit)
     }
+
+    func testRecordStampsWhenTheArticleWasRead() {
+        var history = ReaderHistory()
+        history.record(title: "Read", url: "https://example.com/r", at: 1_756_000_000)
+        XCTAssertEqual(history.entries.first?.readAt, 1_756_000_000)
+        // Re-reading restamps, so the merge treats it as the newer copy.
+        history.record(title: "Read", url: "https://example.com/r", at: 1_756_000_900)
+        XCTAssertEqual(history.entries.first?.readAt, 1_756_000_900)
+    }
+
+    func testTimestampsAndTombstoneSurviveTheRoundTrip() {
+        var history = ReaderHistory(clearedAt: 1_755_000_000)
+        history.record(title: "One", url: "https://example.com/1", at: 1_756_000_000)
+        XCTAssertEqual(ReaderHistory.fromJSON(history.json), history)
+    }
+
+    func testTheListWrittenBeforeSyncStillDecodes() {
+        // What every existing installation has in its defaults: a bare array, no
+        // timestamps. Those rows sort last in a merge and a tombstone drops them.
+        let legacy = #"[{"title":"Old","url":"https://example.com/old"}]"#
+        let history = ReaderHistory.fromJSON(legacy)
+        XCTAssertEqual(history.entries.map(\.title), ["Old"])
+        XCTAssertNil(history.entries.first?.readAt)
+        XCTAssertNil(history.clearedAt)
+    }
 }

@@ -571,6 +571,52 @@ enum ReaderChrome {
           function save() {
             try { window.webkit.messageHandlers.readerSettings.postMessage(s); } catch (e) {}
           }
+          // How the host hands over settings merged in from another device: adopt and
+          // redraw, but do NOT save — they are already the stored state, and writing them
+          // back would restamp this device as their newest author.
+          window.readerApplySettings = function (next) {
+            if (!next) { return; }
+            s = next;
+            apply();
+          };
+          // How the host hands over a recents list merged in from another device: rows of
+          // {title, url}, newest first. Built with DOM APIs like the hidden-phrase rows —
+          // titles are other sites' text and never take the markup path. Redrawn in place
+          // rather than by re-rendering the page, so whatever is typed into the start
+          // page's field survives a sync landing mid-sentence.
+          window.readerSetRecents = function (rows) {
+            recents.querySelectorAll('.recent, .recent-empty, #readerClear')
+              .forEach(function (n) { n.remove(); });
+            if (!rows || !rows.length) {
+              var empty = document.createElement('p');
+              empty.className = 'recent-empty';
+              empty.textContent = 'No recent articles';
+              recents.appendChild(empty);
+              return;
+            }
+            rows.forEach(function (entry) {
+              var row = document.createElement('button');
+              row.className = 'recent';
+              row.dataset.url = entry.url;
+              var title = document.createElement('span');
+              title.className = 'recent-title';
+              title.textContent = entry.title;
+              row.appendChild(title);
+              var host = '';
+              try { host = new URL(entry.url).hostname; } catch (err) {}
+              if (host) {
+                var line = document.createElement('span');
+                line.className = 'recent-host';
+                line.textContent = host;
+                row.appendChild(line);
+              }
+              recents.appendChild(row);
+            });
+            var clear = document.createElement('button');
+            clear.id = 'readerClear';
+            clear.textContent = 'Clear history';
+            recents.appendChild(clear);
+          };
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {
             popovers.forEach(function (p) {

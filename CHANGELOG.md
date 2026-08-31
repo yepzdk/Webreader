@@ -22,12 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   system light/dark switch. Explicit themes still pin their own palette.
 - Reader font stacks are now chosen per platform, so Linux gets faces that actually resolve
   there (Noto Serif, Adwaita Sans) instead of falling through to Liberation.
+- Sync appearance settings and recents between devices through a folder you pick — inside
+  your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
+  own file, so nothing collides and no device can wipe another's list. Turn it on under
+  Sync… in the WebReader menu; page zoom stays local. Mac only for now.
 
 ### Changed
 - Hiding boilerplate is now part of the reader itself: select a line and a **Hide text**
   button appears beside it. The Edit-menu and right-click routes are gone — one way to do it,
   and it works on a platform with no menu bar.
 - Both progress hairlines read one shared thickness constant instead of two hand-kept copies.
+- Recents now record when an article was read, and clearing history leaves a timestamp, so
+  two devices merge in the right order and a clear isn't undone by a device that was off.
+  Existing lists are read as before.
 
 ## [0.10.1] - 2026-08-28
 

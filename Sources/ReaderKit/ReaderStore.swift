@@ -2,15 +2,21 @@ import Foundation
 
 /// The minimal read/write surface the reader's persisted state needs from a key-value
 /// store. `DefaultsStore` wraps `UserDefaults`; tests pass an in-memory implementation.
-/// Kept to strings so the same shape fits `NSUbiquitousKeyValueStore` when sync lands.
-public protocol KeyValueStore: AnyObject {
+/// Kept to strings so a whole state document is one value a sync device file can carry.
+///
+/// `Sendable`, because sync reads and writes the store from its own queue while the UI
+/// reads it on the main thread: an implementation has to be safe from both.
+public protocol KeyValueStore: AnyObject, Sendable {
     func string(forKey key: String) -> String?
     /// `nil` removes the key.
     func set(_ value: String?, forKey key: String)
 }
 
 /// `KeyValueStore` over `UserDefaults` (the app's standard suite by default).
-public final class DefaultsStore: KeyValueStore {
+///
+/// Unchecked: `UserDefaults` is documented as thread-safe but isn't annotated `Sendable`,
+/// and this class adds no state of its own beyond the suite it was handed.
+public final class DefaultsStore: KeyValueStore, @unchecked Sendable {
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -32,8 +38,22 @@ public enum ReaderStore {
         public static let hiddenPhrases = "reader.hiddenPhrases"
         public static let suggestions = "reader.suggestions"
         public static let topics = "reader.topics"
+        /// When settings were last changed on this device — the tiebreaker when another
+        /// device's file carries different appearance settings. Kept beside the settings
+        /// rather than inside them so the reader page's script seed stays unchanged.
+        public static let settingsUpdatedAt = "reader.settings.updatedAt"
         /// Marker set once the one-time import from the webwrap-generated app has run.
         public static let legacyImported = "reader.legacyImported"
+
+        // Sync: the folder every instance exchanges device files through, this device's
+        // identity within it, and when it last synced (shown in the Sync sheet).
+        /// Bookmark data (base64) for the chosen folder — it survives a rename or move.
+        public static let syncFolder = "reader.sync.folder"
+        /// The folder's path when it was chosen. Display only; the bookmark is the truth.
+        public static let syncFolderPath = "reader.sync.folderPath"
+        /// This installation's device id — the name of the one file it writes.
+        public static let syncDeviceID = "reader.sync.deviceID"
+        public static let syncLastSuccess = "reader.sync.lastSuccess"
     }
 
     // MARK: - Appearance
@@ -42,16 +62,29 @@ public enum ReaderStore {
         ReaderSettings.fromJSON(store.string(forKey: Key.settings))
     }
 
-    public static func setSettings(_ settings: ReaderSettings, store: KeyValueStore) {
+    public static func setSettings(_ settings: ReaderSettings, store: KeyValueStore,
+                                   at now: Double = Date().timeIntervalSince1970) {
         store.set(settings.json, forKey: Key.settings)
+        store.set(String(now), forKey: Key.settingsUpdatedAt)
+    }
+
+    /// When settings were last written here; 0 when they never were, so any device that
+    /// has touched them wins the merge.
+    public static func settingsUpdatedAt(store: KeyValueStore) -> Double {
+        Double(store.string(forKey: Key.settingsUpdatedAt) ?? "") ?? 0
     }
 
     /// Reverts appearance settings and zoom to stock. NOT the history: it's user data, not
     /// a presentation default, and this action offers no undo — clearing it lives behind
     /// its own affordance in the recents panel.
-    public static func resetAppearance(store: KeyValueStore) {
+    ///
+    /// The reset is stamped like any other settings write, so it propagates to the other
+    /// devices instead of being overwritten by their older settings on the next sync.
+    public static func resetAppearance(store: KeyValueStore,
+                                       at now: Double = Date().timeIntervalSince1970) {
         store.set(nil, forKey: Key.settings)
         store.set(nil, forKey: Key.zoom)
+        store.set(String(now), forKey: Key.settingsUpdatedAt)
     }
 
     // MARK: - History
@@ -62,6 +95,13 @@ public enum ReaderStore {
 
     public static func setHistory(_ history: ReaderHistory, store: KeyValueStore) {
         store.set(history.json, forKey: Key.history)
+    }
+
+    /// Clears the recents list, leaving the tombstone that makes the clear win over
+    /// another device's copy of the list on the next sync.
+    public static func clearHistory(store: KeyValueStore,
+                                    at now: Double = Date().timeIntervalSince1970) {
+        setHistory(ReaderHistory(clearedAt: now), store: store)
     }
 
     // MARK: - Hidden phrases
