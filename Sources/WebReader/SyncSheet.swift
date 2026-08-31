@@ -9,7 +9,9 @@ import ReaderKit
 /// A native sheet rather than one of the generated pages: it owns a file picker, and it has
 /// to work when the folder has gone missing — a moment the page chrome shouldn't have to
 /// have an opinion about.
-@MainActor
+///
+/// Main-thread only, like the rest of the AppKit host — see `SyncController` on why this
+/// isn't spelled `@MainActor`.
 final class SyncSheet: NSObject {
     private let controller: SyncController
     private let panel: NSPanel

@@ -8,12 +8,16 @@ import ReaderKit
 /// talks to a server: whatever already syncs that folder does the moving.
 ///
 /// Cycles are triggered by the app coming forward, the start page being shown, a local
-/// change (debounced), and the folder changing on disk; a 30-second poll while frontmost
-/// is the backstop for the one case the folder watcher misses — a sync client rewriting a
-/// file's contents in place rather than replacing it. A cycle never runs concurrently with
-/// itself: a trigger arriving mid-cycle sets `again` and runs once the current one lands.
-@MainActor
-final class SyncController {
+/// change (debounced), and the folder — or any peer's file in it — changing on disk. A cycle
+/// never runs concurrently with itself: a trigger arriving mid-cycle sets `again` and runs
+/// once the current one lands.
+///
+/// Everything here is used from the main thread, like the rest of the AppKit host: the one
+/// cycle that runs off it hands its outcome back with `DispatchQueue.main.async` and touches
+/// nothing else. Hence `@unchecked Sendable` rather than `@MainActor` — the host predates
+/// actor isolation and the annotation would have to spread across every call site in
+/// `AppDelegate` to buy nothing.
+final class SyncController: @unchecked Sendable {
     private let store: KeyValueStore
     /// Called on the main thread after a cycle changed local state.
     private let onChange: (SyncEngine.Result) -> Void
@@ -150,16 +154,24 @@ final class SyncController {
         running = true
         let engine = SyncEngine(folder: SyncFolder(root: root), store: store, device: device)
         queue.async { [weak self] in
-            var result: SyncEngine.Result?
-            var message: String?
-            do {
-                result = try engine.sync()
-            } catch let error as SyncError {
-                message = error.message
-            } catch {
-                message = error.localizedDescription
+            let outcome = Self.run(engine)
+            DispatchQueue.main.async {
+                self?.finish(result: outcome.result, error: outcome.message)
             }
-            Task { @MainActor [weak self] in self?.finish(result: result, error: message) }
+        }
+    }
+
+    /// One cycle, off the main thread. Static and returning a value rather than assigning
+    /// into captured variables: nothing the queue touches is shared with the main thread
+    /// except the outcome it hands back.
+    private static func run(_ engine: SyncEngine)
+        -> (result: SyncEngine.Result?, message: String?) {
+        do {
+            return (try engine.sync(), nil)
+        } catch let error as SyncError {
+            return (nil, error.message)
+        } catch {
+            return (nil, error.localizedDescription)
         }
     }
 
