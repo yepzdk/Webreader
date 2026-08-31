@@ -26,7 +26,6 @@ final class SyncSheet: NSObject {
         super.init()
         panel.title = "Sync"
         build()
-        controller.onStatusChange = { [weak self] in self?.refresh() }
     }
 
     func present(in window: NSWindow) {
@@ -107,34 +106,14 @@ final class SyncSheet: NSObject {
 
     // MARK: - State
 
-    private func refresh() {
-        let status = controller.status
+    /// Redrawn by the host whenever sync's state changes, so an open sheet stays current.
+    func refresh() {
         offButton.state = controller.isOn ? .off : .on
         folderButton.state = controller.isOn ? .on : .off
-        pathLabel.stringValue = status.folderPath.map(abbreviate) ?? "No folder chosen"
-        pathLabel.isHidden = false
-        statusLabel.stringValue = statusText(status)
-        statusLabel.textColor = status.error == nil ? .secondaryLabelColor : .systemRed
-    }
-
-    /// "Last synced 2 minutes ago · 1 other device", or what went wrong. The error wins:
-    /// a stale success time under a broken folder reads as if things were fine.
-    private func statusText(_ status: SyncController.Status) -> String {
-        if let error = status.error { return error }
-        guard controller.isOn else { return "Settings and recents stay on this Mac." }
-        guard let last = status.lastSuccess else { return "Waiting for the first sync…" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        let synced = "Last synced " + formatter.localizedString(for: last, relativeTo: Date())
-        switch status.peers.count {
-        case 0: return synced + " · no other devices yet"
-        case 1: return synced + " · with " + status.peers[0]
-        default: return synced + " · \(status.peers.count) other devices"
-        }
-    }
-
-    private func abbreviate(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
+        pathLabel.stringValue = controller.folderDisplayPath ?? "No folder chosen"
+        // The error wins over a stale success time, which would read as if things were fine.
+        statusLabel.stringValue = controller.summary
+        statusLabel.textColor = controller.hasError ? .systemRed : .secondaryLabelColor
     }
 
     // MARK: - Actions

@@ -98,7 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
                      "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
                      "readerAddSource", "readerRemoveSource", "readerSetLanguages",
-                     "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate"] {
+                     "readerBlockHost", "readerUnblockHost", "readerTopicFeedback",
+                     "readerRate", "readerOpenSync"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -121,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         sync = SyncController(store: store) { [weak self] result in
             self?.applySync(result)
         }
+        sync.onStatusChange = { [weak self] in self?.syncStatusChanged() }
 
         // A real main menu is required for the standard editing shortcuts (⌘C/⌘V/⌘X/⌘A)
         // to reach the web content — without it, paste silently does nothing.
@@ -459,7 +461,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         pageState.willShow(.settings)
         webView.loadHTMLString(SettingsPage.html(appName: appName,
                                                  settings: ReaderStore.settings(store: store),
-                                                 suggestions: ReaderStore.suggestions(store: store)),
+                                                 suggestions: ReaderStore.suggestions(store: store),
+                                                 syncFolder: sync.folderDisplayPath,
+                                                 syncSummary: sync.summary),
                                baseURL: nil)
     }
 
@@ -538,6 +542,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         else { return }
         webView.evaluateJavaScript(
             "window.readerSetRecents && window.readerSetRecents(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
+    }
+
+    /// Sync's state changed (a folder chosen, a cycle landed, an error): redraw whatever is
+    /// showing it. Pushed, not re-rendered — the settings page holds a half-typed feed
+    /// address that has to survive someone setting sync up.
+    @MainActor
+    private func syncStatusChanged() {
+        syncSheet?.refresh()
+        guard isShowingSettings else { return }
+        // A folder path is whatever the user named their folders; it takes the same escaping
+        // route as feed titles rather than being spliced into the script by hand.
+        let arguments: [Any] = [sync.folderDisplayPath ?? NSNull(), sync.summary]
+        guard let data = try? JSONSerialization.data(withJSONObject: arguments, options: [])
+        else { return }
+        webView.evaluateJavaScript(
+            "window.readerSetSyncStatus && window.readerSetSyncStatus.apply(null, "
+                + HTML.jsLiteral(String(decoding: data, as: UTF8.self)) + ")")
     }
 
     // MARK: - Navigation policy
@@ -749,6 +770,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "readerOpenSettings":
             guard isShowingStartPage else { return }
             showSettingsPage()
+        case "readerOpenSync":
+            guard isShowingSettings else { return }
+            showSyncSheet(nil)
         case "readerHome":
             guard isShowingSettings else { return }
             showStartPage()

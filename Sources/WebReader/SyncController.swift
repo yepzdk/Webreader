@@ -14,14 +14,6 @@ import ReaderKit
 /// itself: a trigger arriving mid-cycle sets `again` and runs once the current one lands.
 @MainActor
 final class SyncController {
-    /// What the Sync sheet shows.
-    struct Status {
-        var folderPath: String?
-        var lastSuccess: Date?
-        var peers: [String]
-        var error: String?
-    }
-
     private let store: KeyValueStore
     /// Called on the main thread after a cycle changed local state.
     private let onChange: (SyncEngine.Result) -> Void
@@ -57,17 +49,37 @@ final class SyncController {
         root = resolveFolder()
     }
 
-    // MARK: - State
+    // MARK: - What the UI shows
 
     var isOn: Bool { root != nil }
 
-    var status: Status {
-        Status(folderPath: store.string(forKey: ReaderStore.Key.syncFolderPath),
-               lastSuccess: Double(store.string(forKey: ReaderStore.Key.syncLastSuccess) ?? "")
-                   .map(Date.init(timeIntervalSince1970:)),
-               peers: peers,
-               error: lastError)
+    /// The chosen folder, `~`-abbreviated, or nil when sync is off. Display only — the
+    /// bookmark is what sync actually resolves.
+    var folderDisplayPath: String? {
+        store.string(forKey: ReaderStore.Key.syncFolderPath)
+            .map { ($0 as NSString).abbreviatingWithTildeInPath }
     }
+
+    /// One line of state: the error if there is one, otherwise when it last synced and who
+    /// else it can see. The Sync sheet and the settings page both show this string, so the
+    /// two can't describe sync differently.
+    var summary: String {
+        if let lastError { return lastError }
+        guard isOn else { return "Settings and recents stay on this Mac." }
+        guard let last = Double(store.string(forKey: ReaderStore.Key.syncLastSuccess) ?? "")
+            .map(Date.init(timeIntervalSince1970:)) else { return "Waiting for the first sync…" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let synced = "Last synced " + formatter.localizedString(for: last, relativeTo: Date())
+        switch peers.count {
+        case 0: return synced + " · no other devices yet"
+        case 1: return synced + " · with " + peers[0]
+        default: return synced + " · with \(peers.count) other devices"
+        }
+    }
+
+    /// True while the last cycle's error is the thing `summary` is reporting.
+    var hasError: Bool { lastError != nil }
 
     /// Picks up where the last run left off: start watching and sync once.
     func start() {

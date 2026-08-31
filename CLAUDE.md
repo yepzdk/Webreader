@@ -32,7 +32,8 @@ Two SwiftPM targets, no dependencies:
     `Suggestions.rank`.
   - `FeedFetcher.swift` — the only networking outside the web view: an actor fetching the
     sources with a 10-minute in-memory TTL; failures are "no items", never errors.
-  - `SettingsPage.swift` — the suggestion sources and the language filter (⌘,).
+  - `SettingsPage.swift` — the suggestion sources, the language filter, and the way into
+    sync (⌘,).
   - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
     `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
@@ -89,9 +90,11 @@ Two SwiftPM targets, no dependencies:
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
   `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
   `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
-  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`. Rename in both
-  Swift and the page scripts together. The host calls back via `window.readerSetHidden(list)`,
-  `window.readerSetSuggestions(items)`, `window.readerSourceAdded/Rejected(…)`.
+  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`,
+  `readerOpenSync`. Rename in both Swift and the page scripts together. The host calls back
+  via `window.readerSetHidden(list)`, `window.readerSetSuggestions(items)`,
+  `window.readerSourceAdded/Rejected(…)`, `window.readerApplySettings(settings)`,
+  `window.readerSetRecents(rows)`, `window.readerSetSyncStatus(folder, summary)`.
 - Hiding a phrase is a **page** affordance, not a menu item: selecting text in the reader
   raises a Hide button that posts to `readerHide`. It was moved out of the Edit and context
   menus for issue #16 — the Linux host has no menu bar — and `window.webkit.messageHandlers`

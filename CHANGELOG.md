@@ -24,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   there (Noto Serif, Adwaita Sans) instead of falling through to Liberation.
 - Sync appearance settings and recents between devices through a folder you pick — inside
   your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
-  own file, so nothing collides and no device can wipe another's list. Turn it on under
-  Sync… in the WebReader menu; page zoom stays local. Mac only for now.
+  own file, so nothing collides and no device can wipe another's list. Set it up in
+  Settings (⌘,) or under Sync… in the WebReader menu; page zoom stays local. Mac only for
+  now — the Linux app doesn't offer it yet.
 
 ### Changed
 - Hiding boilerplate is now part of the reader itself: select a line and a **Hide text**

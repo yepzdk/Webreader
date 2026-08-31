@@ -30,6 +30,21 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertFalse(page.contains("class=\"source\""))
     }
 
+    func testSyncSectionShowsWhereItStandsAndOpensTheSheet() {
+        let off = html()
+        XCTAssertTrue(off.contains(">Not set up<"))
+        XCTAssertTrue(off.contains(">Set up…<"))
+        XCTAssertTrue(off.contains("readerOpenSync"))
+
+        let on = SettingsPage.html(appName: "WebReader",
+                                   syncFolder: "~/Nextcloud/Læsning & \"co\"",
+                                   syncSummary: "Last synced 2 minutes ago · with iPad")
+        // A folder is named by the user, so it takes the page's escaping route.
+        XCTAssertTrue(on.contains("~/Nextcloud/Læsning &amp; &quot;co&quot;"))
+        XCTAssertTrue(on.contains("Last synced 2 minutes ago · with iPad"))
+        XCTAssertTrue(on.contains(">Change…<"))
+    }
+
     func testOffersTheAddFormAndItsHostHooks() {
         let page = html()
         XCTAssertTrue(page.contains("id=\"source\""))
