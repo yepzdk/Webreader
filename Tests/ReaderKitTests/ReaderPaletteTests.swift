@@ -297,3 +297,45 @@ final class ReaderPaletteContrastTests: XCTestCase {
         XCTAssertLessThan(ratio, minimum)
     }
 }
+
+/// The native loading cover paints `ReaderPalette.stock`; the document paints
+/// `ReaderChrome.themeCSS`. They read the same values, or the cover is visibly the wrong
+/// colour behind a page that is about to appear (#24).
+final class StockPaletteTests: XCTestCase {
+    func testEveryPinnedThemeEmitsItsStockPalette() {
+        for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+            var settings = ReaderSettings()
+            settings.theme = theme
+            let css = ReaderChrome.themeCSS(settings)
+            let palette = ReaderPalette.stock(for: theme, prefersDark: false)
+            XCTAssertTrue(css.contains(":root[data-theme=\"\(theme.rawValue)\"] {"),
+                          "\(theme.rawValue) has no pinned block")
+            XCTAssertTrue(css.contains("--bg: \(palette.bg); --fg: \(palette.fg); "
+                                       + "--muted: \(palette.muted); --accent: \(palette.accent);"),
+                          "\(theme.rawValue) drifted from its stock palette")
+            XCTAssertTrue(css.contains("--border: \(palette.border); --surface: \(palette.surface);"),
+                          "\(theme.rawValue) drifted from its stock palette")
+            XCTAssertTrue(css.contains("color-scheme: \(palette.isDark ? "dark" : "light");"))
+        }
+    }
+
+    func testAutoResolvesToTheLightAndDarkDefaults() {
+        // With no host palette the page answers light/dark in CSS; a host that has to paint
+        // a surface asks `stock` the same question and must get the same two answers.
+        let css = ReaderChrome.themeCSS(ReaderSettings())
+        let light = ReaderPalette.stock(for: .auto, prefersDark: false)
+        let dark = ReaderPalette.stock(for: .auto, prefersDark: true)
+        XCTAssertFalse(light.isDark)
+        XCTAssertTrue(dark.isDark)
+        XCTAssertTrue(css.contains("--bg: \(light.bg);"))
+        XCTAssertTrue(css.contains("--bg: \(dark.bg);"))
+    }
+
+    func testAnExplicitThemeIgnoresTheDesktopsLightDarkSwitch() {
+        // The explicit themes exist precisely to pin a palette regardless of the desktop.
+        for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+            XCTAssertEqual(ReaderPalette.stock(for: theme, prefersDark: false),
+                           ReaderPalette.stock(for: theme, prefersDark: true))
+        }
+    }
+}

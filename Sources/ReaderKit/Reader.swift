@@ -15,19 +15,25 @@ public struct Article: Codable, Equatable {
     /// Blocks the hidden-phrase pass removed, per normalized phrase — what the eye-off badge
     /// and the popover's grouping show. Empty when nothing matched (or nothing was sent).
     public let hiddenHits: [String: Int]
+    /// The page's lead image (`og:image`), absolute and http(s), or nil when the page named
+    /// none. Carried through to recents so the start page can show a thumbnail (#25).
+    public let image: String?
 
     public init(title: String, byline: String?, siteName: String?, content: String,
-                hiddenHits: [String: Int] = [:]) {
+                hiddenHits: [String: Int] = [:], image: String? = nil) {
         self.title = title
         self.byline = byline
         self.siteName = siteName
         self.content = content
         self.hiddenHits = hiddenHits
+        self.image = image
     }
 
     /// Only the decoder is hand-written (for tolerance); with the key spelled out here the
     /// compiler synthesizes `encode(to:)`, so a new field can't be forgotten on the way out.
-    private enum CodingKeys: String, CodingKey { case title, byline, siteName, content, hiddenHits = "hidden" }
+    private enum CodingKeys: String, CodingKey {
+        case title, byline, siteName, content, image, hiddenHits = "hidden"
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +43,8 @@ public struct Article: Codable, Equatable {
         content = try c.decode(String.self, forKey: .content)
         // Tolerant: a missing or malformed map is "no hits", never a failed article.
         hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hiddenHits)) ?? [:]
+        // Absent in every article cached before #25, and in any page that names no image.
+        image = try c.decodeIfPresent(String.self, forKey: .image)
     }
 }
 
@@ -96,12 +104,23 @@ public struct ReaderSettings: Equatable {
         case bordered, italic
     }
 
+    /// Whether the start page shows lead-image thumbnails beside its recents (#25). An enum
+    /// rather than a Bool so it decodes, encodes and drives an Aa segment exactly like every
+    /// other setting — including keeping the default when a stored value is unrecognised.
+    public enum ArticleImages: String, CaseIterable {
+        case on, off
+    }
+
     public var fontSize = 17
     public var fontFamily = FontFamily.serif
     public var width = Width.normal
     public var lineHeight = LineHeight.normal
     public var theme = Theme.auto
     public var quoteStyle = QuoteStyle.bordered
+    /// Whether the start page shows a thumbnail beside a recent article that has one (#25).
+    /// On by default — the images are the point of the feature — and off is a real choice:
+    /// with it off the page fetches nothing, which is what it did before #25.
+    public var startPageImages = ArticleImages.on
 
     public init() {}
 
@@ -131,6 +150,9 @@ public struct ReaderSettings: Equatable {
         if let raw = dict["quoteStyle"] as? String, let value = QuoteStyle(rawValue: raw) {
             settings.quoteStyle = value
         }
+        if let raw = dict["startPageImages"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.startPageImages = value
+        }
         return settings
     }
 
@@ -144,6 +166,7 @@ public struct ReaderSettings: Equatable {
             "lineHeight": lineHeight.rawValue,
             "theme": theme.rawValue,
             "quoteStyle": quoteStyle.rawValue,
+            "startPageImages": startPageImages.rawValue,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         else { return "{}" }
@@ -205,6 +228,34 @@ public enum Reader {
     }
     """
 
+    /// Reads the page's own lead image — the one the publisher nominated for a link
+    /// preview — for the start page's recents thumbnails (#25).
+    ///
+    /// `og:image` (then Twitter's equivalent) rather than the first `<img>` in the body: an
+    /// editorially chosen image beats a logo or a tracking pixel, which is what the first
+    /// body image usually is. Read from the LIVE document, because Readability's result
+    /// carries no image field and patching the vendored copy to expose one is not on.
+    ///
+    /// Absolutised against the document, since the start page is an `about:blank` document
+    /// where a relative URL resolves to nothing, and restricted to http(s): the value is
+    /// somebody else's markup, and no other scheme has any business in an `<img src>`.
+    static let leadImageScript = """
+    function readerLeadImage() {
+      var selectors = ['meta[property="og:image"]', 'meta[property="og:image:url"]',
+                       'meta[name="twitter:image"]', 'meta[name="twitter:image:src"]'];
+      for (var i = 0; i < selectors.length; i++) {
+        var tag = document.querySelector(selectors[i]);
+        var raw = tag && tag.getAttribute('content');
+        if (!raw || !raw.trim()) { continue; }
+        try {
+          var url = new URL(raw.trim(), document.baseURI);
+          if (url.protocol === 'http:' || url.protocol === 'https:') { return url.href; }
+        } catch (err) {}
+      }
+      return null;
+    }
+    """
+
     /// The script the host evaluates on a loaded page. Returns `ownPageSentinel` for our own
     /// reader document (back/forward can land on one), otherwise gates on the cheap
     /// `isProbablyReaderable` check, parses a CLONE of the document (Readability's parse is
@@ -221,6 +272,7 @@ public enum Reader {
         \(ReadabilityJS.readerable)
         \(HiddenPhrases.hideScript)
         \(quoteScript)
+        \(leadImageScript)
         if (document.querySelector('meta[name="generator"][content="WebReader"]')) { return "\(ownPageSentinel)"; }
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
@@ -233,7 +285,8 @@ public enum Reader {
           byline: article.byline,
           siteName: article.siteName,
           content: doc.body.innerHTML,
-          hidden: hidden.hits
+          hidden: hidden.hits,
+          image: readerLeadImage()
         });
         })()
         """
@@ -358,6 +411,7 @@ public enum ReaderPage {
           /* Appearance ("Aa") popover and recents list. Chrome UI, so it keeps the sans
              stack and fixed sizes regardless of the reading settings. */
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
@@ -365,6 +419,7 @@ public enum ReaderPage {
         </head>
         <body>
           \(ReaderChrome.progressBar())
+          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
           \(ReaderChrome.indent(ReaderChrome.controls(history: history, showsRating: true,
                                                       rating: rating), by: 2))
           <main>

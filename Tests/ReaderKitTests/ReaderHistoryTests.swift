@@ -81,4 +81,33 @@ final class ReaderHistoryTests: XCTestCase {
             .joined(separator: ",")
         XCTAssertEqual(ReaderHistory.fromJSON("[\(rows)]").entries.count, ReaderHistory.limit)
     }
+
+    // MARK: - Lead image (#25)
+
+    func testTheImageRoundTripsAndIsOptional() {
+        var history = ReaderHistory()
+        history.record(title: "With", url: "https://x.test/a", image: "https://x.test/a.jpg")
+        history.record(title: "Without", url: "https://x.test/b")
+        let decoded = ReaderHistory.fromJSON(history.json)
+        XCTAssertEqual(decoded.entries.map(\.image), [nil, "https://x.test/a.jpg"])
+    }
+
+    func testARowWithNoImageOmitsTheKeyEntirely() {
+        // Not written as null: a list stored before #25 has to round-trip unchanged, or every
+        // launch rewrites the blob (and, once sync lands, re-uploads it).
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        XCTAssertFalse(history.json.contains("image"))
+        XCTAssertEqual(ReaderHistory.fromJSON(history.json).json, history.json)
+    }
+
+    func testALegacyBlobDecodesWithNoImage() {
+        // Rows written before #25 have no image key. They must decode as rows without an
+        // image, never be skipped as malformed.
+        let decoded = ReaderHistory.fromJSON(
+            "[{\"title\":\"Old\",\"url\":\"https://x.test/old\"}]")
+        XCTAssertEqual(decoded.entries.count, 1)
+        XCTAssertNil(decoded.entries[0].image)
+        XCTAssertEqual(decoded.entries[0].title, "Old")
+    }
 }

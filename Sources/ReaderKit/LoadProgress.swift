@@ -19,6 +19,9 @@ public enum LoadProgress: Equatable {
     /// 2.5 registers as "loading". Exported so the CSS and every host read one value instead
     /// of a third platform adding a third hand-kept copy.
     public static let lineThickness: Double = 2.5
+    /// What the loading cover says while a page is on its way (#24). One string, so the two
+    /// hosts' native covers can't word it differently.
+    public static let coverLabel = "Loading"
     /// At/above this, treat the load as finished (WebKit reports 1.0 on completion).
     static let completeThreshold = 1.0
 

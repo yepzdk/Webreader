@@ -53,6 +53,29 @@ final class ReaderDecodeTests: XCTestCase {
     }
 }
 
+final class ArticleLeadImageTests: XCTestCase {
+    func testDecodesTheLeadImage() {
+        let json = """
+        {"title":"T","content":"<p>x</p>","image":"https://x.test/lead.jpg"}
+        """
+        XCTAssertEqual(Reader.decode(json)?.image, "https://x.test/lead.jpg")
+    }
+
+    func testAnArticleCachedBeforeTheImageExistedStillDecodes() {
+        // ArticleCache blobs on disk predate #25 and carry no image key.
+        let article = Reader.decode("{\"title\":\"T\",\"content\":\"<p>x</p>\"}")
+        XCTAssertNotNil(article)
+        XCTAssertNil(article?.image)
+    }
+
+    func testTheImageSurvivesTheCacheRoundTrip() {
+        let article = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>",
+                              image: "https://x.test/lead.jpg")
+        let data = try! JSONEncoder().encode(article)
+        XCTAssertEqual(try! JSONDecoder().decode(Article.self, from: data), article)
+    }
+}
+
 final class ReaderSettingsTests: XCTestCase {
     func testDecodesFullPayload() {
         let payload: [String: Any] = ["fontSize": 21, "fontFamily": "sans", "width": "wide",
@@ -110,6 +133,28 @@ final class ReaderSettingsTests: XCTestCase {
     }
 }
 
+final class StartPageImagesSettingTests: XCTestCase {
+    func testDecodesAndRoundTrips() {
+        var settings = ReaderSettings()
+        XCTAssertEqual(settings.startPageImages, .on, "images are the point of the feature")
+        settings.startPageImages = .off
+        let decoded = ReaderSettings.fromJSON(settings.json)
+        XCTAssertEqual(decoded.startPageImages, .off)
+        XCTAssertEqual(decoded.json, settings.json)
+    }
+
+    func testAStoredBlobFromBeforeTheSettingKeepsImagesOn() {
+        XCTAssertEqual(ReaderSettings.fromJSON("{\"fontSize\":17}").startPageImages, .on)
+    }
+
+    func testAnUnrecognisedValueKeepsTheDefault() {
+        // Same tolerance as every other field: a hand-edited or future value must not turn
+        // the feature off by accident.
+        XCTAssertEqual(ReaderSettings.decode(["startPageImages": "nonsense"]).startPageImages, .on)
+        XCTAssertEqual(ReaderSettings.decode(["startPageImages": "off"]).startPageImages, .off)
+    }
+}
+
 final class ReaderExtractionScriptTests: XCTestCase {
     func testContainsVendoredSourcesAndGate() {
         let script = Reader.extractionScript()
@@ -153,6 +198,29 @@ final class ReaderExtractionScriptTests: XCTestCase {
         let hide = script.range(of: "var hidden = readerHideBlocks(")!
         let wrap = script.range(of: "readerWrapQuotes(doc.body);")!
         XCTAssertTrue(hide.lowerBound < wrap.lowerBound)
+    }
+}
+
+final class LeadImageExtractionTests: XCTestCase {
+    func testTheScriptReadsThePagesNominatedImage() {
+        let script = Reader.extractionScript()
+        XCTAssertTrue(script.contains("meta[property=\"og:image\"]"))
+        XCTAssertTrue(script.contains("meta[name=\"twitter:image\"]"))
+        XCTAssertTrue(script.contains("image: readerLeadImage()"))
+    }
+
+    func testTheImageIsAbsolutisedAndSchemeRestricted() {
+        // The start page is an about:blank document, so a relative URL resolves to nothing;
+        // and the value is somebody else's markup, so only http(s) belongs in an <img src>.
+        let script = Reader.extractionScript()
+        XCTAssertTrue(script.contains("new URL(raw.trim(), document.baseURI)"))
+        XCTAssertTrue(script.contains("url.protocol === 'http:' || url.protocol === 'https:'"))
+    }
+
+    func testTheLookupReadsTheLiveDocumentNotTheParsedCopy() {
+        // Readability's result carries no image field, and the DOMParser copy is a filtered
+        // body — the meta tags only exist on the real document.
+        XCTAssertTrue(Reader.extractionScript().contains("document.querySelector(selectors[i])"))
     }
 }
 
@@ -362,6 +430,19 @@ final class ReaderPageTests: XCTestCase {
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("height: \(LoadProgress.lineThickness)px; z-index: 9;"))
         XCTAssertTrue(html.contains("right: 14px; z-index: 10;"))
+    }
+
+    // MARK: - Nav slot
+
+    func testReaderOffersAWayHome() {
+        // Before #15 the only route back to the start page was a menu item — and on Linux
+        // there is no menu bar at all.
+        let page = ReaderPage.html(article: article)
+        XCTAssertTrue(page.contains("<div class=\"reader-nav\">"))
+        XCTAssertTrue(page.contains("id=\"readerHomeBtn\""))
+        XCTAssertTrue(page.contains("messageHandlers.readerHome.postMessage"))
+        // The slot's occupant here is Home, never the start page's Settings button.
+        XCTAssertFalse(page.contains("id=\"startSettings\""))
     }
 
     // MARK: - Rating the article being read

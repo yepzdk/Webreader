@@ -37,6 +37,40 @@ public struct ReaderPalette: Equatable, Sendable {
     /// scrollbars and the default canvas match rather than staying stubbornly light.
     public let isDark: Bool
 
+    /// The palette a given theme paints, so a host can match a native surface to the page
+    /// it sits in front of — the loading cover, and anything a later host puts beside the
+    /// web view (#24).
+    ///
+    /// The four explicit themes ignore `prefersDark` and pin their own colours, exactly as
+    /// they do in CSS; only `.auto` consults it, standing in for the `prefers-color-scheme`
+    /// query the page would otherwise answer for itself.
+    ///
+    /// `ReaderChrome.themeCSS` renders its stylesheet from these same values, so the cover
+    /// cannot drift from the document — the `LoadProgress.lineThickness` arrangement, one
+    /// step further.
+    public static func stock(for theme: ReaderSettings.Theme, prefersDark: Bool) -> ReaderPalette {
+        switch theme {
+        case .auto: return prefersDark ? stock(for: .dark, prefersDark: true)
+                                       : stock(for: .light, prefersDark: false)
+        case .light:
+            return ReaderPalette(bg: "#fafafa", fg: "#1c1c1e", muted: "#6b6b70",
+                                 accent: "#2563eb", border: "rgba(0,0,0,0.12)",
+                                 surface: "rgba(0,0,0,0.05)", isDark: false)
+        case .sepia:
+            return ReaderPalette(bg: "#f4ecd8", fg: "#3d3225", muted: "#6f6049",
+                                 accent: "#2563eb", border: "rgba(61,50,37,0.18)",
+                                 surface: "rgba(61,50,37,0.07)", isDark: false)
+        case .dark:
+            return ReaderPalette(bg: "#1c1c1e", fg: "#f2f2f7", muted: "#9a9aa0",
+                                 accent: "#3b82f6", border: "rgba(255,255,255,0.16)",
+                                 surface: "rgba(255,255,255,0.08)", isDark: true)
+        case .black:
+            return ReaderPalette(bg: "#000000", fg: "#f2f2f7", muted: "#98989e",
+                                 accent: "#3b82f6", border: "rgba(255,255,255,0.18)",
+                                 surface: "rgba(255,255,255,0.10)", isDark: true)
+        }
+    }
+
     public init(bg: String, fg: String, muted: String, accent: String,
                 border: String, surface: String, isDark: Bool) {
         self.bg = bg

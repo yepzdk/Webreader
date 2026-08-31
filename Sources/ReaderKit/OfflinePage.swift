@@ -119,18 +119,20 @@ public enum OfflineFallback {
           .icon svg { width: 44px; height: 44px; }
           h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
           p { color: var(--muted); margin: 0 auto 24px; max-width: 24rem; }
-          button {
+          .card button {
             font: inherit; font-weight: 500;
             color: var(--accent-fg); background: var(--accent);
             border: 0; border-radius: 6px; padding: 9px 18px; cursor: pointer;
             transition: opacity 160ms ease-out;
           }
-          button:hover { opacity: 0.92; }
-          button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-          @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+          .card button:hover { opacity: 0.92; }
+          .card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+          @media (prefers-reduced-motion: reduce) { .card button { transition: none; } }
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 2))
         </style>
         </head>
         <body>
+          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
           <div class="card">
             <div class="icon" aria-hidden="true">
               <!-- wifi-off, Lucide-style line icon, inherits currentColor -->

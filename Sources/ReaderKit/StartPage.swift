@@ -78,8 +78,8 @@ public enum StartPage {
             """
             : """
             <h2 class="section">Recent articles</h2>
-                  <div class="recents-inline">
-                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history), by: 8))
+                  <div class="recents-inline\(history.entries.contains { $0.image != nil } ? " has-thumbs" : "")">
+                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history, thumbnails: true), by: 8))
                   </div>
             """
         return """
@@ -167,6 +167,29 @@ public enum StartPage {
             white-space: normal;
             display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
           }
+          /* Thumbnails (#25). A grid rather than a flex line, and only in a list that has at
+             least one image: the text column is pinned, so a row whose article named no image
+             still lines its title up with the rest instead of starting 74px to their left.
+             A list with no images at all is laid out exactly as it always was. Scoped to the
+             inline list — the reader's 280px popover has no room and never asks for them. */
+          .recents-inline.has-thumbs .recent {
+            display: grid; grid-template-columns: 64px 1fr; gap: 0 10px; align-items: start;
+          }
+          .recents-inline.has-thumbs .recent-thumb { grid-row: 1 / span 2; }
+          /* Pinned, or auto-placement would drop an imageless row's title into the 64px
+             column and squeeze it. */
+          .recents-inline.has-thumbs .recent-title,
+          .recents-inline.has-thumbs .recent-host { grid-column: 2; }
+          /* 64x40 rather than a square: a lead image is usually landscape, and this is about
+             the height two clamped title lines already take, so rows barely grow. */
+          .recent-thumb {
+            width: 64px; height: 40px; object-fit: cover;
+            border-radius: 4px; background: var(--surface);
+          }
+          /* Article images off: no image, no reserved column, and nothing fetched — the
+             appearance script is the only thing that ever sets a src. */
+          :root[data-thumbs="off"] .recent-thumb { display: none; }
+          :root[data-thumbs="off"] .recents-inline.has-thumbs .recent { display: block; }
           .empty { margin-top: 36px; }
           #suggested[hidden], .empty-suggestions[hidden] { display: none; }
           /* Suggested rows reuse the recents row markup, so they inherit its styling — the
@@ -196,21 +219,15 @@ public enum StartPage {
             padding: 0; border: 0; background: none; cursor: pointer;
             font: inherit; color: var(--accent); text-decoration: underline;
           }
-          /* A quiet way into Settings from the page whose content it governs. */
-          #startSettings {
-            position: fixed; bottom: 14px; left: 14px;
-            padding: 5px 10px; font-family: inherit; font-size: 12px;
-            color: var(--muted); background: var(--bg);
-            border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-          }
-          #startSettings:hover { color: var(--fg); }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history), by: 2))
-          <button id="startSettings" type="button">Settings</button>
+          \(ReaderChrome.indent(ReaderChrome.controls(history: history,
+                                                      showsThumbnailToggle: true), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
           <main>
             <div class="intro">
             <h1>\(name)</h1>
@@ -294,10 +311,6 @@ public enum StartPage {
               if (!row) { return; }
               post('readerOpen', row.dataset.url);
             });
-            document.getElementById('startSettings').addEventListener('click', function () {
-              post('readerOpenSettings', '');
-            });
-
             // Lucide-style line icons: thumbs-up, thumbs-down, and the same X the other
             // remove controls use. Markup is ours, never feed text.
             var ICON_MORE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';

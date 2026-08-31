@@ -86,6 +86,23 @@ static inline GtkWidget *wr_web_view_new(WebKitUserContentManager *ucm)
     return GTK_WIDGET(g_object_new(WEBKIT_TYPE_WEB_VIEW, "user-content-manager", ucm, NULL));
 }
 
+/**
+ * wr_prefers_dark_theme:
+ *
+ * Reads `GtkSettings:gtk-application-prefer-dark-theme`, which `g_object_get` can only
+ * deliver through varargs. Used to resolve `Theme.auto` for the native loading cover when
+ * the desktop supplies no palette of its own (off Omarchy); on Omarchy the palette answers
+ * the question outright and this is never consulted.
+ */
+static inline int wr_prefers_dark_theme(void)
+{
+    GtkSettings *settings = gtk_settings_get_default();
+    if (!settings) return 0;
+    gboolean dark = FALSE;
+    g_object_get(settings, "gtk-application-prefer-dark-theme", &dark, NULL);
+    return dark ? 1 : 0;
+}
+
 /* ---------------------------------------------------------------------------------------
  * Signal callback signatures.
  *

@@ -204,6 +204,84 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
     }
 
+    // MARK: - Recents thumbnails (#25)
+
+    func testARecentWithALeadImageGetsAThumbnail() {
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a",
+                       image: "https://x.test/lead.jpg?w=1&h=2")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("class=\"recent-thumb\""))
+        // The src is withheld until the appearance script applies the setting, so the page
+        // fetches nothing while article images are off.
+        XCTAssertTrue(html.contains("data-src=\"https://x.test/lead.jpg?w=1&amp;h=2\""))
+        XCTAssertFalse(html.contains("<img class=\"recent-thumb\" src="))
+        XCTAssertTrue(html.contains("referrerpolicy=\"no-referrer\""))
+    }
+
+    func testARecentWithoutALeadImageGetsNoBox() {
+        // Every row stored before #25 has no image; reserving space would render the whole
+        // list as grey rectangles on first upgrade.
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        // The class is always in the stylesheet; what must be absent is the element.
+        XCTAssertFalse(StartPage.html(appName: "Reader", history: history)
+            .contains("<img class=\"recent-thumb\""))
+    }
+
+    func testTheRecentsPopoverNeverGetsThumbnails() {
+        // One row builder serves the start page and the reader's 280px popover; only the
+        // start page asks for images.
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        XCTAssertFalse(ReaderChrome.recentsRows(history).contains("recent-thumb"))
+        XCTAssertTrue(ReaderChrome.recentsRows(history, thumbnails: true).contains("recent-thumb"))
+    }
+
+    func testTheImagesToggleIsOnTheStartPageOnly() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("data-key=\"startPageImages\""))
+        // The Aa popover is shared verbatim with the reader page, where the control would
+        // govern rows that aren't there.
+        XCTAssertFalse(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                        content: "<p>x</p>"))
+            .contains("data-key=\"startPageImages\""))
+    }
+
+    // MARK: - Nav slot
+
+    func testSettingsSitsInTheTopLeftNavSlot() {
+        // It used to hide in the bottom-left corner (#15). It now occupies the same slot Home
+        // takes on every other page, and carries its own handler so the page needs no listener.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("<div class=\"reader-nav\">"))
+        XCTAssertTrue(html.contains("id=\"startSettings\""))
+        XCTAssertTrue(html.contains("messageHandlers.readerOpenSettings.postMessage"))
+        XCTAssertFalse(html.contains("bottom: 14px"))
+    }
+
+    func testTheStartPageHasNoHomeButton() {
+        // This page *is* home, so the slot carries Settings instead.
+        XCTAssertFalse(StartPage.html(appName: "Reader").contains("id=\"readerHomeBtn\""))
+    }
+
+    func testBothChromeClustersShareOneBaseline() {
+        // The nav slot and the control cluster are separate fixed elements in opposite
+        // corners; they only look like one row of chrome while they agree on `top`.
+        let nav = ReaderChrome.navCSS()
+        let controls = ReaderChrome.controlsCSS()
+        XCTAssertTrue(nav.contains("top: 14px; left: 14px;"))
+        XCTAssertTrue(controls.contains("top: 14px; right: 14px;"))
+    }
+
+    func testTheNavSlotIsNotAControlCluster() {
+        // controlsScript dismisses an open popover on any click outside `.reader-controls`.
+        // Reusing that class for the nav slot would silently break the dismissal.
+        XCTAssertFalse(ReaderChrome.navCSS().contains(".reader-controls"))
+        XCTAssertFalse(ReaderChrome.navHome().contains("reader-controls"))
+        XCTAssertFalse(ReaderChrome.navSettings().contains("reader-controls"))
+    }
+
     func testBakedReaderSettingsDriveThePage() {
         var settings = ReaderSettings()
         settings.fontSize = 22

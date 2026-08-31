@@ -46,6 +46,8 @@ final class Application {
     private var host: ReaderHost?
     /// Held for the window's lifetime: the strip reaches its GObject callbacks unretained.
     private var progress: ProgressStrip?
+    /// Likewise: the cover's watchdog callback reaches it unretained.
+    private var loadingCover: LoadingCover?
 
     /// Set by `--clipboard` and consumed by the first activation. Issue #16 wants
     /// open-from-clipboard bindable in Hyprland so it works while the app is unfocused,
@@ -189,8 +191,13 @@ final class Application {
         gtk_overlay_set_child(overlayRef, widget)
         gtk_window_set_child(windowRef, overlay)
 
+        // Added before the progress strip, so the hairline is the later overlay child and
+        // keeps painting over the cover.
+        let cover = LoadingCover(overlay: OpaquePointer(overlayRef))
+
         let host = ReaderHost(webView: OpaquePointer(view), userContentManager: userContent,
                               store: store, cache: cache, palette: OmarchyTheme.current)
+        host.loadingCover = cover
         host.onTitleChange = { [weak self] title in self?.setWindowTitle(title) }
         // Before anything is loaded: `connectSignals` attaches the
         // `script-message-received::<name>` handlers and only then registers the names,
@@ -204,6 +211,7 @@ final class Application {
         self.window = window
         self.webView = view
         self.host = host
+        loadingCover = cover
         progress = ProgressStrip(overlay: overlayRef, webView: OpaquePointer(view))
         return host
     }
