@@ -38,7 +38,7 @@ public struct ReaderHistory: Equatable, Sendable {
 
     public init() {}
 
-    public init(clearedAt: Double) { self.clearedAt = clearedAt }
+    public init(clearedAt: Double) { self.clearedAt = Timestamp.stamp(clearedAt) }
 
     /// Records an article as the newest entry.
     ///
@@ -47,11 +47,11 @@ public struct ReaderHistory: Equatable, Sendable {
     /// Entries without a title or URL are dropped — an untitled row is unnavigable
     /// noise in the panel.
     public mutating func record(title: String, url: String,
-                                at readAt: Double = Date().timeIntervalSince1970) {
+                                at readAt: Double = Timestamp.now()) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !url.isEmpty else { return }
         entries.removeAll { $0.url == url }
-        entries.insert(Entry(title: title, url: url, readAt: readAt), at: 0)
+        entries.insert(Entry(title: title, url: url, readAt: Timestamp.stamp(readAt)), at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
     }
 
@@ -137,14 +137,14 @@ public struct ReaderHistory: Equatable, Sendable {
             rows = array
         case let object as [String: Any]:
             rows = object["entries"] as? [[String: Any]] ?? []
-            history.clearedAt = object["clearedAt"] as? Double
+            history.clearedAt = Timestamp.decode(object["clearedAt"])
         default:
             return history
         }
         history.entries = rows.compactMap { row in
             guard let title = row["title"] as? String, !title.isEmpty,
                   let url = row["url"] as? String, !url.isEmpty else { return nil }
-            return Entry(title: title, url: url, readAt: row["readAt"] as? Double)
+            return Entry(title: title, url: url, readAt: Timestamp.decode(row["readAt"]))
         }
         if history.entries.count > limit {
             history.entries.removeLast(history.entries.count - limit)

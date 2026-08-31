@@ -192,6 +192,12 @@ Two SwiftPM targets, no dependencies:
   Nextcloud client (or iCloud Drive, or Syncthing) resolves collisions per file: two
   instances writing one `history.json` produce `history (conflicted copy …).json` and lose
   a write. Single-writer files have no collision to resolve, and merging is a fold.
+- Every stored timestamp goes through `Timestamp` — whole milliseconds, quantized on write
+  *and* on read. They are compared for equality after a JSON round-trip (a cycle publishes
+  only when its state differs from the file it last wrote), and full `Double` precision does
+  not survive that trip identically on both platforms: corelibs-Foundation prints one
+  significant digit fewer than Darwin, so `…957.1707573` came back `…957.1707568` and every
+  device rewrote its file on every cycle. The Linux CI job is what caught it.
 - Recents carry `readAt` and history carries a `clearedAt` tombstone because two devices
   can't otherwise be ordered against each other. Rows with no `readAt` (everything written
   before sync existed) sort last and are dropped by any tombstone — that's what stops a

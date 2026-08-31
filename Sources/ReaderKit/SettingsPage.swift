@@ -61,11 +61,14 @@ public enum SettingsPage {
                 </div>
               </section>
         """
-        let syncSection = """
+        // Only for a host that has somewhere to send the button: it opens a native sheet
+        // with a folder picker, and drawing it on a host without one (the GTK host, until
+        // #7's Linux half lands) would be a control that does nothing.
+        let syncSection = syncSummary.isEmpty ? "" : """
         <h2 class="section">Sync</h2>
-              <p class="help">Appearance and recents follow you between Macs through a folder
-              that already syncs — in your Nextcloud folder, iCloud Drive, or anything
-              similar. Page zoom stays on this Mac.</p>
+              <p class="help">Appearance and recents follow you between your devices through a
+              folder that already syncs — in your Nextcloud folder, iCloud Drive, or anything
+              similar. Page zoom stays on this device.</p>
               <div class="sync">
                 <span class="sync-text">
                   <span class="sync-folder">\(HTML.escape(syncFolder ?? "Not set up"))</span>
@@ -196,8 +199,8 @@ public enum SettingsPage {
         <body>
           <main>
             <h1>Settings</h1>
-            <p class="lede">What the start page suggests, and how this Mac stays in step
-            with your others.</p>
+            <p class="lede">\(syncSection.isEmpty ? "Sources feed the suggestions on the start page."
+                : "What the start page suggests, and how this device stays in step with your others.")</p>
 
             <h2 class="section">Suggestion sources</h2>
             <p class="help">A feed address, or a site address to look one up on.</p>
@@ -326,18 +329,22 @@ public enum SettingsPage {
               post('readerHome', '');
             });
 
-            document.getElementById('syncOpen').addEventListener('click', function () {
-              post('readerOpenSync', '');
-            });
-
-            // The host pushes the two sync strings after the sheet changes anything, rather
-            // than re-rendering the page: a half-typed feed address in the field above must
-            // survive someone setting up sync.
-            window.readerSetSyncStatus = function (folder, summary) {
-              document.querySelector('.sync-folder').textContent = folder || 'Not set up';
-              document.querySelector('.sync-state').textContent = summary || '';
-              document.getElementById('syncOpen').textContent = folder ? 'Change…' : 'Set up…';
-            };
+            // Absent on a host that has no sync sheet to open (see `syncSection`), so both
+            // halves check before touching it.
+            var syncOpen = document.getElementById('syncOpen');
+            if (syncOpen) {
+              syncOpen.addEventListener('click', function () {
+                post('readerOpenSync', '');
+              });
+              // The host pushes the two sync strings after the sheet changes anything, rather
+              // than re-rendering the page: a half-typed feed address in the field above must
+              // survive someone setting up sync.
+              window.readerSetSyncStatus = function (folder, summary) {
+                document.querySelector('.sync-folder').textContent = folder || 'Not set up';
+                document.querySelector('.sync-state').textContent = summary || '';
+                syncOpen.textContent = folder ? 'Change…' : 'Set up…';
+              };
+            }
 
             // Called by the host once it has fetched (or failed to fetch) the address.
             window.readerSourceAdded = function (source) {

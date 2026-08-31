@@ -130,16 +130,23 @@ final class SyncFolderTests: XCTestCase {
         XCTAssertEqual(folder.state(of: me.id)?.history.entries.map(\.title), ["Theirs", "Mine"])
     }
 
+    /// The regression Linux found: with full-precision timestamps a state came back out of
+    /// its own file slightly unequal to the one that went in, so every cycle "changed"
+    /// something and rewrote the file — an upload loop over nothing. Real wall-clock values
+    /// here, not round numbers, because round numbers can't catch it.
     func testACycleThatLearnedNothingDoesNotRewriteTheFile() throws {
         let store = MemoryStore()
-        ReaderStore.setSettings(ReaderSettings(), store: store, at: 100)
+        ReaderStore.setSettings(ReaderSettings(), store: store, at: 1_788_172_957.170757)
+        var history = ReaderHistory()
+        history.record(title: "Read", url: "https://a.test/read", at: 1_788_172_957.645378)
+        ReaderStore.setHistory(history, store: store)
 
-        try engine(store, at: 500).sync()
+        try engine(store, at: 1_788_172_958.123456).sync()
         let first = folder.state(of: me.id)
-        let second = try engine(store, at: 900).sync()
+        let second = try engine(store, at: 1_788_172_999.987654).sync()
 
         XCTAssertEqual(folder.state(of: me.id)?.writtenAt, first?.writtenAt)
-        XCTAssertEqual(first?.writtenAt, 500)
+        XCTAssertEqual(first?.writtenAt, 1_788_172_958.123)
         XCTAssertFalse(second.changedHistory)
         XCTAssertFalse(second.changedSettings)
     }

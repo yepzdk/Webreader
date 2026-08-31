@@ -100,29 +100,48 @@ public struct SyncFolder: Sendable {
             throw SyncError.writeFailed((error as NSError).localizedDescription)
         }
         let url = directory.appendingPathComponent(state.fileName)
-        let data = Data(state.json.utf8)
+        do {
+            try writeCoordinated(Data(state.json.utf8), to: url)
+        } catch {
+            throw SyncError.writeFailed((error as NSError).localizedDescription)
+        }
+    }
+
+    // MARK: - Coordinated I/O
+    //
+    // `NSFileCoordinator` and the ubiquity APIs are Darwin-only; corelibs-Foundation has
+    // neither. On Linux the same operations are the plain file calls the coordinator wraps —
+    // which is what a Nextcloud or Syncthing folder needs anyway, since coordination only
+    // ever mattered for iCloud Drive materializing a file under us.
+
+    private func writeCoordinated(_ data: Data, to url: URL) throws {
+        #if canImport(Darwin)
         var writeError: Error?
         var coordinationError: NSError?
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
                                        error: &coordinationError) { url in
             do { try data.write(to: url, options: .atomic) } catch { writeError = error }
         }
-        if let failure = writeError ?? coordinationError {
-            throw SyncError.writeFailed((failure as NSError).localizedDescription)
-        }
+        if let failure = writeError ?? coordinationError { throw failure }
+        #else
+        try data.write(to: url, options: .atomic)
+        #endif
     }
 
-    // MARK: - Reading
-
-    /// A coordinated read, so a file being materialized by iCloud or replaced by the sync
-    /// client isn't read mid-write. nil for a missing, unreadable or non-device file.
+    /// nil for a missing, unreadable or non-device file. On Darwin the read is coordinated,
+    /// so a file being materialized by iCloud or replaced by the sync client isn't read
+    /// mid-write.
     private func read(_ url: URL) -> DeviceState? {
         var data: Data?
+        #if canImport(Darwin)
         var coordinationError: NSError?
         NSFileCoordinator().coordinate(readingItemAt: url, options: [],
                                        error: &coordinationError) { url in
             data = try? Data(contentsOf: url)
         }
+        #else
+        data = try? Data(contentsOf: url)
+        #endif
         guard let data, let object = try? JSONSerialization.jsonObject(with: data)
         else { return nil }
         return DeviceState.decode(object)
@@ -130,15 +149,21 @@ public struct SyncFolder: Sendable {
 
     /// False only for an iCloud item that exists as metadata but has no local bytes yet.
     /// Ordinary files (the Nextcloud client's, Syncthing's) have no downloading status and
-    /// are always readable.
+    /// are always readable — as is everything on Linux, where iCloud Drive doesn't exist.
     private func isDownloaded(_ url: URL) -> Bool {
+        #if canImport(Darwin)
         guard let status = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
             .ubiquitousItemDownloadingStatus else { return true }
         return status != .notDownloaded
+        #else
+        return true
+        #endif
     }
 
     private func requestDownload(of name: String) {
+        #if canImport(Darwin)
         try? FileManager.default.startDownloadingUbiquitousItem(
             at: directory.appendingPathComponent(name))
+        #endif
     }
 }

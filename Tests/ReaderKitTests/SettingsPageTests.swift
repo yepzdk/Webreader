@@ -31,7 +31,8 @@ final class SettingsPageTests: XCTestCase {
     }
 
     func testSyncSectionShowsWhereItStandsAndOpensTheSheet() {
-        let off = html()
+        let off = SettingsPage.html(appName: "WebReader",
+                                    syncSummary: "Settings and recents stay on this Mac.")
         XCTAssertTrue(off.contains(">Not set up<"))
         XCTAssertTrue(off.contains(">Set up…<"))
         XCTAssertTrue(off.contains("readerOpenSync"))
@@ -43,6 +44,18 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(on.contains("~/Nextcloud/Læsning &amp; &quot;co&quot;"))
         XCTAssertTrue(on.contains("Last synced 2 minutes ago · with iPad"))
         XCTAssertTrue(on.contains(">Change…<"))
+    }
+
+    /// The GTK host has no folder picker and no sheet, so it passes no summary — and must
+    /// not get a button that does nothing. The script keeps its (guarded) sync half either
+    /// way; what must be absent is the markup.
+    func testHostWithoutASyncSheetGetsNoSyncSection() {
+        let page = SettingsPage.html(appName: "WebReader", platform: .linux)
+        XCTAssertFalse(page.contains("<h2 class=\"section\">Sync</h2>"))
+        XCTAssertFalse(page.contains("id=\"syncOpen\""))
+        XCTAssertFalse(page.contains("class=\"sync\""))
+        // …and the rest of the page's script still installs.
+        XCTAssertTrue(page.contains("window.readerSourceAdded"))
     }
 
     func testOffersTheAddFormAndItsHostHooks() {

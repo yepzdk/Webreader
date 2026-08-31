@@ -39,11 +39,14 @@ public struct DeviceState: Equatable, Sendable {
     public let settings: ReaderSettings
     public let history: ReaderHistory
 
+    /// Timestamps are put on the millisecond grid (`Timestamp`) so a state that came back
+    /// out of a file compares equal to the one that went in — the whole basis for
+    /// publishing only when something actually changed.
     public init(device: Device, writtenAt: Double, settingsUpdatedAt: Double,
                 settings: ReaderSettings, history: ReaderHistory) {
         self.device = device
-        self.writtenAt = writtenAt
-        self.settingsUpdatedAt = settingsUpdatedAt
+        self.writtenAt = Timestamp.stamp(writtenAt)
+        self.settingsUpdatedAt = Timestamp.stamp(settingsUpdatedAt)
         self.settings = settings
         self.history = history
     }
@@ -84,8 +87,8 @@ public struct DeviceState: Equatable, Sendable {
         else { return nil }
         return DeviceState(
             device: Device(id: id, name: device["name"] as? String ?? id),
-            writtenAt: object["writtenAt"] as? Double ?? 0,
-            settingsUpdatedAt: object["settingsUpdatedAt"] as? Double ?? 0,
+            writtenAt: Timestamp.decode(object["writtenAt"]) ?? 0,
+            settingsUpdatedAt: Timestamp.decode(object["settingsUpdatedAt"]) ?? 0,
             settings: ReaderSettings.decode(object["settings"]),
             history: ReaderHistory.decode(object["history"]))
     }

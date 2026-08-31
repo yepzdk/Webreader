@@ -63,15 +63,15 @@ public enum ReaderStore {
     }
 
     public static func setSettings(_ settings: ReaderSettings, store: KeyValueStore,
-                                   at now: Double = Date().timeIntervalSince1970) {
+                                   at now: Double = Timestamp.now()) {
         store.set(settings.json, forKey: Key.settings)
-        store.set(String(now), forKey: Key.settingsUpdatedAt)
+        store.set(String(Timestamp.stamp(now)), forKey: Key.settingsUpdatedAt)
     }
 
     /// When settings were last written here; 0 when they never were, so any device that
     /// has touched them wins the merge.
     public static func settingsUpdatedAt(store: KeyValueStore) -> Double {
-        Double(store.string(forKey: Key.settingsUpdatedAt) ?? "") ?? 0
+        Timestamp.stamp(Double(store.string(forKey: Key.settingsUpdatedAt) ?? "") ?? 0)
     }
 
     /// Reverts appearance settings and zoom to stock. NOT the history: it's user data, not
@@ -81,10 +81,10 @@ public enum ReaderStore {
     /// The reset is stamped like any other settings write, so it propagates to the other
     /// devices instead of being overwritten by their older settings on the next sync.
     public static func resetAppearance(store: KeyValueStore,
-                                       at now: Double = Date().timeIntervalSince1970) {
+                                       at now: Double = Timestamp.now()) {
         store.set(nil, forKey: Key.settings)
         store.set(nil, forKey: Key.zoom)
-        store.set(String(now), forKey: Key.settingsUpdatedAt)
+        store.set(String(Timestamp.stamp(now)), forKey: Key.settingsUpdatedAt)
     }
 
     // MARK: - History
@@ -100,7 +100,7 @@ public enum ReaderStore {
     /// Clears the recents list, leaving the tombstone that makes the clear win over
     /// another device's copy of the list on the next sync.
     public static func clearHistory(store: KeyValueStore,
-                                    at now: Double = Date().timeIntervalSince1970) {
+                                    at now: Double = Timestamp.now()) {
         setHistory(ReaderHistory(clearedAt: now), store: store)
     }
 
