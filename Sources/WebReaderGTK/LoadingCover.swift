@@ -32,9 +32,9 @@ final class LoadingCover {
     /// Where the highlight is in its cycle: 0 puts it entirely off the label's left edge,
     /// `1 + spread` entirely off the right, so one cycle is one clean pass.
     private var phase: Double = 0
-    private var background = GdkRGBA()
-    private var base = GdkRGBA()
-    private var highlight = GdkRGBA()
+    private var background = Colour.grey
+    private var base = Colour.grey
+    private var highlight = Colour.grey
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
     /// that changes what's on screen, so they must be idempotent.
@@ -173,13 +173,22 @@ final class LoadingCover {
         cairo_show_text(cr, LoadProgress.coverLabel)
     }
 
-    /// A `ReaderPalette` colour as a `GdkRGBA`. GTK parses the same CSS spellings the palette
-    /// is written in (`#rrggbb`, `rgba(…)`), so the host does not need a parser of its own.
-    private static func colour(_ css: String) -> GdkRGBA {
+    /// A colour in the form cairo wants it. `GdkRGBA` stores `Float` and every cairo entry
+    /// point takes `Double`, so the conversion happens once here rather than at each of the
+    /// eight places a component is passed.
+    private struct Colour {
+        let red: Double
+        let green: Double
+        let blue: Double
+
+        static let grey = Colour(red: 0.5, green: 0.5, blue: 0.5)
+    }
+
+    /// A `ReaderPalette` colour, parsed by GTK. It reads the same CSS spellings the palette is
+    /// written in (`#rrggbb`, `rgba(…)`), so the host needs no parser of its own.
+    private static func colour(_ css: String) -> Colour {
         var rgba = GdkRGBA()
-        guard gdk_rgba_parse(&rgba, css) != 0 else {
-            return GdkRGBA(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
-        }
-        return rgba
+        guard gdk_rgba_parse(&rgba, css) != 0 else { return .grey }
+        return Colour(red: Double(rgba.red), green: Double(rgba.green), blue: Double(rgba.blue))
     }
 }
