@@ -185,8 +185,20 @@ Two SwiftPM targets, no dependencies:
   `coverSuppressedOnce` that the next navigation-start consumes. A test over the page flags
   instead would have missed the offline page, which sets none of them — that is how a page
   gets stuck behind "Loading". The other reveals are extraction declining, the own-page
-  sentinel, an ignorable load failure, and the reader toggle (which wants the site). There is
-  a 10 s watchdog because neither extraction nor `didFinish` has a timeout.
+  sentinel, an ignorable load failure, and the reader toggle (which wants the site).
+- The cover's watchdog measures **silence, not elapsed time**. It shipped as a fixed 10 s cap
+  from the moment the cover went up, which on a slow connection fired mid-load and revealed the
+  site the cover exists to hide. Each host now watches `estimatedProgress` /
+  `estimated-load-progress` itself and re-arms `LoadProgress.coverStallPatience` on every
+  change, so a load that is still moving is waited for however long it takes and only a stall
+  reveals the page. Measured against a deliberately slow local server: trickling for 24 s keeps
+  the cover up, headers-then-nothing drops it at 6.3 s. The cover owns this rather than being
+  fed progress by the delegate — whether it may come down is its own business.
+- The cover's copy is `LoadProgress.coverMessages`, one picked per appearance. All short and
+  all in the same register (what the reader does to a page — stripping it back to type), 138–237 px
+  at 20 pt: a sentence risks clipping in a narrow window, and mixing a two-word message with a
+  nine-word one makes the cover lurch between loads. Picked per load, never per frame — a label
+  changing under you mid-wait reads as a glitch.
 - `ReaderPalette.stock(for:prefersDark:)` is the **one** place the theme colours live;
   `ReaderChrome.themeCSS` renders its stylesheet from those values and the native covers read
   the same ones, so a cover cannot be a different colour from the page behind it. Same

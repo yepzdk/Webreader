@@ -57,6 +57,8 @@ Incoming links are cleaned first: tracking redirects that embed the real destina
 
 **Appearance.** The **Aa** button in the top-right corner sets font size, serif or sans type, column width, line height, theme (auto, light, sepia, dark, black), and how inline quotations (»…«, “…”) are set — bordered with medium weight, or italic. Changes apply instantly and persist. **⌘+ / ⌘− / ⌘0** zoom any page. View → Reset Reader Appearance returns everything to stock.
 
+**While a page loads** you get a plain screen rather than the site you asked not to read, with the load progress along the top edge. It stays until the article is ready — however long that takes, as long as the connection is still doing something — and steps aside if the page turns out not to be an article.
+
 **Getting back.** Every page except the start page has a Home button in the same top-left corner (**⇧⌘H** / **Ctrl+Shift+H** does the same) — the reader, Settings, and the offline page, so a failed load is never a dead end. On the start page that corner holds **Settings** instead.
 
 **Recents.** The list button next to **Aa** opens the last 30 articles read; click one and it opens instantly from its saved copy, offline too, for as long as the system keeps it (copies live in the cache folder). If a page fails to load and a saved copy exists, you get the copy instead of the error page. **⌘R** in the reader fetches the page again. The start page (**⇧⌘H**) lists the same articles inline. Clear history from the bottom of the panel (this also deletes the saved copies) — Reset Reader Appearance leaves it alone.

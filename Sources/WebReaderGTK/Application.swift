@@ -193,7 +193,7 @@ final class Application {
 
         // Added before the progress strip, so the hairline is the later overlay child and
         // keeps painting over the cover.
-        let cover = LoadingCover(overlay: overlayRef)
+        let cover = LoadingCover(overlay: overlayRef, webView: OpaquePointer(view))
 
         let host = ReaderHost(webView: OpaquePointer(view), userContentManager: userContent,
                               store: store, cache: cache, palette: OmarchyTheme.current)

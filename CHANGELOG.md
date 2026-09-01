@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   top-left corner, aligned with the controls opposite it. On the start page that slot holds
   Settings, which moves up from the bottom-left corner. Settings loses its "Done" button: it
   sat below the fold and committed nothing, since changes there apply as you make them.
-- **A loading screen** (#24). While a page loads, WebReader shows a plain "Loading" screen
-  with the progress line at the top instead of letting the original site paint itself only
-  to be replaced by the reader a moment later. A highlight travels across the word while the
-  load is in flight, and holds still if the system asks for reduced motion.
+- **A loading screen** (#24). While a page loads, WebReader shows a plain screen with the
+  progress line at the top instead of letting the original site paint itself only to be
+  replaced by the reader a moment later. It picks one of fifteen short messages per load, with
+  a highlight travelling across it — held still if the system asks for reduced motion. On a
+  slow connection the screen stays up as long as the load keeps moving, and gives way only if
+  nothing happens for six seconds.
 - **Article thumbnails** (#25). Recent and suggested articles on the start page show the
   article's own lead image where there is one — read from the page for recents, and from the
   feed for suggestions. Articles without one get a placeholder rather than a blank gap, so

@@ -13,6 +13,44 @@ final class CoverLabelTests: XCTestCase {
             .contains("font-size: 20px"))
     }
 
+    func testThereAreEnoughMessagesToNotRepeatConstantly() {
+        XCTAssertGreaterThanOrEqual(LoadProgress.coverMessages.count, 10)
+        XCTAssertEqual(Set(LoadProgress.coverMessages).count, LoadProgress.coverMessages.count,
+                       "duplicates waste a slot")
+        XCTAssertTrue(LoadProgress.coverMessages.allSatisfy { !$0.isEmpty })
+    }
+
+    func testEveryMessageIsShortEnoughToFitOneLine() {
+        // At 20pt a sentence risks clipping in a narrow window, and mixing a two-word message
+        // with a nine-word one makes the cover lurch between loads.
+        for message in LoadProgress.coverMessages {
+            XCTAssertLessThanOrEqual(message.count, 28, "too long: \(message)")
+        }
+    }
+
+    func testNoEmojiInTheMessages() {
+        // Same rule the offline page is held to: line icons, never emoji.
+        for message in LoadProgress.coverMessages {
+            XCTAssertFalse(message.unicodeScalars.contains { $0.properties.isEmoji },
+                           "emoji in: \(message)")
+        }
+    }
+
+    func testARandomMessageIsAlwaysOneOfTheList() {
+        for _ in 0..<200 {
+            XCTAssertTrue(LoadProgress.coverMessages.contains(LoadProgress.randomCoverMessage()))
+        }
+    }
+
+    func testTheCoverMeasuresSilenceNotElapsedTime() {
+        // A fixed cap from the moment the cover went up fired mid-load on a slow connection
+        // and revealed the site the cover exists to hide (#24). The window is now idle time,
+        // re-armed by every progress notification, so it must be short enough to catch a real
+        // stall without being so short that a normal gap between packets trips it.
+        XCTAssertGreaterThanOrEqual(LoadProgress.coverStallPatience, 3)
+        XCTAssertLessThanOrEqual(LoadProgress.coverStallPatience, 10)
+    }
+
     func testTheShimmerIsOneSlowPass() {
         // A spread wider than the label means the highlight starts and ends fully clear of
         // it, so every cycle is one clean pass rather than a band parked mid-word.

@@ -1,5 +1,6 @@
 import Cocoa
 import ReaderKit
+import WebKit
 
 /// The plain screen shown in place of a site while it loads (#24). Solid page background, the
 /// word "Loading" in the secondary text colour, nothing else — the top-edge progress hairline
@@ -15,20 +16,17 @@ import ReaderKit
 ///
 /// Stacking between the web view and the hairline instead keeps the progress line untouched.
 final class LoadingCover {
-    /// How long the cover waits before revealing the page regardless. Extraction has no
-    /// timeout and neither does WebKit's `didFinish`: a page that never settles (long-poll,
-    /// an ad frame that keeps loading) must not leave "Loading" on screen for good.
-    private static let patience: TimeInterval = 10
-
     private let view = NSView()
-    private let label = ShimmerLabel(LoadProgress.coverLabel)
+    private let label = ShimmerLabel()
     private var watchdog: Timer?
+    /// Watches the load so the watchdog can measure *silence* rather than elapsed time.
+    private var progressObserver: NSKeyValueObservation?
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
     /// that changes what's on screen, so they must be idempotent.
     private(set) var isVisible = false
 
-    init(over webView: NSView, in container: NSView) {
+    init(over webView: WKWebView, in container: NSView) {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.wantsLayer = true
         view.isHidden = true
@@ -45,6 +43,24 @@ final class LoadingCover {
             label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
+        // The cover keeps its own eye on the load rather than being fed progress by the
+        // delegate: whether it may come down is its business, and `ProgressLine` watching the
+        // same key path is no obstacle.
+        progressObserver = webView.observe(\.estimatedProgress, options: [.new]) {
+            [weak self] _, _ in self?.noteProgress()
+        }
+    }
+
+    /// The load moved, so it is not stuck: start the silence over.
+    private func noteProgress() {
+        guard isVisible else { return }
+        armWatchdog()
+    }
+
+    private func armWatchdog() {
+        watchdog?.invalidate()
+        watchdog = Timer.scheduledTimer(withTimeInterval: LoadProgress.coverStallPatience,
+                                        repeats: false) { [weak self] _ in self?.hide() }
     }
 
     /// Covers the web view, painted for `theme` so the page it precedes doesn't arrive as a
@@ -55,15 +71,13 @@ final class LoadingCover {
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let palette = ReaderPalette.stock(for: theme, prefersDark: dark)
         view.layer?.backgroundColor = NSColor(css: palette.bg)?.cgColor
+        label.setText(LoadProgress.randomCoverMessage())
         label.paint(base: NSColor(css: palette.muted) ?? .secondaryLabelColor,
                     highlight: NSColor(css: palette.fg) ?? .labelColor)
         view.isHidden = false
         label.startShimmer()
         isVisible = true
-        watchdog?.invalidate()
-        watchdog = Timer.scheduledTimer(withTimeInterval: Self.patience, repeats: false) {
-            [weak self] _ in self?.hide()
-        }
+        armWatchdog()
     }
 
     /// Reveals whatever is behind the cover. Called from every path that settles what's on
@@ -96,31 +110,37 @@ private final class ShimmerLabel: NSView {
 
     private let gradient = CAGradientLayer()
     private let glyphs = CATextLayer()
-    private let text: String
     private var size: NSSize = .zero
 
-    init(_ text: String) {
-        self.text = text
+    init() {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.addSublayer(gradient)
         gradient.startPoint = CGPoint(x: 0, y: 0.5)
         gradient.endPoint = CGPoint(x: 1, y: 0.5)
         gradient.locations = Self.locations(at: 0)
+        glyphs.alignmentMode = .center
+        gradient.mask = glyphs
+        applyScale()
+    }
+
+    /// Sets the message. The messages differ in width, so the measured size is the view's
+    /// intrinsic one and Auto Layout is told to ask again.
+    func setText(_ text: String) {
         // The mask only needs coverage, so the colour is irrelevant as long as it is opaque.
-        glyphs.string = NSAttributedString(string: text, attributes: [
+        let attributed = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: CGFloat(LoadProgress.coverLabelSize),
                                      weight: .semibold),
             // -0.01em, the same tightening the offline page's headline uses.
             .kern: -CGFloat(LoadProgress.coverLabelSize) * 0.01,
             .foregroundColor: NSColor.black,
         ])
-        glyphs.alignmentMode = .center
-        gradient.mask = glyphs
-        size = (glyphs.string as? NSAttributedString)?.size() ?? .zero
+        glyphs.string = attributed
+        size = attributed.size()
         size.width.round(.up)
         size.height.round(.up)
-        applyScale()
+        invalidateIntrinsicContentSize()
+        needsLayout = true
     }
 
     @available(*, unavailable)

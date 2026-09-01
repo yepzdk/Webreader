@@ -17,10 +17,6 @@ import ReaderKit
 /// `ProgressStrip` — a draw function plus a `g_timeout` — and the same lifetime rule: it must
 /// be kept alive for the window's lifetime, because `self` reaches the callbacks unretained.
 final class LoadingCover {
-    /// How long the cover waits before revealing the page regardless. Extraction has no
-    /// timeout and neither does WebKit's FINISHED: a page that never settles must not leave
-    /// "Loading" on screen for good.
-    private static let patienceMS: UInt32 = 10_000
     /// Repaint cadence of the shimmer, matching `ProgressStrip`'s fade.
     private static let frameMS: UInt32 = 16
 
@@ -35,12 +31,14 @@ final class LoadingCover {
     private var background = Colour.grey
     private var base = Colour.grey
     private var highlight = Colour.grey
+    /// The message this appearance of the cover is showing, picked once per load.
+    private var message = ""
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
     /// that changes what's on screen, so they must be idempotent.
     private(set) var isVisible = false
 
-    init(overlay: OpaquePointer) {
+    init(overlay: OpaquePointer, webView: OpaquePointer) {
         let area = gtk_drawing_area_new()!
         self.area = area
         // Fill the overlay rather than hug the text, so the site behind is covered edge to
@@ -62,6 +60,32 @@ final class LoadingCover {
         // Added before `ProgressStrip`, so the hairline is the later overlay child and stays
         // painted on top of this.
         gtk_overlay_add_overlay(wr_overlay(UnsafeMutableRawPointer(overlay)), area)
+
+        // The cover keeps its own eye on the load rather than being fed progress by the host:
+        // whether it may come down is its business, and `ProgressStrip` watching the same
+        // property is no obstacle.
+        wr_connect_notify(UnsafeMutableRawPointer(webView), "estimated-load-progress",
+                          { _, _, data in
+            guard let data else { return }
+            Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue().noteProgress()
+        }, this)
+    }
+
+    /// The load moved, so it is not stuck: start the silence over.
+    private func noteProgress() {
+        guard isVisible else { return }
+        armWatchdog()
+    }
+
+    private func armWatchdog() {
+        cancel(&watchdog)
+        watchdog = g_timeout_add(UInt32(LoadProgress.coverStallPatience * 1000), { data in
+            guard let data else { return 0 }
+            let cover = Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue()
+            cover.watchdog = 0
+            cover.hide()
+            return 0  // G_SOURCE_REMOVE — a macro the Swift importer can't see.
+        }, Unmanaged.passUnretained(self).toOpaque())
     }
 
     // MARK: - Visibility
@@ -72,19 +96,13 @@ final class LoadingCover {
         background = Self.colour(palette.bg)
         base = Self.colour(palette.muted)
         highlight = Self.colour(palette.fg)
+        message = LoadProgress.randomCoverMessage()
         phase = 0
         gtk_widget_set_visible(area, 1)
         isVisible = true
         gtk_widget_queue_draw(area)
         startShimmer()
-        cancel(&watchdog)
-        watchdog = g_timeout_add(Self.patienceMS, { data in
-            guard let data else { return 0 }
-            let cover = Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue()
-            cover.watchdog = 0
-            cover.hide()
-            return 0  // G_SOURCE_REMOVE — a macro the Swift importer can't see.
-        }, Unmanaged.passUnretained(self).toOpaque())
+        armWatchdog()
     }
 
     /// Reveals whatever is behind the cover. Called from every path that settles what's on
@@ -148,7 +166,7 @@ final class LoadingCover {
         cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD)
         cairo_set_font_size(cr, LoadProgress.coverLabelSize)
         var extents = cairo_text_extents_t()
-        cairo_text_extents(cr, LoadProgress.coverLabel, &extents)
+        cairo_text_extents(cr, message, &extents)
         guard extents.width > 0 else { return }
         let x = (width - extents.width) / 2 - extents.x_bearing
         let y = (height - extents.height) / 2 - extents.y_bearing
@@ -170,7 +188,7 @@ final class LoadingCover {
             cairo_set_source_rgb(cr, base.red, base.green, base.blue)
         }
         cairo_move_to(cr, x, y)
-        cairo_show_text(cr, LoadProgress.coverLabel)
+        cairo_show_text(cr, message)
     }
 
     /// A colour in the form cairo wants it. `GdkRGBA` stores `Float` and every cairo entry
