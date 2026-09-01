@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-31
+
 ### Fixed
 - **Keyboard focus** (#26). `Tab` now reaches the whole page on macOS — buttons, recents
   rows, the appearance controls — instead of stopping at the URL field.
@@ -105,7 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/yepzdk/webreader/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/yepzdk/webreader/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yepzdk/webreader/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/yepzdk/webreader/releases/tag/v0.9.0
