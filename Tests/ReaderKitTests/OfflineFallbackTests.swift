@@ -25,6 +25,24 @@ final class OfflineFallbackClassifyTests: XCTestCase {
     }
 }
 
+final class OfflineFallbackNavTests: XCTestCase {
+    func testTheOfflinePageIsNotADeadEnd() {
+        // Try Again retries the URL that just failed, so without this a failed load left no
+        // route anywhere else (#15).
+        let html = OfflineFallback.html(appName: "Reader", host: "x.test", kind: .offline)
+        XCTAssertTrue(html.contains("id=\"readerHomeBtn\""))
+        XCTAssertTrue(html.contains("messageHandlers.readerHome.postMessage"))
+    }
+
+    func testTheAccentButtonStylingStaysOnTheCard() {
+        // The page styled every `button` as the primary action; the nav button must keep the
+        // quiet chrome box it wears everywhere else.
+        let html = OfflineFallback.html(appName: "Reader", host: "x.test", kind: .offline)
+        XCTAssertTrue(html.contains(".card button {"))
+        XCTAssertFalse(html.contains("\n          button {"))
+    }
+}
+
 final class OfflineFallbackHTMLTests: XCTestCase {
     private func html(appName: String = "Example",
                       host: String? = "example.com",

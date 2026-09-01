@@ -24,7 +24,9 @@ final class ProgressLine {
         bar.wantsLayer = true
         bar.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
         bar.alphaValue = 0
-        container.addSubview(bar, positioned: .above, relativeTo: webView)
+        // Front-most, not merely above the web view: the loading cover sits between the two,
+        // and progress has to stay readable over it.
+        container.addSubview(bar, positioned: .above, relativeTo: nil)
         let width = bar.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: container.topAnchor),

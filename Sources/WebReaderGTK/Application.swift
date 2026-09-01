@@ -46,6 +46,8 @@ final class Application {
     private var host: ReaderHost?
     /// Held for the window's lifetime: the strip reaches its GObject callbacks unretained.
     private var progress: ProgressStrip?
+    /// Likewise: the cover's watchdog callback reaches it unretained.
+    private var loadingCover: LoadingCover?
 
     /// Set by `--clipboard` and consumed by the first activation. Issue #16 wants
     /// open-from-clipboard bindable in Hyprland so it works while the app is unfocused,
@@ -189,14 +191,25 @@ final class Application {
         gtk_overlay_set_child(overlayRef, widget)
         gtk_window_set_child(windowRef, overlay)
 
+        // Added before the progress strip, so the hairline is the later overlay child and
+        // keeps painting over the cover.
+        let cover = LoadingCover(overlay: overlayRef, webView: OpaquePointer(view))
+
         let host = ReaderHost(webView: OpaquePointer(view), userContentManager: userContent,
                               store: store, cache: cache, palette: OmarchyTheme.current)
+        host.loadingCover = cover
         host.onTitleChange = { [weak self] title in self?.setWindowTitle(title) }
         // Before anything is loaded: `connectSignals` attaches the
         // `script-message-received::<name>` handlers and only then registers the names,
         // which is the order the WebKit header asks for — the reverse races the first
         // message against its own registration.
         host.connectSignals()
+        // Already TRUE by default here, unlike the AppKit host — stated anyway so the two
+        // hosts read the same and a future default cannot quietly take Tab away (#26).
+        if let settings = webkit_web_view_get_settings(view) {
+            webkit_settings_set_enable_tabs_to_links(settings, 1)
+        }
+
         // Zoom is a multiplier (1.0 = 100%). Applied before the first load so no page is
         // ever drawn at the wrong size for a frame.
         webkit_web_view_set_zoom_level(view, ReaderStore.zoom(store: store))
@@ -204,6 +217,7 @@ final class Application {
         self.window = window
         self.webView = view
         self.host = host
+        loadingCover = cover
         progress = ProgressStrip(overlay: overlayRef, webView: OpaquePointer(view))
         return host
     }

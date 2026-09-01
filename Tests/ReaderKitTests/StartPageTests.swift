@@ -204,6 +204,150 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
     }
 
+    // MARK: - Recents thumbnails (#25)
+
+    func testARecentWithALeadImageGetsAThumbnail() {
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a",
+                       image: "https://x.test/lead.jpg?w=1&h=2")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("class=\"recent-thumb\""))
+        // The src is withheld until the appearance script applies the setting, so the page
+        // fetches nothing while article images are off.
+        XCTAssertTrue(html.contains("data-src=\"https://x.test/lead.jpg?w=1&amp;h=2\""))
+        XCTAssertFalse(html.contains("<img class=\"recent-thumb\" src="))
+        XCTAssertTrue(html.contains("referrerpolicy=\"no-referrer\""))
+    }
+
+    func testAListWhereNothingHasAnImageGetsNoColumnAtAll() {
+        // Every row stored before #25 has no image, so this is the state after upgrading.
+        // Neither an image nor a placeholder: the list looks exactly as it always did.
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertFalse(html.contains("<img class=\"recent-thumb\""))
+        // The class is always in the stylesheet; what must be absent is the element.
+        XCTAssertFalse(html.contains("<span class=\"recent-thumb recent-thumb-empty\""))
+        XCTAssertFalse(html.contains("recents-inline has-thumbs"))
+    }
+
+    func testAnImagelessRowInAMixedListGetsThePlaceholder() {
+        // The reason the placeholder exists: coverage is uneven by nature, so lists normally
+        // mix the two, and a blank column on those rows reads as a failed load.
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("recents-inline has-thumbs"))
+        XCTAssertTrue(html.contains("recent-thumb recent-thumb-empty"))
+        XCTAssertTrue(html.contains("data-src=\"https://x.test/l.jpg\""))
+    }
+
+    func testAFailedImageFallsBackToThePlaceholder() {
+        // Otherwise a dead URL leaves the browser's broken-image glyph in the row.
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        XCTAssertTrue(StartPage.html(appName: "Reader", history: history)
+            .contains("this.insertAdjacentHTML('afterend', window.readerThumbPlaceholder)"))
+    }
+
+    func testBothListsRenderTheSamePlaceholderMarkup() {
+        // One Swift constant, handed to the page script as a quoted literal, so the
+        // server-rendered recents rows and the host-delivered suggestion rows cannot drift.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerThumbPlaceholder = \"<span class="))
+        XCTAssertTrue(html.contains("row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder)"))
+    }
+
+    func testThePlaceholderIsHiddenOutsideAThumbnailList() {
+        // It ships in the reader popover's row markup too if a caller ever asks for it; only
+        // a list with a column may show it.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".recent-thumb-empty { display: none; }"))
+        XCTAssertTrue(html.contains(".has-thumbs .recent-thumb-empty {"))
+    }
+
+    func testTheRecentsPopoverNeverGetsThumbnails() {
+        // One row builder serves the start page and the reader's 280px popover; only the
+        // start page asks for images.
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        XCTAssertFalse(ReaderChrome.recentsRows(history).contains("recent-thumb"))
+        XCTAssertTrue(ReaderChrome.recentsRows(history, thumbnails: true).contains("recent-thumb"))
+    }
+
+    func testSuggestionRowsGetTheSameThumbnailAsRecents() {
+        let html = StartPage.html(appName: "Reader")
+        // Built by the host callback, since suggestions arrive after the page does.
+        XCTAssertTrue(html.contains("thumb.className = 'recent-thumb'"))
+        XCTAssertTrue(html.contains("thumb.dataset.src = item.image"))
+        XCTAssertTrue(html.contains("thumb.referrerPolicy = 'no-referrer'"))
+        // Never a direct src: whether a thumbnail fetches is decided in one place.
+        XCTAssertFalse(html.contains("thumb.src = item.image"))
+        XCTAssertTrue(html.contains("window.readerRevealThumbs()"))
+    }
+
+    func testOnlyOneFunctionEverTurnsAThumbnailIntoAFetch() {
+        // The invariant behind "images off means the page requests nothing": rows render with
+        // data-src alone, and `readerRevealThumbs` refuses while the setting is off. A second
+        // place setting .src would silently reintroduce the requests.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerRevealThumbs = function ()"))
+        XCTAssertTrue(html.contains("if (root.getAttribute('data-thumbs') === 'off') { return; }"))
+        XCTAssertEqual(html.components(separatedBy: "img.src = img.dataset.src").count - 1, 1)
+    }
+
+    func testSuggestionsReserveTheColumnOnlyWhenTheBatchHasImages() {
+        // Same rule as the server-rendered recents list, so a batch of imageless suggestions
+        // is laid out exactly as it was before thumbnails existed.
+        XCTAssertTrue(StartPage.html(appName: "Reader")
+            .contains("list.classList.toggle('has-thumbs'"))
+    }
+
+    func testTheImagesToggleIsOnTheStartPageOnly() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("data-key=\"startPageImages\""))
+        // The Aa popover is shared verbatim with the reader page, where the control would
+        // govern rows that aren't there.
+        XCTAssertFalse(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                        content: "<p>x</p>"))
+            .contains("data-key=\"startPageImages\""))
+    }
+
+    // MARK: - Nav slot
+
+    func testSettingsSitsInTheTopLeftNavSlot() {
+        // It used to hide in the bottom-left corner (#15). It now occupies the same slot Home
+        // takes on every other page, and carries its own handler so the page needs no listener.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("<div class=\"reader-nav\">"))
+        XCTAssertTrue(html.contains("id=\"startSettings\""))
+        XCTAssertTrue(html.contains("messageHandlers.readerOpenSettings.postMessage"))
+        XCTAssertFalse(html.contains("bottom: 14px"))
+    }
+
+    func testTheStartPageHasNoHomeButton() {
+        // This page *is* home, so the slot carries Settings instead.
+        XCTAssertFalse(StartPage.html(appName: "Reader").contains("id=\"readerHomeBtn\""))
+    }
+
+    func testBothChromeClustersShareOneBaseline() {
+        // The nav slot and the control cluster are separate fixed elements in opposite
+        // corners; they only look like one row of chrome while they agree on `top`.
+        let nav = ReaderChrome.navCSS()
+        let controls = ReaderChrome.controlsCSS()
+        XCTAssertTrue(nav.contains("top: 14px; left: 14px;"))
+        XCTAssertTrue(controls.contains("top: 14px; right: 14px;"))
+    }
+
+    func testTheNavSlotIsNotAControlCluster() {
+        // controlsScript dismisses an open popover on any click outside `.reader-controls`.
+        // Reusing that class for the nav slot would silently break the dismissal.
+        XCTAssertFalse(ReaderChrome.navCSS().contains(".reader-controls"))
+        XCTAssertFalse(ReaderChrome.navHome().contains("reader-controls"))
+        XCTAssertFalse(ReaderChrome.navSettings().contains("reader-controls"))
+    }
+
     func testBakedReaderSettingsDriveThePage() {
         var settings = ReaderSettings()
         settings.fontSize = 22

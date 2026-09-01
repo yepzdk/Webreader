@@ -32,6 +32,7 @@ enum ReaderChrome {
     static func themeAttribute(_ settings: ReaderSettings) -> String {
         (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
             + (settings.quoteStyle == .bordered ? "" : " data-quotes=\"\(settings.quoteStyle.rawValue)\"")
+            + (settings.startPageImages == .on ? "" : " data-thumbs=\"off\"")
     }
 
     /// The palette custom properties: light defaults, the dark media query, and the four
@@ -53,16 +54,8 @@ enum ReaderChrome {
     static func themeCSS(_ settings: ReaderSettings, platform: Platform = .macOS,
                          palette: ReaderPalette? = nil) -> String {
         let hosted = settings.theme == .auto ? palette : nil
-        let rootPalette = hosted.map {
-            """
-            --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
-            --border: \($0.border); --surface: \($0.surface);
-            color-scheme: \($0.isDark ? "dark" : "light");
-            """
-        } ?? """
-        --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-        --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
-        """
+        let rootPalette = hosted.map { properties($0, colorScheme: true) }
+            ?? properties(.stock(for: .light, prefersDark: false), colorScheme: false)
         var blocks = ["""
         :root {
           \(indent(rootPalette, by: 2))
@@ -76,37 +69,74 @@ enum ReaderChrome {
             blocks.append("""
             @media (prefers-color-scheme: dark) {
               :root {
-                --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-                --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
+                \(indent(properties(.stock(for: .dark, prefersDark: true), colorScheme: false), by: 4))
               }
             }
             """)
         }
+        let pinned = [ReaderSettings.Theme.light, .sepia, .dark, .black].map { theme in
+            """
+            :root[data-theme="\(theme.rawValue)"] {
+              \(indent(properties(.stock(for: theme, prefersDark: false), colorScheme: true), by: 2))
+            }
+            """
+        }.joined(separator: "\n")
         blocks.append("""
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
-        :root[data-theme="light"] {
-          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-          --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
-          color-scheme: light;
-        }
-        :root[data-theme="sepia"] {
-          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #2563eb;
-          --border: rgba(61,50,37,0.18); --surface: rgba(61,50,37,0.07);
-          color-scheme: light;
-        }
-        :root[data-theme="dark"] {
-          --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-          --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
-          color-scheme: dark;
-        }
-        :root[data-theme="black"] {
-          --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #3b82f6;
-          --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
-          color-scheme: dark;
-        }
+        \(pinned)
         """)
         return blocks.joined(separator: "\n")
+    }
+
+    /// A palette's six custom properties, two declarations to a line, as every block in
+    /// `themeCSS` has always written them. `colorScheme` adds the `color-scheme` line: the
+    /// blocks that answer the light/dark question outright carry it, the light defaults and
+    /// the dark media query (which the browser has already decided) do not.
+    private static func properties(_ palette: ReaderPalette, colorScheme: Bool) -> String {
+        var lines = [
+            "--bg: \(palette.bg); --fg: \(palette.fg); --muted: \(palette.muted); --accent: \(palette.accent);",
+            "--border: \(palette.border); --surface: \(palette.surface);",
+        ]
+        if colorScheme { lines.append("color-scheme: \(palette.isDark ? "dark" : "light");") }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The shared chrome button box: the same padding, colours, hairline and radius for the
+    /// top-right cluster and the top-left nav slot. One declaration and two selector lists,
+    /// so a button on one side of the window can't drift from a button on the other.
+    private static func buttonBox(_ selectors: String) -> String {
+        """
+        \(selectors) {
+          padding: 4px 10px; font-family: inherit; font-size: 14px;
+          color: var(--muted); background: var(--bg);
+          border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+        }
+        """
+    }
+
+    /// The top-left nav slot: one button on the same 14px baseline as the top-right cluster,
+    /// so the two read as one row of chrome rather than two stray corners.
+    ///
+    /// Deliberately *not* a second `.reader-controls`: `controlsScript`'s outside-click
+    /// dismissal keys off that class, and clicking the nav button must still close an open
+    /// popover. The occupant differs per page (`navHome`, `navSettings`) and both ids are
+    /// styled here, since a page renders one or the other and never both. Nothing here may
+    /// reach for `--surface` — the offline page renders a nav button and defines no such
+    /// custom property.
+    static func navCSS(platform: Platform = .macOS) -> String {
+        """
+        .reader-nav {
+          position: fixed; top: 14px; left: 14px; z-index: 10;
+          display: flex; gap: 6px;
+          font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+        }
+        \(buttonBox("#readerHomeBtn, #startSettings"))
+        #readerHomeBtn:hover, #startSettings:hover { color: var(--fg); }
+        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor. */
+        #readerHomeBtn { display: flex; align-items: center; padding: 5px 9px; }
+        #readerHomeBtn svg { display: block; }
+        """
     }
 
     /// CSS for the chrome controls: the button row, both popovers, the appearance segments
@@ -123,11 +153,7 @@ enum ReaderChrome {
         }
         /* Each button owns the popover anchored under it. */
         .reader-control { position: relative; }
-        #readerAa, #readerRecentsBtn, #readerHiddenBtn {
-          padding: 4px 10px; font-family: inherit; font-size: 14px;
-          color: var(--muted); background: var(--bg);
-          border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-        }
+        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn"))
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
@@ -378,15 +404,51 @@ enum ReaderChrome {
     /// so titles and URLs (other sites' content) run through the same escaping as the rest
     /// of the page. The URL lives in a data attribute; the host re-validates it before
     /// navigating.
-    static func recentsRows(_ history: ReaderHistory) -> String {
+    static func recentsRows(_ history: ReaderHistory, thumbnails: Bool = false) -> String {
         history.entries.map { entry in
             let host = URL(string: entry.url)?.host ?? ""
             let hostLine = host.isEmpty ? ""
                 : "<span class=\"recent-host\">\(HTML.escape(host))</span>"
             return "<button class=\"recent\" data-url=\"\(HTML.escape(entry.url))\">"
+                + (thumbnails ? thumbnail(entry) : "")
                 + "<span class=\"recent-title\">\(HTML.escape(entry.title))</span>"
                 + "\(hostLine)</button>"
         }.joined(separator: "\n")
+    }
+
+    /// What fills a thumbnail slot when the article named no image: the same box, in the
+    /// row surface, with a quiet picture glyph.
+    ///
+    /// A slot rather than a gap. Coverage is uneven by nature — an article need not name an
+    /// image and plenty of feeds name none — so a list will normally mix the two, and leaving
+    /// the column blank on those rows reads as a failed load rather than as a design.
+    ///
+    /// Only ever rendered into a list that carries `has-thumbs`; the CSS keeps it out of a
+    /// list where nothing has an image, so such a list looks exactly as it always did.
+    static let thumbnailPlaceholder =
+        "<span class=\"recent-thumb recent-thumb-empty\" aria-hidden=\"true\">"
+        + "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\""
+        + " stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\""
+        + " stroke-linejoin=\"round\">"
+        + "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/>"
+        + "<circle cx=\"9\" cy=\"9\" r=\"1.5\"/>"
+        + "<path d=\"m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21\"/>"
+        + "</svg></span>"
+
+    /// A row's lead-image thumbnail, or the placeholder when the article named none.
+    ///
+    /// The URL goes in `data-src`, not `src`: `readerRevealThumbs` is the only thing that ever
+    /// promotes one to a fetch, so with article images off the page requests nothing — which
+    /// is what the start page did before this existed. `no-referrer` keeps the reading list
+    /// from travelling back to the publisher, and an image that fails falls back to the
+    /// placeholder rather than leaving a broken glyph.
+    private static func thumbnail(_ entry: ReaderHistory.Entry) -> String {
+        guard let image = entry.image, !image.isEmpty else { return thumbnailPlaceholder }
+        return "<img class=\"recent-thumb\" alt=\"\" loading=\"lazy\""
+            + " referrerpolicy=\"no-referrer\""
+            + " onerror=\"this.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);"
+            + " this.remove()\""
+            + " data-src=\"\(HTML.escape(image))\">"
     }
 
     /// The recents popover's contents: the heading, the rows, and the clear action — or the
@@ -400,6 +462,40 @@ enum ReaderChrome {
             + "\n<button id=\"readerClear\">Clear history</button>"
     }
 
+    /// The nav slot's occupant on the reader and offline pages: back to the start page.
+    ///
+    /// The click posts inline rather than through `controlsScript`, because the offline page
+    /// carries no chrome script at all — one mechanism for one button beats a listener here
+    /// and an inline handler there. Every handler name is registered for the window's life,
+    /// so there is nothing for the bare `postMessage` to throw on.
+    static func navHome() -> String {
+        """
+        <div class="reader-nav">
+          <button id="readerHomeBtn" type="button" aria-label="Home" title="Start page"
+                  onclick="window.webkit.messageHandlers.readerHome.postMessage('')">
+            <!-- house, Lucide-style line icon -->
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>
+              <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </button>
+        </div>
+        """
+    }
+
+    /// The start page's nav occupant. The start page *is* home, so the slot carries the one
+    /// piece of navigation it does have — and Settings sits where Home sits on every other
+    /// page instead of hiding in the opposite corner.
+    static func navSettings() -> String {
+        """
+        <div class="reader-nav">
+          <button id="startSettings" type="button"
+                  onclick="window.webkit.messageHandlers.readerOpenSettings.postMessage('')">Settings</button>
+        </div>
+        """
+    }
+
     /// The chrome markup: the recents button with its popover, the hidden-text button with
     /// its (script-filled) list, then the "Aa" button with the appearance popover. All carry
     /// hover tooltips and name their own panel, since the buttons themselves are unlabelled.
@@ -407,7 +503,8 @@ enum ReaderChrome {
     /// rating (nil = unrated); the start page omits it, since there is no article to rate.
     static func controls(history: ReaderHistory,
                          showsRating: Bool = false,
-                         rating: TopicPreferences.Rating? = nil) -> String {
+                         rating: TopicPreferences.Rating? = nil,
+                         showsThumbnailToggle: Bool = false) -> String {
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -495,6 +592,7 @@ enum ReaderChrome {
                 <button data-key="quoteStyle" data-value="bordered">Bordered</button>
                 <button data-key="quoteStyle" data-value="italic">Italic</button>
               </div>
+              \(indent(thumbnailToggle(showsThumbnailToggle), by: 14))
               <div class="themes" role="group" aria-label="Theme">
                 <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
                 <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
@@ -504,6 +602,19 @@ enum ReaderChrome {
               </div>
             </div>
           </div>
+        </div>
+        """
+    }
+
+    /// The start page's "Article images" segment. Opt-in, like the rating pair: the popover is
+    /// shared verbatim with the reader page, where a control governing the start page's rows
+    /// would sit there doing nothing.
+    private static func thumbnailToggle(_ shows: Bool) -> String {
+        guard shows else { return "" }
+        return """
+        <div class="seg" role="group" aria-label="Article images">
+          <button data-key="startPageImages" data-value="on">Images</button>
+          <button data-key="startPageImages" data-value="off">No images</button>
         </div>
         """
     }
@@ -549,6 +660,18 @@ enum ReaderChrome {
             'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
             '<path d="M18 6 6 18M6 6l12 12"/></svg>';
 
+          // The only thing in the app that ever sets a thumbnail's src. Rows are rendered
+          // carrying `data-src` and nothing else, so while article images are off the page
+          // asks the publishers for nothing at all — which is what the start page did before
+          // thumbnails existed. Called by `apply`, and again by the start page whenever the
+          // host delivers suggestion rows, which arrive long after this has first run.
+          window.readerRevealThumbs = function () {
+            if (root.getAttribute('data-thumbs') === 'off') { return; }
+            document.querySelectorAll('.recent-thumb').forEach(function (img) {
+              if (!img.getAttribute('src') && img.dataset.src) { img.src = img.dataset.src; }
+            });
+          };
+
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
             root.style.setProperty('--reader-font', FONTS[s.fontFamily]);
@@ -558,6 +681,11 @@ enum ReaderChrome {
             else { root.setAttribute('data-theme', s.theme); }
             if (s.quoteStyle === 'italic') { root.setAttribute('data-quotes', 'italic'); }
             else { root.removeAttribute('data-quotes'); }
+            // Article thumbnails: the attribute drives the layout, exactly as data-quotes
+            // does, and `readerRevealThumbs` is the one thing that ever sets a src.
+            if (s.startPageImages === 'off') { root.setAttribute('data-thumbs', 'off'); }
+            else { root.removeAttribute('data-thumbs'); }
+            window.readerRevealThumbs();
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });

@@ -110,6 +110,16 @@ final class ReaderHost {
     /// One box per script message name, kept alive here (see `MessageBinding`).
     private var messageBindings: [MessageBinding] = []
 
+    /// The plain "Loading" screen that stands in for a site while it loads (#24). Owned by
+    /// `Application` (it is an overlay child of the window) and handed over here, which is
+    /// where every load starts and settles.
+    var loadingCover: LoadingCover?
+    /// Set by `loadHTML` and consumed by the next LOAD_STARTED: one of our own documents is
+    /// already the answer, so its load must not raise the cover again. A one-shot rather than
+    /// a test over the page flags — the flags differ per own page, and enumerating them is
+    /// how a page gets stuck behind "Loading".
+    private var coverSuppressedOnce = false
+
     init(webView: OpaquePointer, userContentManager: OpaquePointer,
          store: KeyValueStore, cache: ArticleCache,
          palette: @escaping () -> ReaderPalette?) {
@@ -288,6 +298,8 @@ final class ReaderHost {
     /// distinguishes this load from a foreign navigation to the same URI.
     private func loadHTML(_ html: String, base: URL?, as page: PageState.Page) {
         pageState.willShow(page)
+        loadingCover?.hide()
+        coverSuppressedOnce = true
         // Spelled out rather than passing an optional String through: the implicit
         // String-to-`const char *` bridge is only defined for a non-optional argument.
         if let base {
@@ -326,6 +338,8 @@ final class ReaderHost {
             // Back/forward landed on one of our own reader documents: it IS the reader, so
             // just say so. Nothing to extract, record, or cache.
             if result == Reader.ownPageSentinel {
+                // Back/forward landed on a reader document of ours; it is already the page.
+                self.loadingCover?.hide()
                 self.pageState.restored(generator: Self.readerGenerator)
                 self.readerSourceURL = url
                 // We arrived here through back/forward rather than `renderReader`, so the
@@ -351,6 +365,8 @@ final class ReaderHost {
             // rendering it would file page A's body under page B's key.
             guard self.currentURL == url else { return }
             guard let article = Reader.decode(result) else {
+                // Not an article. The site itself is the honest answer, so reveal it.
+                self.loadingCover?.hide()
                 if manual { self.beep() }
                 return
             }
@@ -374,7 +390,7 @@ final class ReaderHost {
         // recording the raw one would make the replay look like a new article.
         var history = ReaderStore.history(store: store)
         let key = URLCleaner.clean(source).absoluteString
-        history.record(title: article.title, url: key)
+        history.record(title: article.title, url: key, image: article.image)
         ReaderStore.setHistory(history, store: store)
         cache.prune(keeping: history.entries.map(\.url))
         let html = ReaderPage.html(article: article,
@@ -432,6 +448,14 @@ final class ReaderHost {
     /// owns that distinction, and is tested on it.
     private func navigationStarted() {
         pageState.navigationStarted()
+        // Someone else's page is on its way: cover it rather than let the site paint itself
+        // only to be replaced by the reader a moment later (#24).
+        if coverSuppressedOnce {
+            coverSuppressedOnce = false
+        } else {
+            loadingCover?.show(palette: LoadingCover.palette(
+                for: ReaderStore.settings(store: store), desktop: palette()))
+        }
         // Whatever is loading isn't the start page any more; a late result must not land on it.
         suggestionTask?.cancel()
         suggestionTask = nil
@@ -457,6 +481,8 @@ final class ReaderHost {
         // which case what landed is the offline page and its pending state is consumed here.
         if suppressReaderOnce {
             suppressReaderOnce = false
+            // Ctrl+Shift+R asked for the original page; showing it is the whole point.
+            loadingCover?.hide()
             pageState.navigationFinished()
             return
         }
@@ -477,6 +503,7 @@ final class ReaderHost {
         // own `load_html` documents whose base URI was nil (`about:blank`), so ask the
         // document what it is rather than trying to extract it.
         guard let url = currentURL, WebURL.isWebURL(url) else {
+            loadingCover?.hide()
             remarkOwnPage()
             return
         }
@@ -579,7 +606,12 @@ final class ReaderHost {
         // visible with its own Aa, recents and rating handlers gated shut. (The AppKit host
         // gets away with clearing unconditionally only because its `isShowingReader` is a
         // separate bool that `PageState.clear()` doesn't reach.)
-        guard !OfflineFallback.isIgnorable(errorCode: code) else { return 1 }
+        guard !OfflineFallback.isIgnorable(errorCode: code) else {
+            // The page on screen is untouched, so reveal it — no FINISHED follows an
+            // ignorable failure to take the cover down later.
+            loadingCover?.hide()
+            return 1
+        }
         pageState.clear()
         failedURL = uri.flatMap { URL(string: String(cString: $0)) }
         pendingFailure = OfflineFallback.classify(errorCode: code)
@@ -717,7 +749,7 @@ final class ReaderHost {
             openSettings()
 
         case "readerHome":
-            guard isShowingSettings else { return }
+            guard ownPage || isShowingFallback else { return }
             goHome()
 
         case "readerAddSource":
@@ -875,7 +907,11 @@ final class ReaderHost {
     private func showSuggestions(_ items: [FeedItem]) {
         // The page may have been replaced while the feeds were in flight.
         guard isShowingStartPage else { return }
-        let rows = items.map { ["title": $0.title, "url": $0.url, "source": $0.host] }
+        let rows: [[String: String]] = items.map { item in
+            var row = ["title": item.title, "url": item.url, "source": item.host]
+            if let image = item.image { row["image"] = image }
+            return row
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [])
         else { return }
         let literal = HTML.jsLiteral(String(decoding: data, as: UTF8.self))

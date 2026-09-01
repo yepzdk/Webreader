@@ -41,8 +41,22 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("role=\"alert\""))
     }
 
-    func testDoneReturnsHome() {
-        XCTAssertTrue(html().contains("readerHome"))
+    func testTheWayHomeIsTheSameNavSlotEveryOtherPageUses() {
+        // It used to be a "Done" button after the shortcut table, which on a page with a few
+        // sources sat below the fold — so the only route home was off screen (#15).
+        let page = html()
+        XCTAssertTrue(page.contains("<div class=\"reader-nav\">"))
+        XCTAssertTrue(page.contains("id=\"readerHomeBtn\""))
+        XCTAssertTrue(page.contains("messageHandlers.readerHome.postMessage"))
+    }
+
+    func testTheDoneButtonIsGone() {
+        // Two routes to one action, and the label promised a commit that never happened:
+        // every change on this page posts the moment it is made.
+        let page = html()
+        XCTAssertFalse(page.contains("id=\"done\""))
+        XCTAssertFalse(page.contains(">Done<"))
+        XCTAssertFalse(page.contains(".done {"))
     }
 
     func testLanguageSectionOnlyAppearsWithMoreThanOneLanguage() {
@@ -207,11 +221,12 @@ final class SettingsPageTests: XCTestCase {
         // Reference, not editor: no rebinding, so no host round-trip and no new handler.
         XCTAssertFalse(rendered.contains("readerShortcut"))
         XCTAssertFalse(rendered.contains("readerSetShortcut"))
-        // And it sits after the sections someone came to Settings to change.
+        // And it sits after the sections someone came to Settings to change, and is the last
+        // thing in the document — it used to be followed by a "Done" button (#15).
         let sources = try XCTUnwrap(rendered.range(of: "<h2 class=\"section\">Suggestion sources</h2>"))
         let keys = try XCTUnwrap(rendered.range(of: shortcutHeading))
-        let done = try XCTUnwrap(rendered.range(of: "id=\"done\""))
+        let end = try XCTUnwrap(rendered.range(of: "</main>"))
         XCTAssertTrue(sources.lowerBound < keys.lowerBound)
-        XCTAssertTrue(keys.lowerBound < done.lowerBound)
+        XCTAssertTrue(keys.lowerBound < end.lowerBound)
     }
 }
