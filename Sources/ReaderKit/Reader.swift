@@ -104,9 +104,9 @@ public struct ReaderSettings: Equatable {
         case bordered, italic
     }
 
-    /// Whether the start page shows lead-image thumbnails beside its recents (#25). An enum
-    /// rather than a Bool so it decodes, encodes and drives an Aa segment exactly like every
-    /// other setting — including keeping the default when a stored value is unrecognised.
+    /// Whether a list of articles shows lead-image thumbnails (#25). An enum rather than a
+    /// Bool so it decodes and encodes exactly like every other setting — including keeping
+    /// the default when a stored value is unrecognised.
     public enum ArticleImages: String, CaseIterable {
         case on, off
     }
@@ -117,10 +117,15 @@ public struct ReaderSettings: Equatable {
     public var lineHeight = LineHeight.normal
     public var theme = Theme.auto
     public var quoteStyle = QuoteStyle.bordered
-    /// Whether the start page shows a thumbnail beside a recent article that has one (#25).
+    /// Thumbnails beside the start page's recents and suggestions, and beside the reader
+    /// popover's two groups (#33) — one switch per surface, since each page shows only its
+    /// own lists and a thumbnail nobody sees is a request nobody asked for.
+    ///
     /// On by default — the images are the point of the feature — and off is a real choice:
-    /// with it off the page fetches nothing, which is what it did before #25.
-    public var startPageImages = ArticleImages.on
+    /// with a surface off, its rows carry no image, reserve no column and fetch nothing,
+    /// which is what the start page did before #25.
+    public var startPageThumbnails = ArticleImages.on
+    public var readerThumbnails = ArticleImages.on
 
     public init() {}
 
@@ -150,8 +155,19 @@ public struct ReaderSettings: Equatable {
         if let raw = dict["quoteStyle"] as? String, let value = QuoteStyle(rawValue: raw) {
             settings.quoteStyle = value
         }
+        // 0.11.0 stored one `startPageImages`, when the start page was the only surface with
+        // thumbnails. It meant "no thumbnails", so it seeds both switches rather than leaving
+        // the reader's on and fetching images the user had already opted out of. Only the two
+        // current keys are ever written.
         if let raw = dict["startPageImages"] as? String, let value = ArticleImages(rawValue: raw) {
-            settings.startPageImages = value
+            settings.startPageThumbnails = value
+            settings.readerThumbnails = value
+        }
+        if let raw = dict["startPageThumbnails"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.startPageThumbnails = value
+        }
+        if let raw = dict["readerThumbnails"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.readerThumbnails = value
         }
         return settings
     }
@@ -166,7 +182,8 @@ public struct ReaderSettings: Equatable {
             "lineHeight": lineHeight.rawValue,
             "theme": theme.rawValue,
             "quoteStyle": quoteStyle.rawValue,
-            "startPageImages": startPageImages.rawValue,
+            "startPageThumbnails": startPageThumbnails.rawValue,
+            "readerThumbnails": readerThumbnails.rawValue,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         else { return "{}" }
@@ -334,6 +351,7 @@ public enum ReaderPage {
                             history: ReaderHistory = ReaderHistory(),
                             hidden: HiddenPhrases = HiddenPhrases(),
                             rating: TopicPreferences.Rating? = nil,
+                            currentURL: String? = nil,
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let title = HTML.escape(article.title)
@@ -351,7 +369,7 @@ public enum ReaderPage {
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: settings.readerThumbnails))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -420,8 +438,11 @@ public enum ReaderPage {
         <body>
           \(ReaderChrome.progressBar())
           \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history, showsRating: true,
-                                                      rating: rating), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.controls(
+                history: history.recents(limit: ReaderChrome.popoverRecents,
+                                         excluding: currentURL),
+                showsRating: true, rating: rating,
+                showsRecents: true, showsHidden: true), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Recents live on the start page** (#32). The start page drops its recents and hidden-text
+  buttons: the recents popover duplicated the inline list in a worse form, and the
+  hidden-text panel had no article to group phrases against. Clearing history moves under
+  the inline list, and hidden phrases are managed on the settings page beside blocked
+  outlets.
+- **Five recent, five suggested** (#33). The reader's recents popover lists five recent
+  articles instead of the whole history, followed by five suggestions — both with
+  thumbnails — so you can pick up something new without going home first.
+- **Article images move to settings.** The Aa popover's **Images / No images** switch is
+  gone: sitting among the type and theme controls it read as governing the article's own
+  images, which it never did. The settings page now has an **Article images** section with
+  one switch per surface — the start page's lists and the reader's dropdown — and a list
+  with its switch off carries no images, reserves no space for them and fetches nothing.
+  Anyone who had turned the old switch off gets both new ones off.
+
 ## [0.11.0] - 2026-08-31
 
 ### Fixed

@@ -356,6 +356,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 // The restored document still shows the rating baked in when it was first
                 // rendered; it may have changed since.
                 self.pushRating(for: url)
+                // Its popover's suggested group was filled by a script call on the way in,
+                // which this navigation did not repeat (#33) — and the settings page may
+                // have flipped the thumbnail switch since this document was baked.
+                self.pushThumbnails()
+                self.loadSuggestions()
                 return
             }
             // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
@@ -388,16 +393,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // The cleaned URL, because opening a row routes through `openIncoming`, which
         // cleans — recording the raw one would make the replay look like a new article.
         var history = ReaderStore.history(store: store)
-        history.record(title: article.title, url: URLCleaner.clean(source).absoluteString,
-                       image: article.image)
+        let key = URLCleaner.clean(source).absoluteString
+        history.record(title: article.title, url: key, image: article.image)
         ReaderStore.setHistory(history, store: store)
         cache.prune(keeping: history.entries.map(\.url))
         let html = ReaderPage.html(article: article,
                                    settings: ReaderStore.settings(store: store),
                                    history: history,
                                    hidden: ReaderStore.hiddenPhrases(store: store),
-                                   rating: ReaderStore.topics(store: store)
-                                       .rating(for: URLCleaner.clean(source).absoluteString))
+                                   rating: ReaderStore.topics(store: store).rating(for: key),
+                                   currentURL: key)
         pendingReaderRender = true
         loadOwnPage(html, baseURL: source)
     }
@@ -466,17 +471,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         pageState.willShow(.settings)
         loadOwnPage(SettingsPage.html(appName: appName,
                                       settings: ReaderStore.settings(store: store),
-                                      suggestions: ReaderStore.suggestions(store: store)),
+                                      suggestions: ReaderStore.suggestions(store: store),
+                                      hidden: ReaderStore.hiddenPhrases(store: store)),
                     baseURL: nil)
     }
 
     // MARK: - Suggestions
 
-    /// Fetches the sources, ranks them against what's been read, and hands the result to the
-    /// start page. Everything here is best-effort: the fetch and ranking run off the main
-    /// actor inside the task, and the page is already on screen and stays usable whatever
-    /// happens. Main-actor isolated because it reads the page flags and hands off to the
-    /// web view; every caller is already on the main thread.
+    /// Fetches the sources, ranks them against what's been read, and hands the result to
+    /// whichever of our pages shows suggestions — the start page's list, or the reader's
+    /// recents popover (#33). Everything here is best-effort: the fetch and ranking run off
+    /// the main actor inside the task, and the page is already on screen and stays usable
+    /// whatever happens. Main-actor isolated because it reads the page flags and hands off to
+    /// the web view; every caller is already on the main thread.
     @MainActor
     private func loadSuggestions() {
         suggestionTask?.cancel()
@@ -514,8 +521,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     @MainActor
     private func showSuggestions(_ items: [FeedItem]) {
-        // The page may have been replaced while the feeds were in flight.
-        guard isShowingStartPage else { return }
+        // The page may have been replaced while the feeds were in flight. Both surfaces
+        // implement `readerSetSuggestions`; each renders the shape that fits it.
+        guard isShowingStartPage || isShowingReader else { return }
         let rows: [[String: String]] = items.map { item in
             var row = ["title": item.title, "url": item.url, "source": item.host]
             if let image = item.image { row["image"] = image }
@@ -588,6 +596,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if pendingReaderRender {
             pendingReaderRender = false
             isShowingReader = true
+            // The article is up; its popover's suggested group catches up when it can (#33).
+            // Usually free — arriving from the start page leaves the feeds warm in
+            // `FeedFetcher`'s cache — but a link opened from another app fetches here.
+            loadSuggestions()
             return
         }
         if suppressReaderOnce {
@@ -863,6 +875,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let value = rating.map { "'\($0.rawValue)'" } ?? "null"
         webView.evaluateJavaScript(
             "window.readerSetRating && window.readerSetRating(\(value), true)")
+    }
+
+    /// Tells a restored reader document whether its popover may show thumbnails. The
+    /// attribute was baked when the document was rendered, and the settings page can have
+    /// flipped the switch in between.
+    @MainActor
+    private func pushThumbnails() {
+        let state = ReaderStore.settings(store: store).readerThumbnails.rawValue
+        webView.evaluateJavaScript(
+            "window.readerSetThumbs && window.readerSetThumbs('\(state)')")
     }
 
     /// Stores a resolved source and tells the settings page to show its row.

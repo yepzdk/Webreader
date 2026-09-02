@@ -110,4 +110,25 @@ final class ReaderHistoryTests: XCTestCase {
         XCTAssertNil(decoded.entries[0].image)
         XCTAssertEqual(decoded.entries[0].title, "Old")
     }
+
+    func testRecentsTrimsAndCanDropTheArticleOnScreen() {
+        var history = ReaderHistory()
+        for index in 1...8 { history.record(title: "A\(index)", url: "https://x.test/\(index)") }
+        // Newest first, so 8 is the top row.
+        let five = history.recents(limit: 5)
+        XCTAssertEqual(five.entries.map(\.title), ["A8", "A7", "A6", "A5", "A4"])
+        // Excluding takes effect before the cap, so the panel still gets five rows.
+        let excluded = history.recents(limit: 5, excluding: "https://x.test/8")
+        XCTAssertEqual(excluded.entries.map(\.title), ["A7", "A6", "A5", "A4", "A3"])
+        // The stored list is untouched.
+        XCTAssertEqual(history.entries.count, 8)
+    }
+
+    func testRecentsIsHappyWithLessThanItAsksFor() {
+        var history = ReaderHistory()
+        history.record(title: "Only", url: "https://x.test/only")
+        XCTAssertEqual(history.recents(limit: 5).entries.count, 1)
+        XCTAssertTrue(history.recents(limit: 5, excluding: "https://x.test/only").entries.isEmpty)
+        XCTAssertTrue(ReaderHistory().recents(limit: 5).entries.isEmpty)
+    }
 }

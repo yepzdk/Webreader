@@ -46,6 +46,21 @@ public struct ReaderHistory: Equatable {
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
     }
 
+    /// The newest `limit` entries, optionally without `url`.
+    ///
+    /// What the reader's recents popover lists (#33). The article being read is recorded
+    /// before the page renders, so without the exclusion it would always be row one — a
+    /// fifth of a five-row panel spent on the article already on screen. The inline list on
+    /// the start page takes the whole history and does neither.
+    public func recents(limit: Int, excluding url: String? = nil) -> ReaderHistory {
+        var trimmed = ReaderHistory()
+        trimmed.entries = entries
+            .filter { $0.url != url }
+            .prefix(limit)
+            .map { $0 }
+        return trimmed
+    }
+
     /// The list as a JSON array string — the storage format. The reader page does NOT
     /// consume this: its rows are rendered (and escaped) in Swift from `entries`, so no
     /// history data reaches the page as script.

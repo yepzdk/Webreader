@@ -193,15 +193,55 @@ final class StartPageTests: XCTestCase {
 
     // MARK: - Shared chrome
 
-    func testCarriesTheSameChromeAsTheReader() {
+    func testCarriesTheAppearanceChromeButNeitherList() {
         var history = ReaderHistory()
         history.record(title: "Something", url: "https://x.test/s")
         let html = StartPage.html(appName: "Reader", history: history)
-        // Appearance popover and recents popover, both from ReaderChrome.
+        // The appearance popover is shared verbatim with the reader page.
         XCTAssertTrue(html.contains("id=\"readerAa\""))
-        XCTAssertTrue(html.contains("id=\"readerRecentsBtn\""))
         XCTAssertTrue(html.contains("messageHandlers.readerSettings.postMessage"))
-        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+        // The recents popover is not: it would be a second, worse copy of the inline list,
+        // and the hidden-text panel has no article to group its phrases against (#32).
+        XCTAssertFalse(html.contains("id=\"readerRecentsBtn\""))
+        XCTAssertFalse(html.contains("id=\"readerRecents\""))
+        XCTAssertFalse(html.contains("id=\"readerHiddenBtn\""))
+        XCTAssertFalse(html.contains("id=\"readerHiddenList\""))
+        // The reader page keeps both, from the same function.
+        let reader = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                      content: "<p>x</p>"), history: history)
+        XCTAssertTrue(reader.contains("id=\"readerRecentsBtn\""))
+        XCTAssertTrue(reader.contains("id=\"readerHiddenBtn\""))
+    }
+
+    func testTheChromeScriptDoesNotAssumeTheListsExist() {
+        // The shared script runs on a page carrying only the Aa popover, so every reference
+        // to the other two is conditional. Without this the whole script throws on load and
+        // the start page silently loses its theme, its thumbnails and its settings writes.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(".filter(function (p) { return p.btn && p.panel; });"))
+        XCTAssertTrue(html.contains("if (!hiddenList) { return; }"))
+        XCTAssertTrue(html.contains("if (recents) {"))
+        // …and the appearance pass still runs, which is what applies theme and data-thumbs.
+        XCTAssertTrue(html.contains("window.readerRevealThumbs();"))
+        XCTAssertTrue(html.contains("apply();"))
+    }
+
+    func testClearHistorySitsUnderTheInlineList() {
+        var history = ReaderHistory()
+        history.record(title: "Something", url: "https://x.test/s")
+        let html = StartPage.html(appName: "Reader", history: history)
+        XCTAssertTrue(html.contains("id=\"startClear\""))
+        XCTAssertTrue(html.contains("post('readerClear', '')"))
+        // A separate id from the popover's #readerClear, which carries the popover's own
+        // styling and is handled by the shared chrome script.
+        XCTAssertFalse(html.contains("id=\"readerClear\""))
+        // Clearing leaves the page saying the same thing an empty history says.
+        XCTAssertTrue(html.contains("window.readerEmptyRecents ="))
+        XCTAssertTrue(html.contains("column.insertAdjacentHTML('afterbegin', window.readerEmptyRecents)"))
+    }
+
+    func testNothingToClearWithAnEmptyHistory() {
+        XCTAssertFalse(StartPage.html(appName: "Reader").contains("id=\"startClear\""))
     }
 
     // MARK: - Recents thumbnails (#25)
@@ -267,13 +307,48 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains(".has-thumbs .recent-thumb-empty {"))
     }
 
-    func testTheRecentsPopoverNeverGetsThumbnails() {
-        // One row builder serves the start page and the reader's 280px popover; only the
-        // start page asks for images.
+    func testTheRecentsPopoverAsksForThumbnailsToo() {
+        // #25 kept them out of the 280px panel; #33 reversed that for consistency with the
+        // inline lists, so one row builder still serves both and both now ask for images.
         var history = ReaderHistory()
         history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
-        XCTAssertFalse(ReaderChrome.recentsRows(history).contains("recent-thumb"))
         XCTAssertTrue(ReaderChrome.recentsRows(history, thumbnails: true).contains("recent-thumb"))
+        XCTAssertFalse(ReaderChrome.recentsRows(history).contains("recent-thumb"))
+        // The popover reserves the column itself, as the inline list does.
+        XCTAssertTrue(ReaderChrome.recentsBody(history).contains("id=\"readerRecentsList\" class=\"has-thumbs\""))
+        XCTAssertTrue(ReaderChrome.recentsBody(history).contains("data-src=\"https://x.test/l.jpg\""))
+    }
+
+    func testTheThumbnailCSSIsSharedByBothPages() {
+        // It used to be scoped to the start page by placement, which is exactly what stopped
+        // the popover from ever showing one. Both pages now render the same block — including
+        // the images-off rules, which are the load-bearing part.
+        let reader = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                      content: "<p>x</p>"))
+        for rule in [".has-thumbs .recent {", ".recent-thumb {", ".recent-thumb-empty {",
+                     ":root[data-thumbs=\"off\"] .recent-thumb { display: none; }",
+                     ":root[data-thumbs=\"off\"] .has-thumbs .recent { display: block; }"] {
+            XCTAssertTrue(reader.contains(rule), rule)
+            XCTAssertTrue(StartPage.html(appName: "Reader").contains(rule), rule)
+        }
+    }
+
+    func testAClosedPanelFetchesNothing() {
+        // The popover is closed on every render, and an engine that ignores loading="lazy"
+        // inside display:none would otherwise fetch ten thumbnails per article for a panel
+        // nobody opened. Opening it is what asks for the images.
+        let html = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                    content: "<p>x</p>"))
+        XCTAssertTrue(html.contains("if (img.closest('[hidden]')) { return; }"))
+        XCTAssertTrue(html.contains("if (which) { window.readerRevealThumbs(); }"))
+        // …which only holds if a list is unhidden before it is revealed, on both pages.
+        for page in [html, StartPage.html(appName: "Reader")] {
+            let unhide = page.range(of: "hidden = false;")
+            let reveal = page.range(of: "if (window.readerRevealThumbs) { window.readerRevealThumbs(); }")
+            XCTAssertNotNil(unhide)
+            XCTAssertNotNil(reveal)
+            XCTAssertTrue(unhide!.lowerBound < reveal!.lowerBound)
+        }
     }
 
     func testSuggestionRowsGetTheSameThumbnailAsRecents() {
@@ -304,14 +379,20 @@ final class StartPageTests: XCTestCase {
             .contains("list.classList.toggle('has-thumbs'"))
     }
 
-    func testTheImagesToggleIsOnTheStartPageOnly() {
-        let html = StartPage.html(appName: "Reader")
-        XCTAssertTrue(html.contains("data-key=\"startPageImages\""))
-        // The Aa popover is shared verbatim with the reader page, where the control would
-        // govern rows that aren't there.
-        XCTAssertFalse(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
-                                                        content: "<p>x</p>"))
-            .contains("data-key=\"startPageImages\""))
+    func testTheAaPopoverHasNoImagesSegment() {
+        // "Images / No images" sat among the type and theme controls, where it read as
+        // governing the article's own images. It never did — it governed the thumbnails in
+        // the recents and suggested lists, which now say so on the settings page.
+        let reader = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                      content: "<p>x</p>"))
+        for page in [StartPage.html(appName: "Reader"), reader] {
+            XCTAssertFalse(page.contains("aria-label=\"Article images\""))
+            XCTAssertFalse(page.contains(">Images<"))
+            XCTAssertFalse(page.contains(">No images<"))
+            // The popover is now type, quotes and theme — nothing about images.
+            XCTAssertTrue(page.contains("aria-label=\"Column width\""))
+            XCTAssertTrue(page.contains("aria-label=\"Theme\""))
+        }
     }
 
     // MARK: - Nav slot
