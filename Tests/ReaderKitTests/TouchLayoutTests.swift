@@ -255,6 +255,55 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains("visibility: hidden; opacity: 0; pointer-events: none;"))
     }
 
+    func testEveryButtonInTheColumnIsTheSameSquare() {
+        // Measured 44x44 for the icon buttons, 47x44 for "Aa" and 45x44 for the toggle: a
+        // ragged right edge in a vertical stack, where on a horizontal row the same
+        // difference reads as correct. Fixed as ids, because the square has to beat
+        // `#readerHomeBtn`'s and `#readerRecentsBtn`'s own padding rules.
+        let css = ReaderChrome.chromeCSS()
+        for id in ["#readerHomeBtn", "#startSettings", "#readerAa", "#readerRecentsBtn",
+                   "#readerHiddenBtn", "#readerMoreBtn", "#readerLessBtn",
+                   "#readerChromeToggle"] {
+            XCTAssertTrue(css.contains(id), "\(id) is not squared in the column")
+        }
+        XCTAssertTrue(css.contains("width: 44px; padding: 0;"))
+        // And only in the column: a wider "Aa" beside narrower icons is right on a line.
+        guard let square = css.range(of: "width: 44px; padding: 0;"),
+              let compact = css.range(of: "@media \(ReaderChrome.compactViewport) {",
+                                      options: .backwards,
+                                      range: css.startIndex..<square.lowerBound) else {
+            return XCTFail("the square must sit inside a compact-viewport block")
+        }
+        XCTAssertLessThan(compact.lowerBound, square.lowerBound)
+    }
+
+    func testTheStartPageSettingsButtonTradesItsWordForAnIconInTheColumn() {
+        // A text button would be the one wide row in a stack of squares. Both are in the
+        // markup and CSS picks one, the same trick the toggle uses — CSS can hide a child,
+        // not rewrite one. The button keeps its `aria-label` either way.
+        let html = StartPage.html(appName: "R")
+        XCTAssertTrue(html.contains("<button id=\"startSettings\" type=\"button\" aria-label=\"Settings\""))
+        XCTAssertTrue(html.contains("<span class=\"nav-label\">Settings</span>"))
+        XCTAssertTrue(html.contains("class=\"nav-icon\""))
+        let css = ReaderChrome.chromeCSS()
+        // Roomy first, compact second, or the tie goes the wrong way and the icon never shows.
+        guard let roomy = css.range(of: "#startSettings .nav-icon { display: none; }"),
+              let column = css.range(of: "#startSettings .nav-icon { display: block; }") else {
+            return XCTFail("both halves of the swap must be present")
+        }
+        XCTAssertLessThan(roomy.lowerBound, column.lowerBound)
+    }
+
+    func testCollapsingHidesTheNavSlotAndNotJustTheCluster() {
+        // Reported: Home stayed on screen after collapsing. The two clusters are separate
+        // elements, so a rule that names only `.reader-control > button` leaves the nav slot
+        // behind — and the nav slot is the one button that is on every page.
+        let css = ReaderChrome.chromeCSS()
+        let collapsed = ".reader-chrome[data-collapsible=\"true\"]:not([data-open=\"true\"]) "
+        XCTAssertTrue(css.contains(collapsed + ".reader-nav > button,"))
+        XCTAssertTrue(css.contains(collapsed + ".reader-control > button {"))
+    }
+
     func testTheStackReversesSoHomeLandsNearestTheThumb() {
         // `column` on the wrapper puts the toggle at the foot; `column-reverse` inside sends
         // the nav slot — first in the markup — to the bottom of the stack, directly above

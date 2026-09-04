@@ -608,6 +608,17 @@ enum ReaderChrome {
     private static let chromeGap = 10
     private static let chromeEdge = 14
 
+    /// Every button that stands in the chrome column, by id: what `buttonBox` styles, plus
+    /// the rating pair (its own box, so the pressed accent can override it) and the toggle.
+    ///
+    /// Spelled out as ids on purpose. The square rule has to beat `#readerHomeBtn`'s and
+    /// `#readerRecentsBtn`'s own padding declarations, which are id-specific and emitted
+    /// after `buttonBox`; a class or element selector would quietly lose to them.
+    private static let chromeButtons = """
+        #readerHomeBtn, #startSettings, #readerAa, #readerRecentsBtn, #readerHiddenBtn, \
+        #readerMoreBtn, #readerLessBtn, #readerChromeToggle
+        """
+
     /// The viewport at which the chrome collapses into one bottom-right column.
     ///
     /// Size, not input device. Hiding the controls answers "is there room for them beside
@@ -790,6 +801,25 @@ enum ReaderChrome {
           }
           #readerChromeToggle svg { display: block; }
         }
+        /* The roomy slot says the word and hides the icon; the column reverses it below.
+           Stated first so the compact override is the later rule and wins on the tie. */
+        #startSettings .nav-icon { display: none; }
+        /* Last word on the column's geometry. Every button becomes the same square, so the
+           stack reads as one edge rather than a ragged one: "Aa" is text and measured 47px
+           against an icon button's 44px, and the toggle 45px. `padding: 0` with the flex
+           centring already on these boxes is what lets the label sit in the middle of a
+           fixed square; the start page's Settings button drops its word for an icon here
+           (see `navSettings`) rather than being the one wide row.
+
+           Only in the column. The roomy top row stays content-sized, where a wider "Aa"
+           beside narrower icons is exactly right — they sit on a line, not in a stack. */
+        @media \(compactViewport) {
+          \(chromeButtons) {
+            width: \(touchTarget)px; padding: 0;
+          }
+          #startSettings .nav-label { display: none; }
+          #startSettings .nav-icon { display: block; }
+        }
         """
     }
 
@@ -964,11 +994,28 @@ enum ReaderChrome {
     /// The start page's nav occupant. The start page *is* home, so the slot carries the one
     /// piece of navigation it does have — and Settings sits where Home sits on every other
     /// page instead of hiding in the opposite corner.
+    ///
+    /// Carries both an icon and a word, and `chromeCSS` swaps them: the roomy top-left slot
+    /// has room to say "Settings", while the compact column is squares and a text button
+    /// would be the one wide row in it. Same trick the toggle uses for its own two glyphs,
+    /// for the same reason — CSS can hide a child, not rewrite one.
+    ///
+    /// `aria-label` is on the button either way, so the word disappearing costs a screen
+    /// reader nothing.
     static func navSettings() -> String {
         """
         <div class="reader-nav">
-          <button id="startSettings" type="button"
-                  onclick="readerPost('readerOpenSettings', '')">Settings</button>
+          <button id="startSettings" type="button" aria-label="Settings"
+                  onclick="readerPost('readerOpenSettings', '')">
+            <!-- settings-2 (sliders), Lucide-style line icon; shown only in the column -->
+            <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <path d="M20 7h-9"/><path d="M14 17H5"/>
+              <circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>
+            </svg>
+            <span class="nav-label">Settings</span>
+          </button>
         </div>
         """
     }

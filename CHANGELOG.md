@@ -42,9 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the top edge is the hardest place on a phone to reach one-handed. Tapping the button opens
   a vertical column with Home nearest your thumb; tapping anywhere else, or Escape, closes it
   again. Opening recents, hidden text or Aa collapses the column so only the panel is on
-  screen. Triggered by the size of the window, not by touch — so a narrow desktop window
-  gets it too, which is where you can see it before the mobile apps exist. A roomy window
-  keeps the controls in both top corners as before.
+  screen. Every button in the column is the same square, so the start page's Settings button
+  shows an icon there instead of its word. Triggered by the size of the window, not by touch
+  — so a narrow desktop window gets it too, which is where you can see it before the mobile
+  apps exist. A roomy window keeps the controls in both top corners, and Settings keeps its
+  word.
 
 ### Fixed
 - **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
