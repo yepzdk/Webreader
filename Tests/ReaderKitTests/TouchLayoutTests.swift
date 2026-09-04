@@ -215,7 +215,31 @@ final class TouchLayoutTests: XCTestCase {
 
     // MARK: - The collapsing bottom-right chrome
 
-    func testTouchChromeSitsInTheThumbCornerAndCollapses() {
+    func testHidingIsKeyedOnViewportSizeAndSizingOnThePointer() {
+        // The two questions are separate and were once conflated. *Whether* to hide the
+        // controls asks "is there room for them beside the article?" — a narrow desktop
+        // window answers that exactly as a phone does, and the distraction is the same
+        // whether a finger or a cursor put them there. *How big* to make them asks what is
+        // pointing at them, which a window width says nothing about.
+        XCTAssertEqual(ReaderChrome.compactViewport, "(max-width: 48rem), (max-height: 30rem)")
+        // Height as well as width: a phone in landscape is 844px wide and 390px tall, so a
+        // width test alone would leave it with the top cluster eating a fifth of the screen.
+        XCTAssertTrue(ReaderChrome.compactViewport.contains("max-height"))
+        // Sizing is the union: a tablet is roomy but touched, a narrow window is moused but
+        // cramped, and the floating column wants air around it in both.
+        XCTAssertEqual(ReaderChrome.comfortableChrome,
+                       "(pointer: coarse), " + ReaderChrome.compactViewport)
+        // The layout follows the viewport…
+        let chrome = ReaderChrome.chromeCSS()
+        XCTAssertTrue(chrome.contains("@media \(ReaderChrome.compactViewport) {"))
+        XCTAssertFalse(chrome.contains("@media (pointer: coarse) {"))
+        // …and the panel's position with it, while what is inside the panel does not.
+        let controls = ReaderChrome.controlsCSS()
+        XCTAssertTrue(controls.contains("@media \(ReaderChrome.compactViewport) {"))
+        XCTAssertTrue(controls.contains("@media (pointer: coarse) {"))
+    }
+
+    func testCompactChromeSitsInTheThumbCornerAndCollapses() {
         // Both halves of the report this answers: the top edge is the hardest place on a
         // phone to reach one-handed, and six always-visible buttons over prose compete with
         // the prose.

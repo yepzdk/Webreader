@@ -653,14 +653,16 @@ final class ChromeBackdropTests: XCTestCase {
             "background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);"))
     }
 
-    func testItIsAPointerLayoutDeviceAndRetiresOnTouch() {
-        // On a pointer the cluster ends 41px down, and 65% of 72px is 47px — so the buttons
-        // sit on solid colour rather than on the fade.
+    func testItIsARoomyLayoutDeviceAndRetiresWhenCompact() {
+        // In the roomy layout the cluster ends 41px down, and 65% of 72px is 47px — so the
+        // buttons sit on solid colour rather than on the fade.
         let css = ReaderChrome.backdropCSS()
         XCTAssertTrue(css.contains("height: calc(72px + env(safe-area-inset-top, 0px));"))
-        // On a coarse pointer the chrome has moved to the bottom-right, so a fade along the
-        // top edge would cover nothing. Retired rather than resized.
-        XCTAssertTrue(css.contains("@media (pointer: coarse) {\n  #readerBackdrop { display: none; }"))
+        // On a compact viewport the chrome has moved to the bottom-right, so a fade along
+        // the top edge would cover nothing. Retired rather than resized — and keyed on the
+        // same condition the chrome is, or the two could disagree about where the chrome is.
+        XCTAssertTrue(css.contains("@media \(ReaderChrome.compactViewport) {\n"
+                                   + "  #readerBackdrop { display: none; }"))
     }
 
     func testEveryScrollingPageCarriesItAndTheOfflinePageDoesNot() {

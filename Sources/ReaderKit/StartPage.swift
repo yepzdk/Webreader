@@ -158,11 +158,12 @@ public enum StartPage {
               padding-right: max(24px, env(safe-area-inset-right, 0px));
             }
           }
-          /* Last, so it wins at every width. On a coarse pointer the chrome is a floating
+          /* Last, so it wins at every width. On a compact viewport the chrome is a floating
              column in the bottom-right corner: nothing sits at the top but the progress
              hairline, so the headroom goes back to what the content wants — and the foot has
-             to clear the toggle, which ends 58px up. */
-          @media (pointer: coarse) {
+             to clear the toggle, which ends 58px up. Keyed on the same condition the chrome
+             is, because it is the same fact about the layout. */
+          @media \(ReaderChrome.compactViewport) {
             main {
               padding-top: 32px;
               padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));

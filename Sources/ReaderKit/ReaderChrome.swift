@@ -174,10 +174,12 @@ enum ReaderChrome {
     /// top-right cluster and the top-left nav slot. One declaration and two selector lists,
     /// so a button on one side of the window can't drift from a button on the other.
     ///
-    /// The coarse-pointer floor lives here for the same reason the box does: every chrome
-    /// button on either side of the window grows together or none of them does. `inline-flex`
-    /// is what makes `min-height` centre the label — the text buttons have no flex of their
-    /// own, only the icon ones do.
+    /// The comfortable floor lives here for the same reason the box does: every chrome
+    /// button on either side of the window grows together or none of them does. It applies
+    /// on any touch host and in any compact viewport — see `comfortableChrome` for why the
+    /// two are a union rather than one or the other. `inline-flex` is what makes
+    /// `min-height` centre the label: the text buttons have no flex of their own, only the
+    /// icon ones do.
     private static func buttonBox(_ selectors: String) -> String {
         """
         \(selectors) {
@@ -185,7 +187,7 @@ enum ReaderChrome {
           color: var(--muted); background: var(--bg);
           border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
         }
-        @media (pointer: coarse) {
+        @media \(comfortableChrome) {
           \(selectors) {
             display: inline-flex; align-items: center; justify-content: center;
             min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 4px 14px;
@@ -413,30 +415,20 @@ enum ReaderChrome {
         .swatch-sepia { background: #f4ecd8; }
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
-        /* Touch, in one block at the end so source order settles every override without a
-           specificity fight.
+        /* Two blocks at the end, so source order settles every override without a
+           specificity fight. They answer different questions, which is why they are two.
 
-           The panels stop hanging off their button and pin to the viewport instead. Every
-           panel is `right: 0` inside its own `.reader-control`, and the recents button is
-           the third of five — so its right edge is ~273px in from the left on a 390px
-           phone, and any panel wider than that starts off-screen. Measured at -47px before
-           this block existed: the `max-width` guard never fired, because the panel was
+           First: where a panel goes. That follows the chrome, so it is keyed on viewport
+           size. Every panel is `right: 0` inside its own `.reader-control`, and the recents
+           button is the third of five — so its right edge is ~273px in from the left on a
+           390px phone, and any panel wider than that starts off-screen. Measured at -47px
+           before this existed: the `max-width` guard never fired, because the panel was
            narrower than the viewport and still outside it. Widening a right-anchored panel
            cannot fix that; only re-anchoring can. `position: fixed` escapes the
            `.reader-control` containing block without changing DOM ancestry, so
            `controlsScript`'s outside-click dismissal keys off the same `.reader-controls`
-           it always did.
-
-           `top` clears the chrome: a 14px inset plus a 44px button plus the 8px gap the
-           pointer layout uses. `max-height` is then whatever is left above the bottom inset.
-
-           The rest is the 44px floor, for the rows and for the two controls that carry
-           their own box instead of `buttonBox`'s.
-
-           `pointer: coarse` rather than a width breakpoint on purpose: the question is what
-           is doing the pointing, not how wide the window is. A phone in landscape is wider
-           than some desktop windows and still has no mouse. */
-        @media (pointer: coarse) {
+           it always did. */
+        @media \(compactViewport) {
           #readerPanel, #readerRecents, #readerHidden {
             position: fixed;
             /* Anchored to the bottom now, not the top: the chrome that opens these sits in
@@ -460,16 +452,27 @@ enum ReaderChrome {
                              - env(safe-area-inset-bottom, 0px));
             overflow-y: auto;
           }
+        }
+        /* Second: how big the rating pair is. It is chrome — it stands in the column beside
+           the other buttons — but it sits outside `buttonBox`, carrying its own box so the
+           pressed accent state can override it. So it needs the same union `buttonBox` uses,
+           or a narrow mouse window gets five 44px buttons and two 27px ones. */
+        @media \(comfortableChrome) {
+          #readerMoreBtn, #readerLessBtn {
+            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 5px 12px;
+          }
+        }
+        /* Third: how big the controls *inside* a panel are. That asks what is pointing at
+           them, so it stays on the pointer alone. A mouse hits a 32px row without trying,
+           and growing every row on a narrow desktop window would make the panel feel
+           clumsy — the chrome grows there because a floating column over content wants air
+           around it, which a list you read does not. */
+        @media (pointer: coarse) {
           .recent { min-height: \(touchTarget)px; padding: 10px 10px; font-size: 13px; }
           .recent-empty, .phrase-empty { padding: 10px; }
           .seg button { min-height: \(touchTarget)px; padding: 0 4px; }
           .swatch { width: 34px; height: 34px; }
           .themes { padding: 2px 0; }
-          /* The rating pair sits outside `buttonBox` — it carries its own box so the pressed
-             accent state can override it — so it needs the floor stated here too. */
-          #readerMoreBtn, #readerLessBtn {
-            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 5px 12px;
-          }
           /* The X on a hidden-phrase row: a 20px icon box inside a list built for reading. */
           .phrase-remove { min-height: \(touchTarget)px; min-width: \(touchTarget)px; }
         }
@@ -576,7 +579,7 @@ enum ReaderChrome {
     /// The height covers the chrome plus room to fade: on a pointer the cluster ends 41px
     /// down, and the solid stop clears it.
     ///
-    /// It exists only for the pointer layout. On a coarse pointer the chrome has moved to
+    /// It exists only for the roomy layout. On a compact viewport the chrome has moved to
     /// the bottom-right corner (see `chromeCSS`), so a fade along the top edge would be a
     /// gradient over nothing — the only thing left up there is the progress hairline, and a
     /// 2.5px line needs no backing to stay legible.
@@ -588,7 +591,7 @@ enum ReaderChrome {
           pointer-events: none;
           background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);
         }
-        @media (pointer: coarse) {
+        @media \(compactViewport) {
           #readerBackdrop { display: none; }
         }
         """
@@ -604,6 +607,31 @@ enum ReaderChrome {
     /// it agree on where the stack ends without either measuring the other.
     private static let chromeGap = 10
     private static let chromeEdge = 14
+
+    /// The viewport at which the chrome collapses into one bottom-right column.
+    ///
+    /// Size, not input device. Hiding the controls answers "is there room for them beside
+    /// the article?", and on a small viewport there is not — six buttons parked over prose
+    /// compete with the prose whether a finger or a cursor put them there. A narrow desktop
+    /// window has exactly the problem a phone does.
+    ///
+    /// Width *or* height: a phone in landscape is 844px wide and 390px tall, so a width
+    /// test alone would leave it with the top cluster eating a fifth of the screen. 48rem
+    /// is where the window stops being much wider than the reading column itself (the
+    /// widest `--reader-width` is 48rem); 30rem is where there is no vertical room to spare.
+    ///
+    /// Written as a comma list rather than a Level 4 `or`, which WebKitGTK cannot be relied
+    /// on for — which is also why nothing combines this with `and`.
+    static let compactViewport = "(max-width: 48rem), (max-height: 30rem)"
+
+    /// Where the chrome's buttons take the comfortable 44px sizing: any touch host, and any
+    /// compact viewport whatever is pointing at it.
+    ///
+    /// The union is deliberate. A tablet is roomy but touched, so it needs the target
+    /// without collapsing; a narrow desktop window is moused but cramped, and a floating
+    /// column over content wants air around it there too. Only the roomy pointer layout —
+    /// the two top corners — keeps its original density.
+    static let comfortableChrome = "(pointer: coarse), (max-width: 48rem), (max-height: 30rem)"
 
     /// Wraps the nav slot and the control cluster in one element, plus — where a page has
     /// more than one control — the button that reveals them.
@@ -660,17 +688,22 @@ enum ReaderChrome {
         """
     }
 
-    /// The chrome's coarse-pointer layout: one collapsing column in the bottom-right.
+    /// The chrome's compact layout: one collapsing column in the bottom-right.
     ///
     /// Two complaints, from reading on an actual phone. The cluster sat along the top edge,
-    /// which is the hardest place on a phone to reach one-handed; and six always-visible
-    /// buttons over prose compete with the prose. So on a coarse pointer the chrome moves
-    /// into the thumb's corner and, where there is more than one control, hides behind a
-    /// single button until asked for.
+    /// which is the hardest place there to reach one-handed; and six always-visible buttons
+    /// over prose compete with the prose. So on a small viewport the chrome moves into the
+    /// bottom-right corner and, where there is more than one control, hides behind a single
+    /// button until asked for.
     ///
-    /// `display: contents` on the two wrappers is what keeps the pointer layout untouched —
+    /// Keyed on `compactViewport` — size, not input device. The distraction is a question of
+    /// whether there is room for the controls beside the article, which a narrow desktop
+    /// window answers the same way a phone does. Only the button *sizing* asks what is
+    /// pointing at them (`comfortableChrome`).
+    ///
+    /// `display: contents` on the two wrappers is what keeps the roomy layout untouched —
     /// they leave the box tree entirely, so `.reader-nav` and `.reader-controls` fix
-    /// themselves to the same corners as before and no desktop byte moves.
+    /// themselves to the same corners as before and no wide-window byte moves.
     ///
     /// Collapsed uses `visibility: hidden`, not `opacity: 0`: an invisible button still in
     /// the tab order is exactly the trap the suggested-row actions were in. And the stack
@@ -678,9 +711,9 @@ enum ReaderChrome {
     /// the toggle halfway up the screen instead of in the corner.
     static func chromeCSS(platform: Platform = .macOS) -> String {
         """
-        /* A pointer keeps the two opposite corners; the wrappers are not in the box tree. */
+        /* A roomy window keeps the two opposite corners; the wrappers are not in the box tree. */
         .reader-chrome, .reader-chrome-stack { display: contents; }
-        @media (pointer: coarse) {
+        @media \(compactViewport) {
           .reader-chrome {
             position: fixed; z-index: 10;
             bottom: \(inset(chromeEdge, "bottom")); right: \(inset(chromeEdge, "right"));
@@ -734,9 +767,11 @@ enum ReaderChrome {
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-open { display: none; }
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-close { display: block; }
         }
-        /* Combined rather than nested: the reveal only animates in the coarse layout, and
-           one query saying both things reads better than a query inside a query. */
-        @media (pointer: coarse) and (prefers-reduced-motion: reduce) {
+        /* The reveal only animates in the compact layout, so killing the transition
+           unconditionally is enough — there is none anywhere else to kill. Written as its
+           own top-level query rather than combined with `compactViewport`, which is a comma
+           list and cannot be `and`-ed without Level 4 syntax. */
+        @media (prefers-reduced-motion: reduce) {
           .reader-chrome[data-collapsible="true"] .reader-nav > button,
           .reader-chrome[data-collapsible="true"] .reader-control > button {
             transition: none;
@@ -744,12 +779,12 @@ enum ReaderChrome {
         }
         /* The toggle's box comes from the same shared declaration as every other chrome
            button, so it cannot drift from the controls it reveals. Emitted at the top level
-           because `buttonBox` carries its own coarse block, and a media query nested inside
-           one reads far worse than it computes. */
+           because `buttonBox` carries its own query, and one nested inside another reads
+           far worse than it computes. */
         \(buttonBox("#readerChromeToggle"))
-        /* It exists only for the coarse layout; `display` is settled last, after the box. */
+        /* It exists only for the compact layout; `display` is settled last, after the box. */
         #readerChromeToggle { display: none; }
-        @media (pointer: coarse) {
+        @media \(compactViewport) {
           #readerChromeToggle {
             display: inline-flex; align-items: center; justify-content: center;
           }

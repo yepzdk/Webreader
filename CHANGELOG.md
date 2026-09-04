@@ -33,16 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Recents now record when an article was read, and clearing history leaves a timestamp, so
   two devices merge in the right order and a clear isn't undone by a device that was off.
   Existing lists are read as before, on both platforms.
-- **The pages work on a touch screen** (#36). Every generated page now adapts to a coarse
-  pointer: controls reach a 44px target, popovers stay on screen and clear the safe areas,
-  and the layout stops spending desktop gutters and 18vh of headroom on a phone.
-  Groundwork for the mobile apps; the desktop rendering is unchanged.
-- **On touch, the reader's controls move to the bottom-right and hide behind one button**
-  (#36). The top edge is the hardest place on a phone to reach one-handed, and six
-  always-visible buttons over an article compete with the article. Tapping the button opens
-  a vertical column with Home nearest your thumb; tapping anywhere else, or Escape, closes
-  it again. Opening recents, hidden text or Aa collapses the column so only the panel is on
-  screen. Unchanged with a mouse, where the controls keep both top corners.
+- **The pages work on a touch screen** (#36). Controls reach a 44px target where a finger
+  is doing the pointing, popovers stay on screen and clear the safe areas, and the layout
+  stops spending desktop gutters and 18vh of headroom on a phone. Groundwork for the mobile
+  apps; a roomy desktop window renders exactly as before.
+- **On a small viewport the reader's controls move to the bottom-right and hide behind one
+  button** (#36). Six always-visible buttons over an article compete with the article, and
+  the top edge is the hardest place on a phone to reach one-handed. Tapping the button opens
+  a vertical column with Home nearest your thumb; tapping anywhere else, or Escape, closes it
+  again. Opening recents, hidden text or Aa collapses the column so only the panel is on
+  screen. Triggered by the size of the window, not by touch — so a narrow desktop window
+  gets it too, which is where you can see it before the mobile apps exist. A roomy window
+  keeps the controls in both top corners as before.
 
 ### Fixed
 - **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
@@ -53,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   background, but the gaps between them let the article through, leaving a line of text
   crossing the icons with neither readable. A gradient now sits behind them, fading into the
   page so it stays invisible until something scrolls under it, and following the theme. On
-  touch the controls have left the top edge entirely, so the problem goes with them.
+  a small viewport the controls have left the top edge entirely, so the problem goes with
+  them.
 
 ## [0.11.0] - 2026-08-31
 
