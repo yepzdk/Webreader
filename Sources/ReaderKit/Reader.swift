@@ -132,11 +132,16 @@ public struct ReaderSettings: Equatable {
     public static let fontSizeRange = 12...28
 
     /// Tolerant decode of a settings payload — a `WKScriptMessage.body` dictionary or
-    /// a `JSONSerialization` object. Missing/unknown fields keep their defaults and
-    /// the font size is clamped, so a garbled payload can never poison the reader.
-    public static func decode(_ value: Any?) -> ReaderSettings {
-        guard let dict = value as? [String: Any] else { return ReaderSettings() }
-        var settings = ReaderSettings()
+    /// a `JSONSerialization` object. Unknown fields are ignored and the font size is clamped,
+    /// so a garbled payload can never poison the reader.
+    ///
+    /// `onto` is what an absent field falls back to, and it is the reason a page may post only
+    /// the fields it owns: the host seeds this with the settings as stored, so a payload
+    /// carrying one key changes one key. Defaulting it to a fresh `ReaderSettings` keeps the
+    /// "missing means default" behaviour for every other caller.
+    public static func decode(_ value: Any?, onto base: ReaderSettings = ReaderSettings()) -> ReaderSettings {
+        guard let dict = value as? [String: Any] else { return base }
+        var settings = base
         if let size = dict["fontSize"] as? Int {
             settings.fontSize = min(max(size, fontSizeRange.lowerBound), fontSizeRange.upperBound)
         }
@@ -190,11 +195,30 @@ public struct ReaderSettings: Equatable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Decodes stored JSON, with the same tolerance as `decode` — nil/garbage means
-    /// defaults, never an error.
-    public static func fromJSON(_ string: String?) -> ReaderSettings {
-        guard let string, let data = string.data(using: .utf8) else { return ReaderSettings() }
-        return decode(try? JSONSerialization.jsonObject(with: data))
+    /// Decodes stored JSON, with the same tolerance as `decode` — nil/garbage means the
+    /// fallback, never an error.
+    public static func fromJSON(_ string: String?,
+                                onto base: ReaderSettings = ReaderSettings()) -> ReaderSettings {
+        guard let string, let data = string.data(using: .utf8) else { return base }
+        return decode(try? JSONSerialization.jsonObject(with: data), onto: base)
+    }
+
+    /// Which of the two thumbnail switches governs a page's lists.
+    ///
+    /// The raw value is the settings key, so the page's `data-thumbs` decision, the chrome
+    /// script's live lookup and the settings page's checkbox ids all name the field exactly
+    /// once. A page with no article lists (settings, offline) has no scope.
+    public enum ThumbnailScope: String, CaseIterable {
+        case startPage = "startPageThumbnails"
+        case reader = "readerThumbnails"
+    }
+
+    /// The switch governing `scope`.
+    public func thumbnails(_ scope: ThumbnailScope) -> ArticleImages {
+        switch scope {
+        case .startPage: return startPageThumbnails
+        case .reader: return readerThumbnails
+        }
     }
 }
 
@@ -333,9 +357,14 @@ public enum ReaderPage {
     /// `data-theme` attribute; the in-page "Aa" popover adjusts the same properties
     /// live and posts the new settings to the host (`readerSettings`) for persistence.
     ///
-    /// `history` is the recents list, baked into a sibling popover; its rows post the
-    /// chosen URL to the host (`readerOpen`), which validates and navigates.
-    /// Titles are escaped there too — they come from other sites' pages.
+    /// `history` is the recents list. The popover shows the newest few of them, and its rows
+    /// post the chosen URL to the host (`readerOpen`), which validates and navigates. Titles
+    /// are escaped there too — they come from other sites' pages.
+    ///
+    /// `currentURL` is the article this page is showing, as the *cleaned* key
+    /// `ReaderHistory.record` was given (`URLCleaner.clean(source).absoluteString`) — it is
+    /// compared against the stored rows, so a raw URL silently matches nothing and the
+    /// article on screen comes back as row one. nil excludes nothing.
     ///
     /// `hidden` is the phrase list for the third popover; the page also re-applies it live
     /// when the host learns a new phrase (`window.readerSetHidden`).
@@ -369,7 +398,7 @@ public enum ReaderPage {
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: settings.readerThumbnails))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .reader))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -439,10 +468,11 @@ public enum ReaderPage {
           \(ReaderChrome.progressBar())
           \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
           \(ReaderChrome.indent(ReaderChrome.controls(
-                history: history.recents(limit: ReaderChrome.popoverRecents,
+                recents: history.recents(limit: ReaderChrome.popoverRecents,
                                          excluding: currentURL),
+                canClear: !history.entries.isEmpty,
                 showsRating: true, rating: rating,
-                showsRecents: true, showsHidden: true), by: 2))
+                showsHidden: true), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>
@@ -452,7 +482,9 @@ public enum ReaderPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
+                                                             thumbnails: .reader,
+                                                             hidden: hidden,
                                                              hitsJSON: HTML.jsLiteral(hits),
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))

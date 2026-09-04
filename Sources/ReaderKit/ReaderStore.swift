@@ -49,8 +49,17 @@ public enum ReaderStore {
     /// Reverts appearance settings and zoom to stock. NOT the history: it's user data, not
     /// a presentation default, and this action offers no undo — clearing it lives behind
     /// its own affordance in the recents panel.
+    ///
+    /// The two thumbnail switches survive for the same reason. They stopped being appearance
+    /// when they left the Aa popover for the settings page's own "Article images" section
+    /// (#33): one of their states means "fetch no images from publishers", and a menu item
+    /// called Reset Reader Appearance has no business turning that back on.
     public static func resetAppearance(store: KeyValueStore) {
-        store.set(nil, forKey: Key.settings)
+        let kept = settings(store: store)
+        var stock = ReaderSettings()
+        stock.startPageThumbnails = kept.startPageThumbnails
+        stock.readerThumbnails = kept.readerThumbnails
+        setSettings(stock, store: store)
         store.set(nil, forKey: Key.zoom)
     }
 

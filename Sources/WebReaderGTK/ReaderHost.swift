@@ -92,6 +92,10 @@ final class ReaderHost {
     /// `readerSourceURL`: what the current rendering was extracted from; the reader toggle
     /// loads it to get back to the original page.
     private var suppressReaderOnce = false
+    /// Set when the render about to happen is the offline fallback's saved copy, so the
+    /// reader branch skips the suggestion fetch: the network just failed, the fetch would
+    /// fail too, and `FeedFetcher` caches an empty result for its whole TTL.
+    private var suggestionsSuppressedOnce = false
     private var enterReaderForURL: URL?
     private var readerSourceURL: URL?
     /// The title of the article currently rendered, so a like/dislike learns terms from the
@@ -237,7 +241,6 @@ final class ReaderHost {
         loadHTML(StartPage.html(appName: Self.appName,
                                 settings: ReaderStore.settings(store: store),
                                 history: ReaderStore.history(store: store),
-                                hidden: ReaderStore.hiddenPhrases(store: store),
                                 platform: .linux,
                                 palette: palette()),
                  base: nil, as: .startPage)
@@ -359,10 +362,10 @@ final class ReaderHost {
                 // The restored document still shows the rating baked in when it was first
                 // rendered; it may have changed since.
                 self.pushRating(for: url)
-                // Its popover's suggested group was filled by a script call on the way in,
-                // which this navigation did not repeat (#33) — and the settings page may
-                // have flipped the thumbnail switch since this document was baked.
-                self.pushThumbnails()
+                // Reused bytes, not a fresh render: its settings are as old as the document,
+                // and its popover's suggested group was filled by a script call on the way in
+                // that this navigation did not repeat (#33).
+                self.pushSettings()
                 self.loadSuggestions()
                 return
             }
@@ -419,12 +422,13 @@ final class ReaderHost {
         evaluateJavaScript("window.readerSetRating && window.readerSetRating(\(value), true)")
     }
 
-    /// Tells a restored reader document whether its popover may show thumbnails. The
-    /// attribute was baked when the document was rendered, and the settings page can have
-    /// flipped the switch in between.
-    private func pushThumbnails() {
-        let state = ReaderStore.settings(store: store).readerThumbnails.rawValue
-        evaluateJavaScript("window.readerSetThumbs && window.readerSetThumbs('\(state)')")
+    /// Hands a restored document the settings as they now stand. Its `s` was baked when it
+    /// was rendered, so without this the next Aa interaction posts those values back over
+    /// anything the settings page changed in between — and `data-thumbs` would keep showing
+    /// the switch as it was, which for images-off means fetching what the user declined.
+    private func pushSettings() {
+        let json = ReaderStore.settings(store: store).json
+        evaluateJavaScript("window.readerSetSettings && window.readerSetSettings(\(json))")
     }
 
     // MARK: - Title
@@ -486,9 +490,20 @@ final class ReaderHost {
             return
         }
         // Our own reader document has landed; it IS the reader, so there is nothing to do but
-        // consume the pending state.
+        // consume the pending state — and fill the popover's suggested group, which is a
+        // script call the render itself cannot make (#33). This is the only place a fresh
+        // reader render is seen: the `own == .reader` case below is unreachable, because this
+        // branch returns first for every one of them.
         if pageState.isPending, pageState.page == .reader {
             pageState.navigationFinished()
+            // Not after a failed load: the fetch would fail too, and `FeedFetcher` caches an
+            // empty result for its whole TTL, so one offline article would leave every list
+            // empty for ten minutes.
+            if suggestionsSuppressedOnce {
+                suggestionsSuppressedOnce = false
+            } else {
+                loadSuggestions()
+            }
             return
         }
         // A toggle back to the original page suppresses one round of auto-entry. Consumed
@@ -501,12 +516,10 @@ final class ReaderHost {
             pageState.navigationFinished()
             return
         }
-        // Our own start/settings/reader/offline load has landed; the page it set still stands.
+        // Our own start/settings/offline load has landed; the page it set still stands.
         if let own = pageState.navigationFinished() {
-            // Both the start page's list and the reader popover's suggested group are filled
-            // by the host after the page lands (#33). Usually free — arriving from the start
-            // page leaves the feeds warm in `FeedFetcher`'s cache.
-            if own == .startPage || own == .reader { loadSuggestions() }
+            // The start page's suggested list is filled by the host after the page lands.
+            if own == .startPage { loadSuggestions() }
             return
         }
         // A recents row asked for this page explicitly — it beeps if extraction fails, since
@@ -533,6 +546,10 @@ final class ReaderHost {
             switch PageState.Page(generator: generator) {
             case .startPage:
                 self.pageState.restored(generator: generator)
+                // Reused bytes, not a fresh render: hand it the current settings before the
+                // suggestions arrive, since filling a list reveals thumbnails and this
+                // document's idea of the switch is as old as it is.
+                self.pushSettings()
                 self.loadSuggestions()
             case .settings:
                 self.pageState.restored(generator: generator)
@@ -550,6 +567,9 @@ final class ReaderHost {
         evaluateJavaScript(Self.generatorScript) { [weak self] result in
             guard let self else { return }
             self.pageState.restored(generator: result ?? "")
+            // Same reasoning as the other two restore paths: reused bytes carry the settings
+            // they were rendered with. Harmless where the page defines no hook.
+            self.pushSettings()
             if self.pageState.isShowingStartPage { self.loadSuggestions() }
         }
     }
@@ -644,6 +664,9 @@ final class ReaderHost {
         if !suppressReaderOnce, let failed = failedURL {
             let cleaned = URLCleaner.clean(failed)
             if let cached = cache.article(for: cleaned) {
+                // The load that just failed is the network answer for this whole render;
+                // asking the feeds now only poisons their cache with an empty result.
+                suggestionsSuppressedOnce = true
                 renderReader(cached, source: cleaned)
                 return
             }
@@ -714,9 +737,13 @@ final class ReaderHost {
 
         case "readerSettings":
             // Guarded rather than tolerant: a payload we couldn't read must leave the stored
-            // settings alone, not overwrite them with defaults.
+            // settings alone, not overwrite them with defaults. Merged onto what is stored
+            // rather than decoded from defaults, so a page may post only the fields it owns —
+            // the settings page posts one switch — and a payload that is complete but stale
+            // cannot push its own idea of the rest.
             guard ownPage, let json = messageJSON(payload) else { return }
-            ReaderStore.setSettings(ReaderSettings.fromJSON(json), store: store)
+            let current = ReaderStore.settings(store: store)
+            ReaderStore.setSettings(ReaderSettings.fromJSON(json, onto: current), store: store)
 
         case "readerOpen":
             guard ownPage, let raw = messageString(payload), let url = URL(string: raw)

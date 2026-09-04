@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   images, which it never did. The settings page now has an **Article images** section with
   one switch per surface — the start page's lists and the reader's dropdown — and a list
   with its switch off carries no images, reserves no space for them and fetches nothing.
-  Anyone who had turned the old switch off gets both new ones off.
+  Anyone who had turned the old switch off gets both new ones off, and Reset Reader
+  Appearance now leaves both alone.
 
 ## [0.11.0] - 2026-08-31
 

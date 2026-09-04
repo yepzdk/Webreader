@@ -445,15 +445,17 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("data-url=\"https://x.test/older\""))
     }
 
-    func testTheSuggestedGroupShipsEmptyAndHidden() {
+    func testTheSuggestedGroupShipsEmptyHiddenAndNamed() {
         // The host fills it after the page lands, and may never fill it at all — no sources,
         // no network — so the panel has to be complete without it.
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains("<section id=\"readerSuggested\" hidden>"))
-        XCTAssertTrue(html.contains("<p class=\"panel-group rest\">Suggested</p>"))
+        XCTAssertTrue(html.contains("<section id=\"readerSuggested\" hidden aria-labelledby=\"readerSuggestedTitle\">"))
         XCTAssertTrue(html.contains("id=\"readerSuggestedList\""))
         XCTAssertTrue(html.contains("window.readerSetSuggestions = function"))
         XCTAssertFalse(html.contains("data-url="))
+        // A heading, not a paragraph: it is the second of the panel's two groups, and the
+        // other one names itself with an <h2>. Heading navigation has to reach it.
+        XCTAssertTrue(html.contains("<h3 class=\"panel-group rest\" id=\"readerSuggestedTitle\">Suggested</h3>"))
     }
 
     func testTheSuggestedGroupIsCappedAndCarriesNoRowControls() {

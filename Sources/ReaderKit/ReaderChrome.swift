@@ -30,14 +30,14 @@ enum ReaderChrome {
     /// absent at its default (`auto` follows the system; bordered quotes are the
     /// stylesheet's baseline; thumbnails are on), so the stock page is attribute-free.
     ///
-    /// `thumbnails` is the switch for *this page's* lists — the start page passes
-    /// `startPageThumbnails`, the reader `readerThumbnails` — because each page renders only
-    /// its own, and a page with no lists at all (settings, offline) passes nothing. Baked
-    /// here rather than applied by script: nothing on either page changes it any more, so
-    /// the render is the only moment it can be decided.
+    /// `thumbnails` is the scope of *this page's* lists — `.startPage` or `.reader` — because
+    /// each page renders only its own, and a page with no lists at all (settings, offline)
+    /// passes nothing. Baked here so the first paint is right; `controlsScript` keeps the
+    /// attribute in step with the same field afterwards.
     static func themeAttribute(_ settings: ReaderSettings,
-                               thumbnails: ReaderSettings.ArticleImages = .on) -> String {
-        (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
+                               thumbnails scope: ReaderSettings.ThumbnailScope? = nil) -> String {
+        let thumbnails = scope.map { settings.thumbnails($0) } ?? .on
+        return (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
             + (settings.quoteStyle == .bordered ? "" : " data-quotes=\"\(settings.quoteStyle.rawValue)\"")
             + (thumbnails == .on ? "" : " data-thumbs=\"off\"")
     }
@@ -525,26 +525,37 @@ enum ReaderChrome {
     /// `history` arrives already trimmed by the caller (`ReaderHistory.recents(limit:
     /// excluding:)`), so this renders exactly what it is given.
     ///
+    /// `canClear` is asked separately because the trimmed list can be empty while the stored
+    /// history is not: read one article and the only entry is the one on screen, which the
+    /// popover deliberately excludes. The rows say "nothing else to go back to"; the button
+    /// has to follow the store, or there would be history with no way to clear it.
+    ///
     /// The two lists are separate containers because `has-thumbs` is a per-list decision and
     /// the clear action empties one of them in place.
-    static func recentsBody(_ history: ReaderHistory) -> String {
-        let hasThumbs = history.entries.contains { $0.image != nil }
+    static func recentsBody(_ history: ReaderHistory, canClear: Bool) -> String {
+        // Matches the script-side rule (`!!item.image`): an entry carrying an empty string
+        // renders a placeholder, so it must not be what reserves the column.
+        let hasThumbs = history.entries.contains { !($0.image ?? "").isEmpty }
         let rows = history.entries.isEmpty
-            ? "<p class=\"recent-empty\">No recent articles</p>"
+            ? emptyRecentsMarkup
             : recentsRows(history, thumbnails: hasThumbs)
-        let clear = history.entries.isEmpty ? ""
-            : "\n<button id=\"readerClear\">Clear history</button>"
+        let clear = canClear ? "\n<button id=\"readerClear\">Clear history</button>" : ""
         return """
         <h2 class="panel-title" id="readerRecentsTitle">Recent articles</h2>
         <div id="readerRecentsList"\(hasThumbs ? " class=\"has-thumbs\"" : "")>
           \(indent(rows, by: 2))
         </div>\(clear)
-        <section id="readerSuggested" hidden>
-          <p class="panel-group rest">Suggested</p>
+        <section id="readerSuggested" hidden aria-labelledby="readerSuggestedTitle">
+          <h3 class="panel-group rest" id="readerSuggestedTitle">Suggested</h3>
           <div id="readerSuggestedList"></div>
         </section>
         """
     }
+
+    /// The recents empty state. One definition: the server renders it, and the clear action
+    /// swaps it in client-side (through `window.readerEmptyRecents`), so the two cannot come
+    /// to word it differently.
+    static let emptyRecentsMarkup = "<p class=\"recent-empty\">No recent articles</p>"
 
     /// The nav slot's occupant on the reader and offline pages: back to the start page.
     ///
@@ -591,10 +602,14 @@ enum ReaderChrome {
     /// The start page also omits both lists (#32): its recents live inline in the page, where
     /// they get thumbnails and two-line titles, and it has no article for the hidden-text
     /// panel to group phrases against, so every phrase would fall under "the rest".
-    static func controls(history: ReaderHistory,
+    /// `recents` is the popover's list — already trimmed, and `nil` on a page that renders no
+    /// popover, so the data cannot go missing while the button is asked for or be handed to a
+    /// page that discards it. `canClear` follows the stored history rather than that list; see
+    /// `recentsBody`.
+    static func controls(recents: ReaderHistory? = nil,
+                         canClear: Bool = false,
                          showsRating: Bool = false,
                          rating: TopicPreferences.Rating? = nil,
-                         showsRecents: Bool = false,
                          showsHidden: Bool = false) -> String {
         let current = rating
         let ratingControls = !showsRating ? "" : """
@@ -619,7 +634,7 @@ enum ReaderChrome {
             </button>
           </div>
         """
-        let recentsControl = !showsRecents ? "" : """
+        let recentsControl = recents == nil ? "" : """
         <div class="reader-control">
             <button id="readerRecentsBtn" aria-label="Recent articles"
                     title="Recent articles" aria-haspopup="true"
@@ -630,7 +645,7 @@ enum ReaderChrome {
               </svg>
             </button>
             <div id="readerRecents" hidden aria-labelledby="readerRecentsTitle">
-              \(indent(recentsBody(history), by: 6))
+              \(indent(recentsBody(recents ?? ReaderHistory(), canClear: canClear), by: 6))
             </div>
           </div>
         """
@@ -711,9 +726,17 @@ enum ReaderChrome {
     /// phrase from the selection: it strips matching blocks from the article live, adds
     /// what it removed to the hit counts, and redraws the badge and list.
     ///
-    /// `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
+    /// `window.readerSetSettings(next)` is the host's entry point for a document it did not
+    /// just render — a back/forward restore reuses the original bytes, so its `s` is as old as
+    /// the document and would otherwise be posted back over newer values by the next `save()`.
+    ///
+    /// `thumbnails` names the switch this page's lists obey; the script reads `s[THUMBS]`, so
+    /// a pushed settings object drives `data-thumbs` exactly as the server-rendered attribute
+    /// did. `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
     /// the start page has no article and passes nothing.
-    static func controlsScript(settings: ReaderSettings, hidden: HiddenPhrases = HiddenPhrases(),
+    static func controlsScript(settings: ReaderSettings,
+                               thumbnails: ReaderSettings.ThumbnailScope,
+                               hidden: HiddenPhrases = HiddenPhrases(),
                                hitsJSON: String = "{}", platform: Platform = .macOS) -> String {
         let sans = platform.sansStack
         let serif = platform.serifStack
@@ -721,6 +744,7 @@ enum ReaderChrome {
         (function () {
           \(indent(HiddenPhrases.hideScript, by: 2))
           var s = \(settings.json);
+          var THUMBS = '\(thumbnails.rawValue)';
           var HIDDEN = \(hidden.scriptLiteral);
           var HITS = \(hitsJSON);
           var MIN = \(ReaderSettings.fontSizeRange.lowerBound), MAX = \(ReaderSettings.fontSizeRange.upperBound);
@@ -750,6 +774,9 @@ enum ReaderChrome {
           // from script — the start page's suggestions, the popover's — renders the same box
           // the server-rendered rows do. Ours, never feed text.
           window.readerThumbPlaceholder = \(HTML.jsString(thumbnailPlaceholder));
+          // Likewise the recents empty state, which the clear action swaps in: one wording,
+          // whether the server rendered it or the panel did.
+          window.readerEmptyRecents = \(HTML.jsString(emptyRecentsMarkup));
 
           // The only thing in the app that ever sets a thumbnail's src. Rows are rendered
           // carrying `data-src` and nothing else, so while article images are off the page
@@ -768,15 +795,16 @@ enum ReaderChrome {
             });
           };
 
-          // How the host pushes the switch onto a page it did not just render: a reader
-          // document restored by back/forward carries the attribute it was baked with, and
-          // the settings page may have flipped it since. The attribute is what the CSS
-          // reads, so setting it is the whole job; the reveal then loads whatever is now
-          // allowed to load.
-          window.readerSetThumbs = function (state) {
-            if (state === 'off') { root.setAttribute('data-thumbs', 'off'); }
-            else { root.removeAttribute('data-thumbs'); }
-            window.readerRevealThumbs();
+          // How the host hands a document it did not just render the settings as they now
+          // stand. A back/forward restore reuses the original bytes, so `s` is as old as the
+          // document: without this the next `save()` would post those stale values back over
+          // whatever the settings page changed in between, and `readerSettings` replaces the
+          // stored object. Assign, apply, and deliberately do not save — this is the store
+          // telling the page, not the other way round.
+          window.readerSetSettings = function (next) {
+            if (!next) { return; }
+            Object.keys(next).forEach(function (key) { s[key] = next[key]; });
+            apply();
           };
 
           function apply() {
@@ -788,9 +816,11 @@ enum ReaderChrome {
             else { root.setAttribute('data-theme', s.theme); }
             if (s.quoteStyle === 'italic') { root.setAttribute('data-quotes', 'italic'); }
             else { root.removeAttribute('data-quotes'); }
-            // Thumbnails are baked into `data-thumbs` at render (see `themeAttribute`) —
-            // no control on the page changes them, so `apply` has nothing to decide. The
-            // reveal still runs: rows that came into view need their src.
+            // This page's own switch: `THUMBS` names it, so one attribute follows one field
+            // whichever page this is. Baked into the markup too (see `themeAttribute`) so the
+            // first paint is right before this script runs.
+            if (s[THUMBS] === 'off') { root.setAttribute('data-thumbs', 'off'); }
+            else { root.removeAttribute('data-thumbs'); }
             window.readerRevealThumbs();
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
@@ -919,10 +949,13 @@ enum ReaderChrome {
                 // Empty the recents list in place — the host clears the stored list. Scoped
                 // to that container, so the suggested group below it is left alone.
                 recentsList.textContent = '';
-                recentsList.classList.remove('has-thumbs');
-                recentsList.insertAdjacentHTML('beforeend',
-                  '<p class="recent-empty">No recent articles</p>');
+                recentsList.removeAttribute('class');
+                recentsList.insertAdjacentHTML('beforeend', window.readerEmptyRecents);
                 e.target.closest('#readerClear').remove();
+                // The button the user just activated is gone, and the panel stays open to
+                // show the empty state — so focus has to go somewhere deliberate, or it
+                // falls to <body> and the next Tab restarts at the top of the document.
+                recentsBtn.focus();
                 try { window.webkit.messageHandlers.readerClear.postMessage(''); }
                 catch (err) {}
                 return;

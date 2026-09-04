@@ -134,13 +134,18 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(html().contains("data-phrase=\"Annonce\""))
     }
 
-    func testTheHiddenSectionGoesWhenTheLastPhraseDoes() {
+    func testTheHiddenSectionStaysWhenTheLastPhraseGoes() {
+        // `HiddenPhrases` never re-seeds an emptied list, so removing the last phrase is
+        // permanent — and with the start page's hidden-text button gone (#32), this section's
+        // help line is the only place the app says how to hide anything. Deleting the section
+        // with its last row would delete the instructions for getting a row back.
         let page = SettingsPage.html(appName: "WebReader", hidden: HiddenPhrases([]))
-        XCTAssertFalse(page.contains("id=\"hiddenSection\""))
-        XCTAssertFalse(page.contains("Hide a phrase by selecting it"))
-        // The row handler drops the section with its last row, as the blocklist does.
-        let seeded = html()
-        XCTAssertTrue(seeded.contains("document.getElementById('hiddenSection').remove()"))
+        XCTAssertTrue(page.contains("id=\"hiddenSection\""))
+        XCTAssertTrue(page.contains("Hide a phrase by selecting it"))
+        XCTAssertTrue(page.contains("No hidden text."))
+        XCTAssertFalse(page.contains("data-phrase="))
+        // …so the row handler must not remove the section either.
+        XCTAssertFalse(html().contains("document.getElementById('hiddenSection').remove()"))
     }
 
     func testHiddenPhrasesAreEscaped() {
@@ -160,7 +165,7 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("<h2 class=\"section\">Article images</h2>"))
         XCTAssertTrue(page.contains("id=\"startPageThumbnails\" type=\"checkbox\" checked"))
         XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\" checked"))
-        XCTAssertTrue(page.contains("post('readerSettings', settings)"))
+        XCTAssertTrue(page.contains("post('readerSettings', change)"))
         // Each says which surface it governs.
         XCTAssertTrue(page.contains("on the start page</span>"))
         XCTAssertTrue(page.contains("in the reader dropdown</span>"))
@@ -174,17 +179,22 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\">"))
     }
 
-    func testTheSwitchesPostAWholeSettingsObject() {
-        // `readerSettings` replaces the stored object, so a partial payload would reset
-        // font size, theme and the rest to defaults.
+    func testTheSwitchesPostOnlyTheKeyTheyOwn() {
+        // This page's copy of the settings is as old as the document — a back/forward restore
+        // reuses the original bytes — so posting a whole object from here would push a stale
+        // font size and theme over newer ones. The host merges one key onto what is stored.
         var settings = ReaderSettings()
         settings.fontSize = 22
         settings.theme = .sepia
         let page = SettingsPage.html(appName: "WebReader", settings: settings)
-        XCTAssertTrue(page.contains("var settings = \(settings.json);"))
-        XCTAssertTrue(page.contains("settings[key] = box.checked ? 'on' : 'off';"))
+        XCTAssertFalse(page.contains("var settings = \(settings.json);"))
+        XCTAssertTrue(page.contains("var change = {};"))
+        XCTAssertTrue(page.contains("change[key] = box.checked ? 'on' : 'off';"))
         // The box's id IS the key it writes, so the two cannot drift apart.
-        XCTAssertTrue(page.contains("['startPageThumbnails', 'readerThumbnails'].forEach"))
+        XCTAssertTrue(page.contains("['startPageThumbnails',"))
+        XCTAssertTrue(page.contains("'readerThumbnails'].forEach"))
+        // …and the lookup is guarded like every other one in this script.
+        XCTAssertTrue(page.contains("if (!box) { return; }"))
     }
 
     func testIdentifiesItselfForBackForwardRestoration() {

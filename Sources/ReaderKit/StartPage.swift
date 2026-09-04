@@ -63,7 +63,6 @@ public enum StartPage {
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
-                            hidden: HiddenPhrases = HiddenPhrases(),
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
@@ -74,7 +73,7 @@ public enum StartPage {
         // is the most likely reason you're looking at it.
         // A list shows thumbnails only when something in it has an image; otherwise every row
         // would carry an empty slot and the list would look worse than it did before #25.
-        let hasThumbs = history.entries.contains { $0.image != nil }
+        let hasThumbs = history.entries.contains { !($0.image ?? "").isEmpty }
         let recentsList = history.entries.isEmpty
             ? """
             <p class="hint empty">\(copy.emptyRecents)</p>
@@ -90,7 +89,7 @@ public enum StartPage {
             """
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: settings.startPageThumbnails))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -205,17 +204,21 @@ public enum StartPage {
           /* Clearing history sits under the list it clears — the reader page keeps its own
              copy inside the recents popover, since neither page ever shows the other's (#32).
              Muted rather than accented like "Add a source": it is the one destructive control
-             on the page, and should not be the first thing the eye lands on. */
-          .clear-history { margin: 10px 0 0; font-size: 12px; }
-          .clear-history .link { color: var(--muted); text-decoration: none; }
-          .clear-history .link:hover { color: var(--fg); text-decoration: underline; }
+             on the page, and should not be the first thing the eye lands on. The underline
+             comes back on hover and focus, and the padding takes the target to 24px — quiet
+             is not the same as hard to hit (WCAG 2.5.8). */
+          .clear-history { margin: 6px 0 0; font-size: 12px; }
+          .clear-history .link { padding: 4px 2px; color: var(--muted); text-decoration: none; }
+          .clear-history .link:hover, .clear-history .link:focus-visible {
+            color: var(--fg); text-decoration: underline;
+          }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.controls(), by: 2))
           \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
           <main>
             <div class="intro">
@@ -246,13 +249,15 @@ public enum StartPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
+                                                             thumbnails: .startPage,
+                                                             hidden: HiddenPhrases([]),
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
-          // The empty state the list falls back to once cleared — the same paragraph the
-          // server renders for an empty history, so the two can't word it differently.
-          // Ours, never feed text.
-          window.readerEmptyRecents = \(HTML.jsString("<p class=\"hint empty\">\(copy.emptyRecents)</p>"));
+          // What the whole column falls back to once cleared — heading and list included, so
+          // it is this page's own empty state rather than the popover's one-line
+          // `readerEmptyRecents`. Ours, never feed text.
+          window.readerEmptyColumn = \(HTML.jsString("<p class=\"hint empty\">\(copy.emptyRecents)</p>"));
           (function () {
             var form = document.getElementById('open');
             var field = document.getElementById('url');
@@ -281,14 +286,22 @@ public enum StartPage {
             // to the popover.
             document.querySelector('main').addEventListener('click', function (e) {
               if (e.target.closest('#suggestSettings')) { post('readerOpenSettings', ''); return; }
-              // Clearing history: the host empties the store, the page empties the column.
-              // A separate id from the popover's #readerClear, which carries the popover's
-              // own styling and is handled by the shared chrome script.
+              // Clearing history: the host empties the store (and prunes the offline cache
+              // with it), the page empties the column. A separate id from the popover's
+              // #readerClear, which carries the popover's own styling and is handled by the
+              // shared chrome script.
               if (e.target.closest('#startClear')) {
-                var column = document.querySelector('.recents-column');
+                // Ancestor of the button by construction, so no null to guard.
+                var column = e.target.closest('.recents-column');
                 column.textContent = '';
-                column.insertAdjacentHTML('afterbegin', window.readerEmptyRecents);
+                column.insertAdjacentHTML('afterbegin', window.readerEmptyColumn);
                 post('readerClear', '');
+                // The button that was focused is gone. Say what happened — the offline copies
+                // went too, which the list disappearing does not convey — and put focus on
+                // the paragraph that replaced it rather than letting it fall to <body>.
+                window.readerToast('History cleared, including saved copies.');
+                var empty = column.querySelector('.empty');
+                if (empty) { empty.tabIndex = -1; empty.focus(); }
                 return;
               }
               // Row controls come first: they sit inside the row, and clicking one must not

@@ -53,15 +53,17 @@ public enum SettingsPage {
         let readerChecked = settings.readerThumbnails == .on ? " checked" : ""
         let imagesSection = """
         <h2 class="section">Article images</h2>
-              <p class="help">The article's own lead image, shown beside its row. A list with
-              this off carries no images, reserves no space for them, and fetches nothing.</p>
-              <div class="checks">
+              <p class="help" id="imagesHelp">The article's own lead image, shown beside its
+              row. A list with this off carries no images, reserves no space for them, and
+              fetches nothing.</p>
+              <div class="checks" role="group" aria-label="Article images"
+                   aria-describedby="imagesHelp">
                 <label class="check">
-                  <input id="startPageThumbnails" type="checkbox"\(startChecked)>
+                  <input id="\(ReaderSettings.ThumbnailScope.startPage.rawValue)" type="checkbox"\(startChecked)>
                   <span>Show thumbnail image next to recents and suggested on the start page</span>
                 </label>
                 <label class="check">
-                  <input id="readerThumbnails" type="checkbox"\(readerChecked)>
+                  <input id="\(ReaderSettings.ThumbnailScope.reader.rawValue)" type="checkbox"\(readerChecked)>
                   <span>Show thumbnail image next to recents and suggested in the reader dropdown</span>
                 </label>
               </div>
@@ -82,16 +84,23 @@ public enum SettingsPage {
         // Hidden text, managed the same way blocked outlets are: created while reading (a
         // selection in the reader), listed and removed here (#32). The reader's popover
         // stays, because grouping phrases by whether they hit the article on screen is
-        // something only that page can do. Unlike the blocklist this is never empty on a
-        // fresh install — `HiddenPhrases.defaults` seeds it — so the section doubles as the
-        // only written trace the feature has.
-        let hiddenSection = hidden.phrases.isEmpty ? "" : """
+        // something only that page can do.
+        //
+        // Unlike the blocklist this section always renders, empty or not. `HiddenPhrases`
+        // never re-seeds a list that has been emptied, so removing the last phrase is
+        // permanent — and with #readerHiddenBtn gone from the start page, the section's help
+        // line is the only written trace the feature has. Deleting the section with its last
+        // row would delete the instructions for getting a row back.
+        let phraseRows = hidden.phrases.isEmpty
+            ? "<p class=\"empty\">No hidden text.</p>"
+            : hidden.phrases.map(phraseRow).joined(separator: "\n              ")
+        let hiddenSection = """
         <section id="hiddenSection">
                 <h2 class="section">Hidden text</h2>
                 <p class="help">Removed from every article. Hide a phrase by selecting it in
                 the reader.</p>
                 <div id="hiddenPhrases">
-                  \(hidden.phrases.map(phraseRow).joined(separator: "\n              "))
+                  \(phraseRows)
                 </div>
               </section>
         """
@@ -325,9 +334,15 @@ public enum SettingsPage {
                 var row = button.closest('.source');
                 post('readerUnhide', row.dataset.phrase);
                 row.remove();
-                // Same rule as the blocklist: the last row takes the section with it.
+                // Unlike the blocklist, the last row does NOT take the section with it: the
+                // help line above is the only place the app says how to hide a phrase, and
+                // an emptied list is never re-seeded, so removing it would remove the
+                // instructions for getting a row back. Same empty state the sources list uses.
                 if (!phrases.querySelector('.source')) {
-                  document.getElementById('hiddenSection').remove();
+                  var empty = document.createElement('p');
+                  empty.className = 'empty';
+                  empty.textContent = 'No hidden text.';
+                  phrases.appendChild(empty);
                 }
               });
             }
@@ -342,15 +357,20 @@ public enum SettingsPage {
             }
 
             // The two thumbnail switches; each box's id is the settings key it writes.
-            // `readerSettings` replaces the stored object wholesale, so the page posts the
-            // settings it was rendered with plus the changed field — a partial payload would
-            // reset the rest to defaults.
-            var settings = \(settings.json);
-            ['startPageThumbnails', 'readerThumbnails'].forEach(function (key) {
+            //
+            // Only the changed key is posted. This page's copy of the settings would be as
+            // old as the document — a back/forward restore reuses the original bytes — so
+            // posting a whole object from here would push a stale font size and theme over
+            // newer ones. The host merges a payload onto the settings as stored
+            // (`ReaderSettings.decode(_:onto:)`), which is what makes one key safe to send.
+            ['\(ReaderSettings.ThumbnailScope.startPage.rawValue)',
+             '\(ReaderSettings.ThumbnailScope.reader.rawValue)'].forEach(function (key) {
               var box = document.getElementById(key);
+              if (!box) { return; }
               box.addEventListener('change', function () {
-                settings[key] = box.checked ? 'on' : 'off';
-                post('readerSettings', settings);
+                var change = {};
+                change[key] = box.checked ? 'on' : 'off';
+                post('readerSettings', change);
               });
             });
 

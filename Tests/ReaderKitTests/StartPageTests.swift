@@ -226,7 +226,7 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("apply();"))
     }
 
-    func testClearHistorySitsUnderTheInlineList() {
+    func testClearHistorySitsInsideTheRecentsColumn() {
         var history = ReaderHistory()
         history.record(title: "Something", url: "https://x.test/s")
         let html = StartPage.html(appName: "Reader", history: history)
@@ -235,9 +235,19 @@ final class StartPageTests: XCTestCase {
         // A separate id from the popover's #readerClear, which carries the popover's own
         // styling and is handled by the shared chrome script.
         XCTAssertFalse(html.contains("id=\"readerClear\""))
-        // Clearing leaves the page saying the same thing an empty history says.
-        XCTAssertTrue(html.contains("window.readerEmptyRecents ="))
-        XCTAssertTrue(html.contains("column.insertAdjacentHTML('afterbegin', window.readerEmptyRecents)"))
+        // Containment is load-bearing, not cosmetic: the handler empties `.recents-column`,
+        // so the button only vanishes with the list it clears while it is rendered inside it.
+        // One level out and a live Clear history button survives under "No articles yet".
+        let column = try? XCTUnwrap(html.range(of: "class=\"recents-column\""))
+        let button = try? XCTUnwrap(html.range(of: "id=\"startClear\""))
+        let suggested = try? XCTUnwrap(html.range(of: "id=\"suggested\""))
+        XCTAssertTrue(column!.lowerBound < button!.lowerBound)
+        XCTAssertTrue(button!.lowerBound < suggested!.lowerBound)
+        // Clearing swaps in this page's own empty state — heading and list included — and
+        // says so, since the offline copies go with it and no list can convey that.
+        XCTAssertTrue(html.contains("window.readerEmptyColumn ="))
+        XCTAssertTrue(html.contains("column.insertAdjacentHTML('afterbegin', window.readerEmptyColumn)"))
+        XCTAssertTrue(html.contains("History cleared, including saved copies."))
     }
 
     func testNothingToClearWithAnEmptyHistory() {
@@ -315,8 +325,34 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(ReaderChrome.recentsRows(history, thumbnails: true).contains("recent-thumb"))
         XCTAssertFalse(ReaderChrome.recentsRows(history).contains("recent-thumb"))
         // The popover reserves the column itself, as the inline list does.
-        XCTAssertTrue(ReaderChrome.recentsBody(history).contains("id=\"readerRecentsList\" class=\"has-thumbs\""))
-        XCTAssertTrue(ReaderChrome.recentsBody(history).contains("data-src=\"https://x.test/l.jpg\""))
+        let body = ReaderChrome.recentsBody(history, canClear: true)
+        XCTAssertTrue(body.contains("id=\"readerRecentsList\" class=\"has-thumbs\""))
+        XCTAssertTrue(body.contains("data-src=\"https://x.test/l.jpg\""))
+    }
+
+    func testTheRecentsPopoverReservesNoColumnWithoutImages() {
+        // The rule the inline list has always followed: no images in this list, no column,
+        // so it looks exactly as it did before #25. An entry carrying an empty string counts
+        // as no image — `thumbnail(_:)` renders it as a placeholder.
+        var history = ReaderHistory()
+        history.record(title: "Plain", url: "https://x.test/b")
+        history.record(title: "Blank", url: "https://x.test/c", image: "")
+        let body = ReaderChrome.recentsBody(history, canClear: true)
+        XCTAssertTrue(body.contains("<div id=\"readerRecentsList\">"))
+        XCTAssertFalse(body.contains("has-thumbs"))
+        XCTAssertFalse(body.contains("recent-thumb"))
+    }
+
+    func testTheClearButtonFollowsTheStoredHistoryNotThePanelsRows() {
+        // Read one article and the popover's own list is empty — it excludes the article on
+        // screen — but there is history to clear, so the button has to be there.
+        XCTAssertTrue(ReaderChrome.recentsBody(ReaderHistory(), canClear: true)
+            .contains("id=\"readerClear\""))
+        XCTAssertTrue(ReaderChrome.recentsBody(ReaderHistory(), canClear: true)
+            .contains("No recent articles"))
+        // Nothing stored, nothing to clear.
+        XCTAssertFalse(ReaderChrome.recentsBody(ReaderHistory(), canClear: false)
+            .contains("id=\"readerClear\""))
     }
 
     func testTheThumbnailCSSIsSharedByBothPages() {
@@ -333,7 +369,7 @@ final class StartPageTests: XCTestCase {
         }
     }
 
-    func testAClosedPanelFetchesNothing() {
+    func testAClosedPanelFetchesNothing() throws {
         // The popover is closed on every render, and an engine that ignores loading="lazy"
         // inside display:none would otherwise fetch ten thumbnails per article for a panel
         // nobody opened. Opening it is what asks for the images.
@@ -341,13 +377,17 @@ final class StartPageTests: XCTestCase {
                                                     content: "<p>x</p>"))
         XCTAssertTrue(html.contains("if (img.closest('[hidden]')) { return; }"))
         XCTAssertTrue(html.contains("if (which) { window.readerRevealThumbs(); }"))
-        // …which only holds if a list is unhidden before it is revealed, on both pages.
-        for page in [html, StartPage.html(appName: "Reader")] {
-            let unhide = page.range(of: "hidden = false;")
-            let reveal = page.range(of: "if (window.readerRevealThumbs) { window.readerRevealThumbs(); }")
-            XCTAssertNotNil(unhide)
-            XCTAssertNotNil(reveal)
-            XCTAssertTrue(unhide!.lowerBound < reveal!.lowerBound)
+        // …which only holds if a list is unhidden before it is revealed. Scoped to each
+        // page's OWN filler: the chrome script emits its copy first, so an unscoped search
+        // finds those two lines on both pages and the start page's ordering goes untested.
+        for (page, unhideLine) in [(html, "suggested.hidden = false;"),
+                                   (StartPage.html(appName: "Reader"), "section.hidden = false;")] {
+            let filler = try XCTUnwrap(page.range(of: "window.readerSetSuggestions = function (items) {",
+                                                  options: .backwards))
+            let own = page[filler.upperBound...]
+            let unhide = try XCTUnwrap(own.range(of: unhideLine))
+            let reveal = try XCTUnwrap(own.range(of: "window.readerRevealThumbs()"))
+            XCTAssertTrue(unhide.lowerBound < reveal.lowerBound, unhideLine)
         }
     }
 

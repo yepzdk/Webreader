@@ -58,6 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var suppressReaderOnce = false
     private var enterReaderForURL: URL?
     private var pendingReaderRender = false
+    /// Set when the render about to happen is the offline fallback's saved copy, so its
+    /// `didFinish` skips the suggestion fetch. The network just failed, the fetch would fail
+    /// too, and `FeedFetcher` caches an empty result for its whole TTL — one offline article
+    /// would otherwise leave every list empty for ten minutes.
+    private var suggestionsSuppressedOnce = false
     private var readerSourceURL: URL?
     /// The title of the article currently rendered, so a like/dislike learns terms from the
     /// headline rather than from the URL. Set when the reader renders, and cleared when
@@ -356,10 +361,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 // The restored document still shows the rating baked in when it was first
                 // rendered; it may have changed since.
                 self.pushRating(for: url)
-                // Its popover's suggested group was filled by a script call on the way in,
-                // which this navigation did not repeat (#33) — and the settings page may
-                // have flipped the thumbnail switch since this document was baked.
-                self.pushThumbnails()
+                // Reused bytes, not a fresh render: its settings are as old as the document,
+                // and its popover's suggested group was filled by a script call on the way in
+                // that this navigation did not repeat (#33).
+                self.pushSettings()
                 self.loadSuggestions()
                 return
             }
@@ -458,8 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         pageState.willShow(.startPage)
         loadOwnPage(StartPage.html(appName: appName,
                                    settings: ReaderStore.settings(store: store),
-                                   history: ReaderStore.history(store: store),
-                                   hidden: ReaderStore.hiddenPhrases(store: store)),
+                                   history: ReaderStore.history(store: store)),
                     baseURL: nil)
     }
 
@@ -599,7 +603,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             // The article is up; its popover's suggested group catches up when it can (#33).
             // Usually free — arriving from the start page leaves the feeds warm in
             // `FeedFetcher`'s cache — but a link opened from another app fetches here.
-            loadSuggestions()
+            if suggestionsSuppressedOnce {
+                suggestionsSuppressedOnce = false
+            } else {
+                loadSuggestions()
+            }
             return
         }
         if suppressReaderOnce {
@@ -637,6 +645,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             switch PageState.Page(generator: generator) {
             case .startPage:
                 self.pageState.restored(generator: generator)
+                // Reused bytes, not a fresh render: hand it the current settings before the
+                // suggestions arrive, since filling a list reveals thumbnails and this
+                // document's idea of the switch is as old as it is.
+                self.pushSettings()
                 self.loadSuggestions()
             case .settings:
                 self.pageState.restored(generator: generator)
@@ -681,6 +693,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // consumes `suppressReaderOnce` exactly as before.
         if !suppressReaderOnce, let failed = failedURL,
            let cached = cache.article(for: URLCleaner.clean(failed)) {
+            // The load that just failed is the network answer for this whole render; asking
+            // the feeds now only poisons their cache with an empty result.
+            suggestionsSuppressedOnce = true
             renderReader(cached, source: URLCleaner.clean(failed))
             return
         }
@@ -711,8 +726,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 showStartPage()
             }
         case "readerSettings":
+            // Merged onto what is stored rather than decoded from defaults, so a page may
+            // post only the fields it owns — the settings page posts one switch — and a
+            // payload that is complete but stale cannot push its own idea of the rest.
             guard ownPage else { return }
-            ReaderStore.setSettings(ReaderSettings.decode(message.body), store: store)
+            let current = ReaderStore.settings(store: store)
+            ReaderStore.setSettings(ReaderSettings.decode(message.body, onto: current),
+                                    store: store)
         case "readerOpen":
             guard ownPage, let raw = message.body as? String, let url = URL(string: raw) else { return }
             // A saved copy opens straight from disk: no load, no network. Only recents rows
@@ -859,6 +879,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard let self else { return }
             let generator = (result as? String) ?? ""
             self.pageState.restored(generator: generator)
+            // Same reasoning as the other two restore paths: reused bytes carry the settings
+            // they were rendered with. Harmless where the page defines no hook.
+            self.pushSettings()
             if self.pageState.isShowingStartPage { self.loadSuggestions() }
         }
     }
@@ -877,14 +900,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             "window.readerSetRating && window.readerSetRating(\(value), true)")
     }
 
-    /// Tells a restored reader document whether its popover may show thumbnails. The
-    /// attribute was baked when the document was rendered, and the settings page can have
-    /// flipped the switch in between.
+    /// Hands a restored document the settings as they now stand. Its `s` was baked when it
+    /// was rendered, so without this the next Aa interaction posts those values back over
+    /// anything the settings page changed in between — and `data-thumbs` would keep showing
+    /// the switch as it was, which for images-off means fetching what the user declined.
     @MainActor
-    private func pushThumbnails() {
-        let state = ReaderStore.settings(store: store).readerThumbnails.rawValue
+    private func pushSettings() {
+        let json = ReaderStore.settings(store: store).json
         webView.evaluateJavaScript(
-            "window.readerSetThumbs && window.readerSetThumbs('\(state)')")
+            "window.readerSetSettings && window.readerSetSettings(\(json))")
     }
 
     /// Stores a resolved source and tells the settings page to show its row.

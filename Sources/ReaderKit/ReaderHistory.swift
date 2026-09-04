@@ -52,11 +52,15 @@ public struct ReaderHistory: Equatable {
     /// before the page renders, so without the exclusion it would always be row one — a
     /// fifth of a five-row panel spent on the article already on screen. The inline list on
     /// the start page takes the whole history and does neither.
-    public func recents(limit: Int, excluding url: String? = nil) -> ReaderHistory {
+    ///
+    /// Exclusion happens before the cap, so the panel still gets `limit` rows. `url` must be
+    /// the same cleaned key `record` was given. Internal on purpose: this is a view for one
+    /// caller in this module, and a five-row `ReaderHistory` must never reach `setHistory`.
+    func recents(limit: Int, excluding url: String? = nil) -> ReaderHistory {
         var trimmed = ReaderHistory()
         trimmed.entries = entries
             .filter { $0.url != url }
-            .prefix(limit)
+            .prefix(max(0, limit))
             .map { $0 }
         return trimmed
     }
