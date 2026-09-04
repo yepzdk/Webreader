@@ -26,7 +26,7 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("<button type=\"submit\">Open</button>"))
         // The keyboard path is taught, not just the button.
         XCTAssertTrue(html.contains("<kbd>⇧⌘O</kbd>"))
-        XCTAssertTrue(html.contains("messageHandlers.readerOpenURL.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerOpenURL'"))
         // Autofocused so a paste-and-return needs no click.
         XCTAssertTrue(html.contains("autofocus"))
     }
@@ -199,7 +199,7 @@ final class StartPageTests: XCTestCase {
         let html = StartPage.html(appName: "Reader", history: history)
         // The appearance popover is shared verbatim with the reader page.
         XCTAssertTrue(html.contains("id=\"readerAa\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerSettings.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerSettings'"))
         // The recents popover is not: it would be a second, worse copy of the inline list,
         // and the hidden-text panel has no article to group its phrases against (#32).
         XCTAssertFalse(html.contains("id=\"readerRecentsBtn\""))
@@ -443,7 +443,7 @@ final class StartPageTests: XCTestCase {
         let html = StartPage.html(appName: "Reader")
         XCTAssertTrue(html.contains("<div class=\"reader-nav\">"))
         XCTAssertTrue(html.contains("id=\"startSettings\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerOpenSettings.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerOpenSettings'"))
         XCTAssertFalse(html.contains("bottom: 14px"))
     }
 
@@ -454,11 +454,19 @@ final class StartPageTests: XCTestCase {
 
     func testBothChromeClustersShareOneBaseline() {
         // The nav slot and the control cluster are separate fixed elements in opposite
-        // corners; they only look like one row of chrome while they agree on `top`.
-        let nav = ReaderChrome.navCSS()
-        let controls = ReaderChrome.controlsCSS()
-        XCTAssertTrue(nav.contains("top: 14px; left: 14px;"))
-        XCTAssertTrue(controls.contains("top: 14px; right: 14px;"))
+        // corners; they only look like one row of chrome while they agree on `top`. Compared
+        // rather than pinned to a literal, so the safe-area inset (or any future change to
+        // the offset) has to be made in both places or fail here.
+        func topOffset(_ css: String) -> String? {
+            guard let range = css.range(of: "top: ") else { return nil }
+            return css[range.upperBound...].prefix { $0 != ";" }.description
+        }
+        let nav = topOffset(ReaderChrome.navCSS())
+        XCTAssertNotNil(nav)
+        XCTAssertEqual(nav, topOffset(ReaderChrome.controlsCSS()))
+        // And the offset is safe-area aware, with the explicit 0px fallback that keeps the
+        // declaration valid on an engine without `env()`.
+        XCTAssertEqual(nav, "calc(14px + env(safe-area-inset-top, 0px))")
     }
 
     func testTheNavSlotIsNotAControlCluster() {

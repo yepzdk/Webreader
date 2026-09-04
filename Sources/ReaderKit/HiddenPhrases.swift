@@ -130,8 +130,9 @@ public struct HiddenPhrases: Equatable {
 
     /// The floating "Hide text" button's styling. The affordance lives in the page rather
     /// than in a menu because the host may not have a menu bar at all (the GTK host has
-    /// none), and `window.webkit.messageHandlers` is the same API on WebKitGTK as on
-    /// `WKWebView` — so the page-side route is the only one that ports.
+    /// none, and neither will a touch host), and the page's one route to the host —
+    /// `readerPost` — is the same on every platform. So the page-side route is the only
+    /// one that ports.
     ///
     /// Accent-filled like the pressed rating buttons, and `z-index: 8` keeps it below
     /// `.reader-controls` (10) and the progress line (9): an open popover must never be
@@ -156,18 +157,39 @@ public struct HiddenPhrases: Equatable {
         }
         #readerHideBtn[data-shown="true"] { display: flex; }
         #readerHideBtn svg { display: block; }
+        /* Touch: the same 44px floor as every other control, and a slightly larger label —
+           this button appears next to a fingertip-made selection and gets read in a hurry. */
+        @media (pointer: coarse) {
+          #readerHideBtn {
+            min-height: 44px; padding: 10px 14px; font-size: 14px;
+          }
+        }
         """
     }
 
-    /// Creates the button and wires it to the selection: shown above (or below, at the top
-    /// edge) the selection while it is non-empty and inside `<article>`, hidden when the
-    /// selection collapses, on scroll, and on Escape.
+    /// Creates the button and wires it to the selection: shown beside the selection while it
+    /// is non-empty and inside `<article>`, hidden when the selection collapses, on scroll,
+    /// and on Escape.
     ///
-    /// Posts `window.getSelection().toString()` to `readerHide` — the exact string the old
-    /// menu item sent, so the stored-phrase semantics are unchanged: `add` normalizes, and
-    /// matching stays whole-block-text only. The `try`/`catch` is the same shape as every
-    /// other `postMessage` in a generated page: a page opened outside the host has no
-    /// `webkit` object, and an unregistered name throws.
+    /// Posts the selected text to `readerHide` — the exact string the old menu item sent, so
+    /// the stored-phrase semantics are unchanged: `add` normalizes, and matching stays
+    /// whole-block-text only. The guard lives in `readerPost`.
+    ///
+    /// Two things here are deliberately not mouse-shaped, because a fingertip has to work
+    /// the same affordance:
+    ///
+    /// - **The text is captured when the selection is made, not when the button is
+    ///   pressed.** Pressing a button collapses the document selection, which the old code
+    ///   fought with `preventDefault` on `mousedown` — a trick that has no reliable touch
+    ///   equivalent. Reading the string in `update()` instead means the press is free to do
+    ///   whatever the platform wants with focus.
+    /// - **On a coarse pointer the button prefers to sit *below* the selection.** iOS draws
+    ///   its own Copy / Look Up callout immediately above a selection, which is exactly
+    ///   where this used to go — two overlapping popovers, with the system's on top.
+    ///
+    /// `pointerup` rather than `mouseup`: one event covers mouse, touch and pen, and it is
+    /// what settles the position after a drag (during which `selectionchange` has been
+    /// firing continuously).
     ///
     /// Nothing here is platform-specific, and it self-disables where there is no article
     /// (the start page), so it can be dropped into any page that has one.
@@ -191,7 +213,14 @@ public struct HiddenPhrases: Equatable {
           btn.innerHTML = ICON + '<span>Hide text</span>';
           document.body.appendChild(btn);
 
-          function hide() { btn.removeAttribute('data-shown'); }
+          // Captured when the selection is made, so pressing the button — which collapses
+          // the selection on any platform — can never race the read.
+          var pending = '';
+          // Is something coarse doing the pointing? Asked once: it decides which side of the
+          // selection the button prefers, and the answer cannot change mid-session.
+          var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+          function hide() { btn.removeAttribute('data-shown'); pending = ''; }
           // The selection has to lie inside the article: the chrome's own labels and the
           // page's heading are not article boilerplate.
           function selectionRange() {
@@ -207,21 +236,29 @@ public struct HiddenPhrases: Equatable {
             if (!range) { hide(); return; }
             var rect = range.getBoundingClientRect();
             if (!rect.width && !rect.height) { hide(); return; }
+            pending = window.getSelection().toString();
             // Shown before measuring: display:none has no box to measure.
             btn.setAttribute('data-shown', 'true');
             var w = btn.offsetWidth, h = btn.offsetHeight;
             var left = rect.left + (rect.width - w) / 2;
             left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - w - 8));
-            var top = rect.top - h - 8;
-            // A selection starting at the top edge leaves no room above it.
-            if (top < 8) { top = Math.min(rect.bottom + 8, window.innerHeight - h - 8); }
+            var above = rect.top - h - 8;
+            var below = rect.bottom + 8;
+            var floor = window.innerHeight - h - 8;
+            // Above by default; below on touch, where the system draws its own selection
+            // callout (Copy / Look Up) in the space directly above. Either way the other
+            // side is the fallback when the preferred one has no room.
+            var top = coarse ? below : above;
+            if (coarse ? top > floor : top < 8) { top = coarse ? above : Math.min(below, floor); }
             btn.style.left = Math.round(left) + 'px';
-            btn.style.top = Math.round(top) + 'px';
+            btn.style.top = Math.round(Math.min(Math.max(8, top), Math.max(8, floor))) + 'px';
           }
           document.addEventListener('selectionchange', update);
-          document.addEventListener('mouseup', function (e) {
-            // Repositioning under the cursor mid-click would move the button away from
-            // the pointer; the selection hasn't changed anyway.
+          // One event for mouse, touch and pen. It settles the position after a drag, during
+          // which selectionchange has been firing on every intermediate selection.
+          document.addEventListener('pointerup', function (e) {
+            // Repositioning under the pointer mid-press would move the button out from under
+            // it; the selection hasn't changed anyway.
             if (btn.contains(e.target)) { return; }
             update();
           });
@@ -231,15 +268,11 @@ public struct HiddenPhrases: Equatable {
           document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { hide(); }
           });
-          // Focusing a button collapses the document selection, and the posted string is
-          // read from the live selection — so the press must not move focus.
-          btn.addEventListener('mousedown', function (e) { e.preventDefault(); });
           btn.addEventListener('click', function () {
-            var text = window.getSelection().toString();
+            var text = pending;
             hide();
             if (!text.trim()) { return; }
-            try { window.webkit.messageHandlers.readerHide.postMessage(text); }
-            catch (err) {}
+            readerPost('readerHide', text);
             // The host answers with window.readerSetHidden, which strips the blocks; the
             // selection would otherwise survive inside a removed node.
             var sel = window.getSelection();

@@ -31,7 +31,7 @@ final class OfflineFallbackNavTests: XCTestCase {
         // route anywhere else (#15).
         let html = OfflineFallback.html(appName: "Reader", host: "x.test", kind: .offline)
         XCTAssertTrue(html.contains("id=\"readerHomeBtn\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerHome.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerHome'"))
     }
 
     func testTheAccentButtonStylingStaysOnTheCard() {

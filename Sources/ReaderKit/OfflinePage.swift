@@ -100,7 +100,9 @@ public enum OfflineFallback {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="color-scheme" content="light dark">
         <title>\(HTML.escape(appName))</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(theme, by: 2))
           * { box-sizing: border-box; }
@@ -113,7 +115,11 @@ public enum OfflineFallback {
             -webkit-font-smoothing: antialiased;
           }
           .card {
-            text-align: center; padding: 24px; max-width: 30rem;
+            text-align: center; max-width: 30rem;
+            /* The card is centred in the viewport, so it needs no safe-area padding of its
+               own on the block axis — but a landscape notch does eat into the inline one. */
+            padding: 24px max(24px, env(safe-area-inset-left, 0px)) 24px
+                        max(24px, env(safe-area-inset-right, 0px));
           }
           .icon { color: var(--muted); margin-bottom: 16px; }
           .icon svg { width: 44px; height: 44px; }
@@ -128,6 +134,10 @@ public enum OfflineFallback {
           .card button:hover { opacity: 0.92; }
           .card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
           @media (prefers-reduced-motion: reduce) { .card button { transition: none; } }
+          /* Touch: the one action on the page reaches the 44px floor. */
+          @media (pointer: coarse) {
+            .card button { padding: 12px 22px; min-height: 44px; }
+          }
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 2))
         </style>
         </head>
@@ -149,7 +159,7 @@ public enum OfflineFallback {
             </div>
             <h1>\(headline)</h1>
             <p>\(message)</p>
-            <button onclick="window.webkit.messageHandlers.readerRetry.postMessage('retry')">Try Again</button>
+            <button onclick="readerPost('readerRetry', 'retry')">Try Again</button>
           </div>
         </body>
         </html>

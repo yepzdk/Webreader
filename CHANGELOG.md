@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Recents now record when an article was read, and clearing history leaves a timestamp, so
   two devices merge in the right order and a clear isn't undone by a device that was off.
   Existing lists are read as before, on both platforms.
+- **The pages work on a touch screen** (#36). Every generated page now adapts to a coarse
+  pointer: controls reach a 44px target, the fixed chrome clears notches and home
+  indicators, popovers stay on screen, and the layout stops spending desktop gutters and
+  18vh of headroom on a phone. Groundwork for the mobile apps; the desktop rendering is
+  unchanged.
+
+### Fixed
+- **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
+  Block on a suggested row were revealed on hover, which meant they were invisible and
+  unusable on any touch screen. They are now visible by default and only hidden where a
+  pointer can actually hover.
 
 ## [0.11.0] - 2026-08-31
 

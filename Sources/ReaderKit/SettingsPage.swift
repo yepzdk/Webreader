@@ -138,6 +138,7 @@ public enum SettingsPage {
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
@@ -150,7 +151,23 @@ public enum SettingsPage {
             font: 15px/1.5 \(sans);
             -webkit-font-smoothing: antialiased;
           }
-          main { max-width: 34rem; margin: 0 auto; padding: 10vh 24px 64px; }
+          main {
+            max-width: 34rem; margin: 0 auto;
+            /* Mobile first, and the top padding has to clear the fixed nav button — 10vh is
+               84px on a portrait phone but only 39px in landscape, where the button (44px
+               tall on touch, at a 14px inset) would sit on top of the heading. */
+            padding-top: calc(68px + env(safe-area-inset-top, 0px));
+            padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+            padding-left: max(16px, env(safe-area-inset-left, 0px));
+            padding-right: max(16px, env(safe-area-inset-right, 0px));
+          }
+          @media (min-width: 34rem) and (pointer: fine) {
+            main {
+              padding-top: 10vh; padding-bottom: 64px;
+              padding-left: max(24px, env(safe-area-inset-left, 0px));
+              padding-right: max(24px, env(safe-area-inset-right, 0px));
+            }
+          }
           h1 {
             font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
             margin: 0 0 4px;
@@ -247,6 +264,22 @@ public enum SettingsPage {
             font-size: 12px; padding: 1px 6px; white-space: nowrap;
             background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
           }
+          /* Touch: every control reaches the 44px floor, and the field's text goes to 16px
+             so mobile Safari does not zoom the page in on focus. The checkbox itself stays
+             small — the whole `.check` label is the target, which is why it takes the floor
+             and the box only needs `flex: none` to stop the row squashing it to 13px. */
+          @media (pointer: coarse) {
+            .source-remove {
+              min-height: 44px; min-width: 44px;
+              align-items: center; justify-content: center;
+            }
+            #source { padding: 12px; font-size: 16px; min-height: 44px; }
+            form button { padding: 12px 18px; font-size: 16px; min-height: 44px; }
+            .check { min-height: 44px; align-items: center; }
+            .check input { flex: none; width: 20px; height: 20px; margin-top: 0; }
+            .langs { gap: 0 18px; }
+            #syncOpen { min-height: 44px; padding: 10px 14px; font-size: 15px; }
+          }
         </style>
         </head>
         <body>
@@ -283,9 +316,9 @@ public enum SettingsPage {
           </main>
           <script>
           (function () {
-            function post(name, body) {
-              try { window.webkit.messageHandlers[name].postMessage(body); } catch (err) {}
-            }
+            // `readerPost` is defined in <head>; this alias keeps the call sites below on
+            // the short name they have always used.
+            var post = window.readerPost;
             var sources = document.getElementById('sources');
             var form = document.getElementById('add');
             var field = document.getElementById('source');
@@ -528,12 +561,16 @@ public enum SettingsPage {
             switch platform {
             case .macOS: return macOS
             case .linux: return linux
+            // No chords are bound on a touch host, and `shortcutSection` renders nothing
+            // there, so this is unreachable in practice. Empty rather than a trap: the
+            // honest answer to "which chords invoke this" is "none".
+            case .iOS, .android: return []
             }
         }
 
         func note(for platform: Platform) -> String? {
             switch platform {
-            case .macOS: return nil
+            case .macOS, .iOS, .android: return nil
             case .linux: return linuxNote
             }
         }
@@ -563,6 +600,10 @@ public enum SettingsPage {
     /// It comes after the sources, languages and blocked outlets because those are what
     /// someone opened Settings to change; a reference belongs below the things you act on.
     static func shortcutSection(platform: Platform) -> String {
+        // A host that binds no chords has no reference to print. Returning "" rather than
+        // an empty table for the same reason the Sync section is gated on `syncSummary`:
+        // a heading over nothing is a promise the page cannot keep.
+        guard platform.hasKeyboardCommands else { return "" }
         // The one sentence the section owes the reader, and on Linux it is the whole
         // reason the section exists: the GTK host has no menu bar to read the chords off.
         let help = platform == .linux

@@ -76,17 +76,21 @@ final class HiddenPhrasesTests: XCTestCase {
         let js = HiddenPhrases.hideAffordanceJS()
         // The handler name is a contract with the host; renaming it here alone gates the
         // feature shut silently.
-        XCTAssertTrue(js.contains("window.webkit.messageHandlers.readerHide.postMessage(text)"))
-        // Guarded like every other postMessage in a generated page: a page opened outside
-        // the host has no `webkit` object, and an unregistered name throws.
-        XCTAssertTrue(js.contains("try { window.webkit.messageHandlers.readerHide.postMessage(text); }"))
-        XCTAssertTrue(js.contains("catch (err) {}"))
-        // The posted string is read from the live selection — the same string the retired
-        // Edit-menu item sent, so `add`'s normalization and whole-block matching are unchanged.
-        XCTAssertTrue(js.contains("var text = window.getSelection().toString();"))
-        // `messageHandlers` is the only host API it touches — the one thing WebKitGTK 6.0
-        // offers under the same name — which is why this ports without a platform branch.
-        XCTAssertEqual(js.components(separatedBy: "window.webkit.").count - 1, 1)
+        XCTAssertTrue(js.contains("readerPost('readerHide', text);"))
+        // The posted string is the one captured when the selection was made — the same
+        // string the retired Edit-menu item sent, so `add`'s normalization and whole-block
+        // matching are unchanged. Read at selection time, not at press time: pressing a
+        // button collapses the selection on every platform, and the `preventDefault` trick
+        // that used to paper over that has no touch equivalent.
+        XCTAssertTrue(js.contains("pending = window.getSelection().toString();"))
+        XCTAssertTrue(js.contains("var text = pending;"))
+        XCTAssertFalse(js.contains("mousedown"))
+        // `readerPost` is the only host API it touches, which is why this ports to any host
+        // without a platform branch here: the transport itself is the only thing that
+        // differs per platform, and it is chosen once in `ReaderChrome.transportScript`.
+        // The guard that used to sit at this call site moved in there with it.
+        XCTAssertFalse(js.contains("window.webkit."))
+        XCTAssertEqual(js.components(separatedBy: "readerPost(").count - 1, 1)
     }
 
     func testHideAffordanceTracksAndDismissesTheSelection() {
@@ -99,6 +103,19 @@ final class HiddenPhrasesTests: XCTestCase {
         XCTAssertTrue(js.contains("article.contains(range.commonAncestorContainer)"))
         // Confirmed with the shared toast, like the other page-side actions.
         XCTAssertTrue(js.contains("window.readerToast("))
+    }
+
+    func testHideAffordanceIsPointerNeutralAndDodgesTheSystemCallout() {
+        let js = HiddenPhrases.hideAffordanceJS()
+        // One event for mouse, touch and pen — `mouseup` never fires for a touch selection.
+        XCTAssertTrue(js.contains("document.addEventListener('pointerup',"))
+        XCTAssertFalse(js.contains("mouseup"))
+        // iOS draws Copy / Look Up directly above a selection, so on a coarse pointer the
+        // button prefers the space below it and only falls back above.
+        XCTAssertTrue(js.contains("window.matchMedia('(pointer: coarse)').matches"))
+        XCTAssertTrue(js.contains("var top = coarse ? below : above;"))
+        // Clamped into the viewport whichever side it lands on.
+        XCTAssertTrue(js.contains("Math.min(Math.max(8, top), Math.max(8, floor))"))
     }
 
     func testHideAffordanceStaysBelowTheReaderControls() {

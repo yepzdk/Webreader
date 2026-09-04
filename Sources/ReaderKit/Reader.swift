@@ -411,6 +411,7 @@ public enum ReaderPage {
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader">
         <title>\(title)</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
@@ -424,7 +425,20 @@ public enum ReaderPage {
             line-height: var(--reader-leading);
             -webkit-font-smoothing: antialiased;
           }
-          main { max-width: var(--reader-width); margin: 0 auto; padding: 48px 24px 96px; }
+          main {
+            max-width: var(--reader-width); margin: 0 auto;
+            padding-top: 48px;
+            padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+            padding-left: max(24px, env(safe-area-inset-left, 0px));
+            padding-right: max(24px, env(safe-area-inset-right, 0px));
+          }
+          /* The chrome is fixed at the top edge, and on touch it grows to a 44px target —
+             so it now ends below where 48px of padding used to clear it, and the headline
+             would run under the cluster. 68px keeps the same sliver of air above the title
+             that the pointer layout has. */
+          @media (pointer: coarse) {
+            main { padding-top: calc(68px + env(safe-area-inset-top, 0px)); }
+          }
           header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
           h1 { font-size: 1.65em; line-height: 1.25; letter-spacing: -0.01em; margin: 0; }
           .meta {

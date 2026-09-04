@@ -77,7 +77,7 @@ final class SettingsPageTests: XCTestCase {
         let page = html()
         XCTAssertTrue(page.contains("<div class=\"reader-nav\">"))
         XCTAssertTrue(page.contains("id=\"readerHomeBtn\""))
-        XCTAssertTrue(page.contains("messageHandlers.readerHome.postMessage"))
+        XCTAssertTrue(page.contains("readerPost('readerHome'"))
     }
 
     func testTheDoneButtonIsGone() {
@@ -272,10 +272,14 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertFalse(mac.contains("Ctrl+Shift+R"))
     }
 
-    func testEveryActionAndChordInTheTableReachesBothPages() {
-        // One table, two columns: a row that renders on one platform and not the other
-        // means it stopped being the single source the table exists to be.
-        for platform in Platform.allCases {
+    func testEveryActionAndChordReachesEveryKeyboardPage() {
+        // One table, two columns: a row that renders on one keyboard host and not the other
+        // means it stopped being the single source the table exists to be. Driven off
+        // `hasKeyboardCommands` rather than a hand-written pair, so a fifth platform joins
+        // whichever half it belongs to without this test being edited.
+        let keyboard = Platform.allCases.filter(\.hasKeyboardCommands)
+        XCTAssertEqual(keyboard, [.macOS, .linux])
+        for platform in keyboard {
             let rendered = page(platform)
             for shortcut in SettingsPage.shortcuts {
                 XCTAssertTrue(rendered.contains("<dt>\(HTML.escape(shortcut.action))</dt>"),
@@ -284,6 +288,22 @@ final class SettingsPageTests: XCTestCase {
                     XCTAssertTrue(rendered.contains("<kbd>\(HTML.escape(chord))</kbd>"),
                                   "\(chord) is missing from the \(platform.rawValue) page")
                 }
+            }
+        }
+    }
+
+    func testATouchHostGetsNoShortcutSectionAtAll() {
+        // Not an empty table under a heading: a touch host binds none of these, and a
+        // reference listing chords nobody can press is worse than no reference. Asserted
+        // per action too, so a stray row can't leak in through some other part of the page.
+        for platform in Platform.allCases where !platform.hasKeyboardCommands {
+            let rendered = page(platform)
+            XCTAssertFalse(rendered.contains(shortcutHeading), platform.rawValue)
+            XCTAssertFalse(rendered.contains("<dl class=\"keys\">"), platform.rawValue)
+            XCTAssertFalse(rendered.contains("<kbd>"), platform.rawValue)
+            for shortcut in SettingsPage.shortcuts {
+                XCTAssertFalse(rendered.contains("<dt>\(HTML.escape(shortcut.action))</dt>"),
+                               "\(shortcut.action) leaked onto the \(platform.rawValue) page")
             }
         }
     }

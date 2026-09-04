@@ -26,6 +26,67 @@ enum ReaderChrome {
             .joined(separator: "\n")
     }
 
+    /// One chrome offset from a window edge, grown by the device's safe-area inset there.
+    ///
+    /// Every `position: fixed` piece of chrome goes through this so a notch, a rounded
+    /// corner or a home indicator cannot land on top of a control. On a desktop every
+    /// inset is 0 and this is the fixed offset it has always been.
+    ///
+    /// The two-argument `env()` is deliberate. With no fallback the declaration is invalid
+    /// in an engine that does not implement `env()`, and an invalid declaration is dropped
+    /// — so the chrome would lose its offset altogether rather than fall back to it.
+    private static func inset(_ px: Int, _ edge: String) -> String {
+        "calc(\(px)px + env(safe-area-inset-\(edge), 0px))"
+    }
+
+    /// The touch-target floor, in px. 44 is Apple's HIG figure and clears the 24px WCAG
+    /// 2.5.8 minimum the chrome already aimed at with padding; Material's 48dp is met by
+    /// the padding the coarse blocks add around it.
+    ///
+    /// Applied only under `@media (pointer: coarse)`, never unconditionally: the desktop
+    /// chrome is dense on purpose, and a mouse hits a 28px button without trying.
+    private static let touchTarget = 44
+
+    /// The single JS object name an Android host injects with
+    /// `WebViewCompat.addWebMessageListener`. Named here so the host and the page cannot
+    /// disagree about it, the way the message names themselves are agreed by being
+    /// spelled once in `ReaderChrome` and once in each host's registration list.
+    static let androidBridge = "readerHost"
+
+    /// `window.readerPost(name, body)` — the one route a generated page has to its host,
+    /// emitted in `<head>` so it is defined before any inline handler or later script can
+    /// call it.
+    ///
+    /// It exists so the transport is one platform-selected line instead of a
+    /// `window.webkit.messageHandlers` reference at every post site. `WKWebView` and
+    /// WebKitGTK both expose that object under the same name, which is why the two current
+    /// hosts never needed a seam; Android's WebView exposes no such thing. Its
+    /// `addWebMessageListener` bridge injects one named object whose `postMessage` takes a
+    /// single string, so there the name has to travel *with* the body as JSON and the host
+    /// demultiplexes on the far side.
+    ///
+    /// Swallowing the error is carried over unchanged from the call sites this replaces: a
+    /// page can outlive its host — restored from the back-forward cache, or simply opened
+    /// in a browser while working on the CSS — and it must stay readable rather than
+    /// throwing on every click.
+    static func transportScript(platform: Platform) -> String {
+        let send: String
+        switch platform {
+        case .macOS, .linux, .iOS:
+            send = "window.webkit.messageHandlers[name].postMessage(body);"
+        case .android:
+            send = "window.\(androidBridge).postMessage("
+                + "JSON.stringify({ name: name, body: body }));"
+        }
+        return """
+        <script>
+        window.readerPost = function (name, body) {
+          try { \(send) } catch (err) {}
+        };
+        </script>
+        """
+    }
+
     /// The `data-theme`, `data-quotes` and `data-thumbs` attributes for `<html>`. Each is
     /// absent at its default (`auto` follows the system; bordered quotes are the
     /// stylesheet's baseline; thumbnails are on), so the stock page is attribute-free.
@@ -112,12 +173,23 @@ enum ReaderChrome {
     /// The shared chrome button box: the same padding, colours, hairline and radius for the
     /// top-right cluster and the top-left nav slot. One declaration and two selector lists,
     /// so a button on one side of the window can't drift from a button on the other.
+    ///
+    /// The coarse-pointer floor lives here for the same reason the box does: every chrome
+    /// button on either side of the window grows together or none of them does. `inline-flex`
+    /// is what makes `min-height` centre the label — the text buttons have no flex of their
+    /// own, only the icon ones do.
     private static func buttonBox(_ selectors: String) -> String {
         """
         \(selectors) {
           padding: 4px 10px; font-family: inherit; font-size: 14px;
           color: var(--muted); background: var(--bg);
           border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+        }
+        @media (pointer: coarse) {
+          \(selectors) {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 4px 14px;
+          }
         }
         """
     }
@@ -134,14 +206,18 @@ enum ReaderChrome {
     static func navCSS(platform: Platform = .macOS) -> String {
         """
         .reader-nav {
-          position: fixed; top: 14px; left: 14px; z-index: 10;
+          position: fixed; top: \(inset(14, "top")); left: \(inset(14, "left")); z-index: 10;
           display: flex; gap: 6px;
           font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
         }
         \(buttonBox("#readerHomeBtn, #startSettings"))
         #readerHomeBtn:hover, #startSettings:hover { color: var(--fg); }
-        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor. */
-        #readerHomeBtn { display: flex; align-items: center; padding: 5px 9px; }
+        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor.
+           `justify-content` matters only once the coarse floor gives the box more width
+           than the icon needs — without it the icon sits left of centre on touch. */
+        #readerHomeBtn {
+          display: flex; align-items: center; justify-content: center; padding: 5px 9px;
+        }
         #readerHomeBtn svg { display: block; }
         """
     }
@@ -154,7 +230,7 @@ enum ReaderChrome {
         let serif = platform.serifStack
         return """
         .reader-controls {
-          position: fixed; top: 14px; right: 14px; z-index: 10;
+          position: fixed; top: \(inset(14, "top")); right: \(inset(14, "right")); z-index: 10;
           display: flex; gap: 6px;
           font-family: \(sans); font-size: 12px; line-height: 1.3;
         }
@@ -164,9 +240,11 @@ enum ReaderChrome {
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
-        /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor. */
+        /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor.
+           `justify-content` centres the icon once the coarse floor makes the box wider
+           than the glyph needs; on a pointer the box is content-sized and it does nothing. */
         #readerRecentsBtn, #readerHiddenBtn, #readerMoreBtn, #readerLessBtn {
-          display: flex; align-items: center; padding: 5px 9px;
+          display: flex; align-items: center; justify-content: center; padding: 5px 9px;
         }
         #readerRecentsBtn svg, #readerHiddenBtn svg,
         #readerMoreBtn svg, #readerLessBtn svg { display: block; }
@@ -192,6 +270,10 @@ enum ReaderChrome {
         .badge[hidden] { display: none; }
         #readerPanel, #readerRecents, #readerHidden {
           position: absolute; top: calc(100% + 8px); right: 0; width: 240px;
+          /* Every panel hangs leftward from a right-anchored button, so each needs the same
+             guard against running off the opposite edge — not just the two list panels that
+             historically had it. */
+          max-width: calc(100vw - 28px);
           padding: 12px; background: var(--bg);
           border: 1px solid var(--border); border-radius: 8px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
@@ -331,6 +413,58 @@ enum ReaderChrome {
         .swatch-sepia { background: #f4ecd8; }
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
+        /* Touch, in one block at the end so source order settles every override without a
+           specificity fight.
+
+           The panels stop hanging off their button and pin to the viewport instead. Every
+           panel is `right: 0` inside its own `.reader-control`, and the recents button is
+           the third of five — so its right edge is ~273px in from the left on a 390px
+           phone, and any panel wider than that starts off-screen. Measured at -47px before
+           this block existed: the `max-width` guard never fired, because the panel was
+           narrower than the viewport and still outside it. Widening a right-anchored panel
+           cannot fix that; only re-anchoring can. `position: fixed` escapes the
+           `.reader-control` containing block without changing DOM ancestry, so
+           `controlsScript`'s outside-click dismissal keys off the same `.reader-controls`
+           it always did.
+
+           `top` clears the chrome: a 14px inset plus a 44px button plus the 8px gap the
+           pointer layout uses. `max-height` is then whatever is left above the bottom inset.
+
+           The rest is the 44px floor, for the rows and for the two controls that carry
+           their own box instead of `buttonBox`'s.
+
+           `pointer: coarse` rather than a width breakpoint on purpose: the question is what
+           is doing the pointing, not how wide the window is. A phone in landscape is wider
+           than some desktop windows and still has no mouse. */
+        @media (pointer: coarse) {
+          #readerPanel, #readerRecents, #readerHidden {
+            position: fixed;
+            top: calc(66px + env(safe-area-inset-top, 0px));
+            left: max(14px, env(safe-area-inset-left, 0px));
+            right: max(14px, env(safe-area-inset-right, 0px));
+            width: auto;
+            /* Full width on a portrait phone, but a landscape one is 844px wide and a
+               816px band of 13px rows is not a list anyone wants to read. Capped, and
+               pushed back to the right so it still reads as hanging from the cluster that
+               opened it. */
+            max-width: 30rem; margin-left: auto;
+            max-height: calc(100vh - 80px - env(safe-area-inset-top, 0px)
+                             - env(safe-area-inset-bottom, 0px));
+            overflow-y: auto;
+          }
+          .recent { min-height: \(touchTarget)px; padding: 10px 10px; font-size: 13px; }
+          .recent-empty, .phrase-empty { padding: 10px; }
+          .seg button { min-height: \(touchTarget)px; padding: 0 4px; }
+          .swatch { width: 34px; height: 34px; }
+          .themes { padding: 2px 0; }
+          /* The rating pair sits outside `buttonBox` — it carries its own box so the pressed
+             accent state can override it — so it needs the floor stated here too. */
+          #readerMoreBtn, #readerLessBtn {
+            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 5px 12px;
+          }
+          /* The X on a hidden-phrase row: a 20px icon box inside a list built for reading. */
+          .phrase-remove { min-height: \(touchTarget)px; min-width: \(touchTarget)px; }
+        }
         """
     }
 
@@ -342,7 +476,8 @@ enum ReaderChrome {
     static func toastCSS(platform: Platform = .macOS) -> String {
         """
         #readerToast {
-          position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(6px);
+          position: fixed; left: 50%; bottom: \(inset(20, "bottom"));
+          transform: translateX(-50%) translateY(6px);
           z-index: 20; max-width: calc(100vw - 32px);
           padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
           background: var(--bg); color: var(--fg);
@@ -392,7 +527,8 @@ enum ReaderChrome {
     static func progressCSS() -> String {
         """
         #readerProgress {
-          position: fixed; top: 0; left: 0; width: 100%; height: \(LoadProgress.lineThickness)px; z-index: 9;
+          position: fixed; top: env(safe-area-inset-top, 0px); left: 0; width: 100%;
+          height: \(LoadProgress.lineThickness)px; z-index: 9;
           /* Foreground, not accent: the native page-load line is accent-colored, and a
              blue hairline sitting still at 30% reads as a stuck load. */
           background: var(--fg);
@@ -561,13 +697,13 @@ enum ReaderChrome {
     ///
     /// The click posts inline rather than through `controlsScript`, because the offline page
     /// carries no chrome script at all — one mechanism for one button beats a listener here
-    /// and an inline handler there. Every handler name is registered for the window's life,
-    /// so there is nothing for the bare `postMessage` to throw on.
+    /// and an inline handler there. `readerPost` is defined in `<head>`, so it is already
+    /// there by the time a click can happen.
     static func navHome() -> String {
         """
         <div class="reader-nav">
           <button id="readerHomeBtn" type="button" aria-label="Home" title="Start page"
-                  onclick="window.webkit.messageHandlers.readerHome.postMessage('')">
+                  onclick="readerPost('readerHome', '')">
             <!-- house, Lucide-style line icon -->
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -586,7 +722,7 @@ enum ReaderChrome {
         """
         <div class="reader-nav">
           <button id="startSettings" type="button"
-                  onclick="window.webkit.messageHandlers.readerOpenSettings.postMessage('')">Settings</button>
+                  onclick="readerPost('readerOpenSettings', '')">Settings</button>
         </div>
         """
     }
@@ -833,7 +969,7 @@ enum ReaderChrome {
             if (window.readerOnLayoutChange) { window.readerOnLayoutChange(); }
           }
           function save() {
-            try { window.webkit.messageHandlers.readerSettings.postMessage(s); } catch (e) {}
+            readerPost('readerSettings', s);
           }
           // How the host hands over settings merged in from another device: adopt and
           // redraw, but do NOT save — they are already the stored state, and writing them
@@ -967,8 +1103,7 @@ enum ReaderChrome {
                 // close handler would see a node outside .reader-controls and shut the panel.
                 e.stopPropagation();
                 window.readerSetHidden(HIDDEN.filter(function (p) { return p !== phrase; }));
-                try { window.webkit.messageHandlers.readerUnhide.postMessage(phrase); }
-                catch (err) {}
+                readerPost('readerUnhide', phrase);
               });
               row.appendChild(text);
               if (count) { row.appendChild(chip); }
@@ -1002,15 +1137,13 @@ enum ReaderChrome {
                 // show the empty state — so focus has to go somewhere deliberate, or it
                 // falls to <body> and the next Tab restarts at the top of the document.
                 recentsBtn.focus();
-                try { window.webkit.messageHandlers.readerClear.postMessage(''); }
-                catch (err) {}
+                readerPost('readerClear', '');
                 return;
               }
               var row = e.target.closest('button[data-url]');
               if (!row) { return; }
               setOpen(null);
-              try { window.webkit.messageHandlers.readerOpen.postMessage(row.dataset.url); }
-              catch (err) {}
+              readerPost('readerOpen', row.dataset.url);
             });
           }
           // The panel's second group: what to read next, so finishing an article doesn't
@@ -1086,8 +1219,7 @@ enum ReaderChrome {
           var lessBtn = document.getElementById('readerLessBtn');
           if (moreBtn && lessBtn) {
             var rate = function (direction) {
-              try { window.webkit.messageHandlers.readerRate.postMessage(direction); }
-              catch (err) {}
+              readerPost('readerRate', direction);
             };
             moreBtn.addEventListener('click', function () { rate('more'); });
             lessBtn.addEventListener('click', function () { rate('less'); });
