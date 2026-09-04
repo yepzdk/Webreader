@@ -767,7 +767,10 @@ final class ReaderHost {
 
         case "readerClear":
             guard ownPage else { return }
-            ReaderStore.setHistory(ReaderHistory(), store: store)
+            // The tombstone, not an empty list: this host has no sync surface yet, but the
+            // history blob it writes is the shared one, so a clear here has to stay a clear
+            // once this install joins a synced folder.
+            ReaderStore.clearHistory(store: store)
             cache.prune(keeping: [])
 
         case "readerHide":

@@ -11,28 +11,38 @@ import Foundation
 ///
 /// Nothing about it is platform-specific, which is the point: it is a plain `KeyValueStore`,
 /// so it is usable on macOS and directly testable. `ReaderStore` anticipated exactly this
-/// substitution — every value it stores is already a JSON string precisely so a different
-/// backing store (an `NSUbiquitousKeyValueStore` for sync, see issue #7) can drop in.
-public final class FileStore: KeyValueStore {
+/// substitution — every value it stores is already a JSON string, which is also what lets a
+/// whole state document travel in a sync device file (`ReaderKit/Sync`, issue #7).
+/// Thread-safe, because `KeyValueStore` requires it: sync reads and writes the store from
+/// its own queue while the UI reads it on the main thread. The lock is around the cache,
+/// not around the file, which is the same guarantee `UserDefaults` gives — two *processes*
+/// sharing one store still need the single-writer discipline `ReaderKit/Sync` uses.
+public final class FileStore: KeyValueStore, @unchecked Sendable {
     private let fileURL: URL
     /// Loaded on first access, then authoritative: the file is only ever written by us.
     private var values: [String: String]?
+    private let lock = NSLock()
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
     }
 
-    public func string(forKey key: String) -> String? { loaded()[key] }
+    public func string(forKey key: String) -> String? {
+        lock.withLock { loaded()[key] }
+    }
 
     public func set(_ value: String?, forKey key: String) {
-        var values = loaded()
-        if let value {
-            values[key] = value
-        } else {
-            values.removeValue(forKey: key)
+        let updated: [String: String] = lock.withLock {
+            var values = loaded()
+            if let value {
+                values[key] = value
+            } else {
+                values.removeValue(forKey: key)
+            }
+            self.values = values
+            return values
         }
-        self.values = values
-        write(values)
+        write(updated)
     }
 
     /// A missing file is an empty store, and so is an unreadable or malformed one — the same

@@ -1,11 +1,12 @@
 import Foundation
 
-/// The settings page: where suggestion sources live. Pure like the other generated pages,
-/// sharing `ReaderChrome`'s palette and the start page's document shape.
+/// The settings page: suggestion sources, and where sync stands. Pure like the other
+/// generated pages, sharing `ReaderChrome`'s palette and the start page's document shape.
 ///
-/// Appearance is NOT here — it belongs in the Aa popover, next to the text it changes. This
-/// page is the one thing that has nowhere else to live: a list of feeds, which is data the
-/// user manages rather than a control they nudge while reading.
+/// Appearance is NOT here — it belongs in the Aa popover, next to the text it changes. What
+/// lives here is what has nowhere else to go: a list of feeds, which is data the user
+/// manages rather than a control they nudge while reading, and the way into sync (this is
+/// where people look for it; the sheet itself is native, since it owns a folder picker).
 ///
 /// Getting back out is the top-left nav slot every other page uses (`ReaderChrome.navHome`),
 /// not a button at the end of the document. There used to be a "Done" below the shortcut
@@ -20,12 +21,20 @@ public enum SettingsPage {
     /// lists, defaulting to macOS so the AppKit host needs no argument; a GTK host passes
     /// `.linux`. `palette` is the desktop palette for `Theme.auto`, nil by default so the
     /// `prefers-color-scheme` fallback stands.
+    ///
+    /// The Sync section is drawn only when the host passes a `syncSummary`: it opens a
+    /// native sheet with a folder picker, and a host without one (the GTK host, for now)
+    /// would be showing a button that does nothing. `syncFolder` is the abbreviated path of
+    /// the folder sync runs through, nil when sync is off. Both strings come from the host
+    /// so the page and its sheet can't describe sync differently.
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             suggestions: SuggestionSettings = SuggestionSettings(),
                             hidden: HiddenPhrases = HiddenPhrases(),
                             platform: Platform = .macOS,
-                            palette: ReaderPalette? = nil) -> String {
+                            palette: ReaderPalette? = nil,
+                            syncFolder: String? = nil,
+                            syncSummary: String = "") -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
         let sourceRows = suggestions.sources.isEmpty
@@ -80,6 +89,22 @@ public enum SettingsPage {
                   \(blocked.map(blockedRow).joined(separator: "\n              "))
                 </div>
               </section>
+        """
+        // Only for a host that has somewhere to send the button: it opens a native sheet
+        // with a folder picker, and drawing it on a host without one (the GTK host, until
+        // #7's Linux half lands) would be a control that does nothing.
+        let syncSection = syncSummary.isEmpty ? "" : """
+        <h2 class="section">Sync</h2>
+              <p class="help">Appearance and recents follow you between your devices through a
+              folder that already syncs — in your Nextcloud folder, iCloud Drive, or anything
+              similar. Page zoom stays on this device.</p>
+              <div class="sync">
+                <span class="sync-text">
+                  <span class="sync-folder">\(HTML.escape(syncFolder ?? "Not set up"))</span>
+                  <span class="sync-state">\(HTML.escape(syncSummary))</span>
+                </span>
+                <button id="syncOpen">\(syncFolder == nil ? "Set up…" : "Change…")</button>
+              </div>
         """
         // Hidden text, managed the same way blocked outlets are: created while reading (a
         // selection in the reader), listed and removed here (#32). The reader's popover
@@ -188,6 +213,24 @@ public enum SettingsPage {
           .checks { display: flex; flex-direction: column; gap: 10px; }
           .check { display: flex; align-items: start; gap: 8px; font-size: 13px; cursor: pointer; }
           .check input { margin-top: 2px; accent-color: var(--accent); }
+          /* Sync: where it runs and how it's doing, with the control that opens the sheet. */
+          .sync {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 2px; border-bottom: 1px solid var(--border);
+          }
+          .sync-text { flex: 1; min-width: 0; }
+          .sync-folder {
+            display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-size: 14px;
+          }
+          .sync-state { display: block; margin-top: 1px; font-size: 12px; color: var(--muted); }
+          #syncOpen {
+            flex: none; padding: 7px 12px;
+            font-family: inherit; font-size: 13px; color: var(--fg);
+            background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+            cursor: pointer;
+          }
+          #syncOpen:hover { background: var(--surface); }
           /* The shortcut reference: a list you read, so plain markup — nothing in it is a
              control, which is why the section needs no script and no host of its own. The
              columns carry no gap so the hairline is one rule across the row, as the source
@@ -210,7 +253,8 @@ public enum SettingsPage {
           \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
           <main>
             <h1>Settings</h1>
-            <p class="lede">Sources feed the suggestions on the start page.</p>
+            <p class="lede">\(syncSection.isEmpty ? "Sources feed the suggestions on the start page."
+                : "What the start page suggests, and how this device stays in step with your others.")</p>
 
             <h2 class="section">Suggestion sources</h2>
             <p class="help">A feed address, or a site address to look one up on.</p>
@@ -228,6 +272,8 @@ public enum SettingsPage {
             \(languageSection)
 
             \(blockedSection)
+
+            \(syncSection)
 
             \(hiddenSection)
 
@@ -373,6 +419,23 @@ public enum SettingsPage {
                 post('readerSettings', change);
               });
             });
+
+            // Absent on a host that has no sync sheet to open (see `syncSection`), so both
+            // halves check before touching it.
+            var syncOpen = document.getElementById('syncOpen');
+            if (syncOpen) {
+              syncOpen.addEventListener('click', function () {
+                post('readerOpenSync', '');
+              });
+              // The host pushes the two sync strings after the sheet changes anything, rather
+              // than re-rendering the page: a half-typed feed address in the field above must
+              // survive someone setting up sync.
+              window.readerSetSyncStatus = function (folder, summary) {
+                document.querySelector('.sync-folder').textContent = folder || 'Not set up';
+                document.querySelector('.sync-state').textContent = summary || '';
+                syncOpen.textContent = folder ? 'Change…' : 'Set up…';
+              };
+            }
 
             // Called by the host once it has fetched (or failed to fetch) the address.
             window.readerSourceAdded = function (source) {

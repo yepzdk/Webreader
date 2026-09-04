@@ -10,8 +10,8 @@ of [yepzdk/webwrap](https://github.com/yepzdk/webwrap) in August 2026; webwrap's
 frozen at 0.8.0 and all reader work happens here.
 
 Roadmap (not started): read-aloud (`AVSpeechSynthesizer` over Readability's `textContent`),
-a feed of similar articles, and an iOS/iPadOS app with sync (`NSUbiquitousKeyValueStore` for
-settings + recents first; CloudKit only if article bodies need to sync).
+a feed of similar articles, and an iOS/iPadOS app (#6) — which reuses the folder sync that
+already ships (`Sources/ReaderKit/Sync`), with iCloud Drive as the practical folder there.
 
 ## Architecture
 
@@ -32,7 +32,8 @@ Two SwiftPM targets, no dependencies:
     `Suggestions.rank`.
   - `FeedFetcher.swift` — the only networking outside the web view: an actor fetching the
     sources with a 10-minute in-memory TTL; failures are "no items", never errors.
-  - `SettingsPage.swift` — the suggestion sources and the language filter (⌘,).
+  - `SettingsPage.swift` — the suggestion sources, the language filter, and the way into
+    sync (⌘,).
   - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
     `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
@@ -41,6 +42,10 @@ Two SwiftPM targets, no dependencies:
   - `WebURL.swift` — `isWebURL`, `loadsInApp`, `clipboardURL`, `urlToCopy`.
   - `ReaderStore.swift` — `KeyValueStore` protocol, `DefaultsStore`, and the keys/bounds for
     settings, history, and zoom. Strings only, so a KVS-backed store can drop in for sync.
+  - `Sync/` — sync (#7) as files in a folder the user picks, one per device:
+    `DeviceState.swift` (the file format), `SyncMerge.swift` (fold across devices),
+    `SyncFolder.swift` (the folder's I/O, injected like `ArticleCache`), `SyncEngine.swift`
+    (one cycle: read peers, fold, write back, publish).
   - `ReadabilityJS.swift` — vendored Readability 0.6.0 as string literals (Apache-2.0). To
     upgrade, replace both literals and bump `version`.
   - `Platform.swift` — `Platform.macOS` / `.linux` and the serif/sans CSS font stacks each
@@ -59,6 +64,8 @@ Two SwiftPM targets, no dependencies:
   native load-progress hairline and `LoadingCover.swift` the plain "Loading" screen that
   stands in for a site while it loads. `LegacyImport.swift` is the one-time import from the
   webwrap-generated app's defaults domain (`dk.yepz.webwrap.webreader`).
+  `SyncController.swift` drives sync cycles (triggers, folder bookmark, applying results)
+  and `SyncSheet.swift` is the Sync… sheet — the only native window in the app.
 - **`Sources/CWebKitGTK`** — a header-only C shim, `shim.h` plus a module map. It exists
   because Swift's ClangImporter cannot see function-like C macros (`g_signal_connect`,
   `G_CALLBACK`, the `GTK_WIDGET()`/`WEBKIT_WEB_VIEW()` casts) or C varargs (`g_object_new`).
@@ -86,9 +93,11 @@ Two SwiftPM targets, no dependencies:
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
   `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
   `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
-  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`. Rename in both
-  Swift and the page scripts together. The host calls back via `window.readerSetHidden(list)`,
-  `window.readerSetSuggestions(items)`, `window.readerSourceAdded/Rejected(…)`.
+  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`,
+  `readerOpenSync`. Rename in both Swift and the page scripts together. The host calls back
+  via `window.readerSetHidden(list)`, `window.readerSetSuggestions(items)`,
+  `window.readerSourceAdded/Rejected(…)`, `window.readerApplySettings(settings)`,
+  `window.readerSetRecents(rows)`, `window.readerSetSyncStatus(folder, summary)`.
 - Hiding a phrase is a **page** affordance, not a menu item: selecting text in the reader
   raises a Hide button that posts to `readerHide`. It was moved out of the Edit and context
   menus for issue #16 — the Linux host has no menu bar — and `window.webkit.messageHandlers`
@@ -285,6 +294,42 @@ Two SwiftPM targets, no dependencies:
   use the id; the executable name silently never matches.
 - The Linux window title follows the document via `notify::title`, and that is the only
   writer. macOS sets its title once and leaves it. Two writers is how it went stale.
+- Sync is **one file per device, and only that device writes it**. A folder synced by the
+  Nextcloud client (or iCloud Drive, or Syncthing) resolves collisions per file: two
+  instances writing one `history.json` produce `history (conflicted copy …).json` and lose
+  a write. Single-writer files have no collision to resolve, and merging is a fold.
+- Every stored timestamp goes through `Timestamp` — whole milliseconds, quantized on write
+  *and* on read. They are compared for equality after a JSON round-trip (a cycle publishes
+  only when its state differs from the file it last wrote), and full `Double` precision does
+  not survive that trip identically on both platforms: corelibs-Foundation prints one
+  significant digit fewer than Darwin, so `…957.1707573` came back `…957.1707568` and every
+  device rewrote its file on every cycle. The Linux CI job is what caught it.
+- Recents carry `readAt` and history carries a `clearedAt` tombstone because two devices
+  can't otherwise be ordered against each other. Rows with no `readAt` (everything written
+  before sync existed) sort last and are dropped by any tombstone — that's what stops a
+  device that was off during a "Clear history" from restoring the list. Zoom is not synced:
+  it depends on the screen.
+- The settings timestamp lives in its own key (`reader.settings.updatedAt`), NOT inside the
+  settings JSON — that JSON is also the reader page's script seed, and the page posts it
+  back. `resetAppearance` stamps it too, so a reset propagates instead of losing to another
+  device's older settings.
+- A cycle never creates the folder the user chose (only the `WebReader` subfolder inside
+  it): recreating it would publish into a path nothing syncs, which looks like working sync
+  while the devices drift apart. `SyncController.resolveFolder` covers the three ways a
+  folder moves — renamed (the bookmark follows), deleted and recreated at the same path (a
+  sync client does this routinely; the recorded path takes over), and simply gone (the
+  folder stays configured, every trigger retries, the sheet says why).
+- The folder is watched twice over: the directory for files appearing, vanishing or being
+  replaced, and each peer's file for a client that rewrites it in place — a directory watch
+  never sees that. Watchers are re-armed after every cycle. `SyncController` is not
+  `NSObject`-derived, so a target/selector `Timer` on it silently never fires; use blocks.
+- A merge updates the visible page in place — `window.readerApplySettings(json)` and
+  `window.readerSetRecents(rows)` — instead of re-rendering it. The start page holds a URL
+  field, and re-rendering under someone mid-sentence throws their typing away.
+- Sync is **macOS-only for now**: `ReaderKit/Sync` is portable (file coordination is behind
+  `canImport(Darwin)`), but only the AppKit host has a folder picker and a sheet, so
+  `SettingsPage` renders its Sync section for `Platform.macOS` only. A dead control on Linux
+  would be worse than none.
 
 ## Build & test
 

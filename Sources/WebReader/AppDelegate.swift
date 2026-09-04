@@ -84,6 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "dk.yepz.webreader")
             .appendingPathComponent("articles"))
 
+    /// Sync (issue #7): the shared folder this Mac exchanges settings and recents through,
+    /// and the sheet that points it at one. Nil until the web view exists — every result it
+    /// reports lands on a page.
+    private var sync: SyncController!
+    private var syncSheet: SyncSheet?
+
     // MARK: - Launch
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -115,7 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         for name in ["readerRetry", "readerSettings", "readerOpen", "readerClear", "readerOpenURL",
                      "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
                      "readerAddSource", "readerRemoveSource", "readerSetLanguages",
-                     "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate"] {
+                     "readerBlockHost", "readerUnblockHost", "readerTopicFeedback",
+                     "readerRate", "readerOpenSync"] {
             config.userContentController.add(self, name: name)
         }
 
@@ -136,6 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         loadingCover = LoadingCover(over: webView, in: window.contentView!)
         progressLine = ProgressLine(webView: webView, in: window.contentView!)
 
+        sync = SyncController(store: store) { [weak self] result in
+            self?.applySync(result)
+        }
+        sync.onStatusChange = { [weak self] in self?.syncStatusChanged() }
+
         // A real main menu is required for the standard editing shortcuts (⌘C/⌘V/⌘X/⌘A)
         // to reach the web content — without it, paste silently does nothing.
         NSApp.mainMenu = buildMainMenu()
@@ -146,12 +158,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } else {
             showStartPage()
         }
+        sync.start()
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        sync?.applicationDidBecomeActive()
+    }
 
     // MARK: - Menu
 
@@ -164,6 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             .target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
+            .target = self
+        appMenu.addItem(withTitle: "Sync…", action: #selector(showSyncSheet(_:)), keyEquivalent: "")
             .target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -273,6 +292,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc private func goHome(_ sender: Any?) { showStartPage() }
     @objc private func showSettings(_ sender: Any?) { showSettingsPage() }
 
+    @objc private func showSyncSheet(_ sender: Any?) {
+        let sheet = syncSheet ?? SyncSheet(controller: sync)
+        syncSheet = sheet
+        sheet.present(in: window)
+    }
+
     @objc private func openFromClipboard(_ sender: Any?) {
         guard let url = WebURL.clipboardURL(from: NSPasteboard.general.string(forType: .string)),
               openIncoming(url) else {
@@ -301,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// redrawn with the defaults — the reader by reloading its source, which auto-enters.
     @objc private func resetReaderAppearance(_ sender: Any?) {
         ReaderStore.resetAppearance(store: store)
+        sync.localStateChanged()
         webView.pageZoom = 1.0
         if isShowingStartPage {
             showStartPage()
@@ -401,6 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let key = URLCleaner.clean(source).absoluteString
         history.record(title: article.title, url: key, image: article.image)
         ReaderStore.setHistory(history, store: store)
+        sync.localStateChanged()
         cache.prune(keeping: history.entries.map(\.url))
         let html = ReaderPage.html(article: article,
                                    settings: ReaderStore.settings(store: store),
@@ -461,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         isShowingFallback = false
         failedURL = nil
         pageState.willShow(.startPage)
+        sync.startPageShown()
         loadOwnPage(StartPage.html(appName: appName,
                                    settings: ReaderStore.settings(store: store),
                                    history: ReaderStore.history(store: store)),
@@ -476,7 +504,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         loadOwnPage(SettingsPage.html(appName: appName,
                                       settings: ReaderStore.settings(store: store),
                                       suggestions: ReaderStore.suggestions(store: store),
-                                      hidden: ReaderStore.hiddenPhrases(store: store)),
+                                      hidden: ReaderStore.hiddenPhrases(store: store),
+                                      syncFolder: sync.folderDisplayPath,
+                                      syncSummary: sync.summary),
                     baseURL: nil)
     }
 
@@ -536,6 +566,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else { return }
         webView.evaluateJavaScript(
             "window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
+    }
+
+    // MARK: - Sync
+
+    /// Applies what a sync cycle merged in. Both halves update the page in place rather
+    /// than re-rendering it: the start page holds a URL field, and re-rendering under
+    /// someone mid-sentence throws their typing away.
+    @MainActor
+    private func applySync(_ result: SyncEngine.Result) {
+        guard isShowingReader || isShowingStartPage || isShowingSettings else { return }
+        if result.changedSettings {
+            let settings = ReaderStore.settings(store: store)
+            webView.evaluateJavaScript(
+                "window.readerApplySettings && window.readerApplySettings(\(HTML.jsLiteral(settings.json)))")
+        }
+        guard result.changedHistory else { return }
+        let history = ReaderStore.history(store: store)
+        // The cache mirrors recents: a merge that dropped rows (a clear on another device)
+        // has to drop their saved copies too.
+        cache.prune(keeping: history.entries.map(\.url))
+        let rows = history.entries.map { ["title": $0.title, "url": $0.url] }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [])
+        else { return }
+        webView.evaluateJavaScript(
+            "window.readerSetRecents && window.readerSetRecents(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
+    }
+
+    /// Sync's state changed (a folder chosen, a cycle landed, an error): redraw whatever is
+    /// showing it. Pushed, not re-rendered — the settings page holds a half-typed feed
+    /// address that has to survive someone setting sync up.
+    @MainActor
+    private func syncStatusChanged() {
+        syncSheet?.refresh()
+        guard isShowingSettings else { return }
+        // A folder path is whatever the user named their folders; it takes the same escaping
+        // route as feed titles rather than being spliced into the script by hand.
+        let arguments: [Any] = [sync.folderDisplayPath ?? NSNull(), sync.summary]
+        guard let data = try? JSONSerialization.data(withJSONObject: arguments, options: [])
+        else { return }
+        webView.evaluateJavaScript(
+            "window.readerSetSyncStatus && window.readerSetSyncStatus.apply(null, "
+                + HTML.jsLiteral(String(decoding: data, as: UTF8.self)) + ")")
     }
 
     // MARK: - Navigation policy
@@ -733,6 +805,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let current = ReaderStore.settings(store: store)
             ReaderStore.setSettings(ReaderSettings.decode(message.body, onto: current),
                                     store: store)
+            sync.localStateChanged()
         case "readerOpen":
             guard ownPage, let raw = message.body as? String, let url = URL(string: raw) else { return }
             // A saved copy opens straight from disk: no load, no network. Only recents rows
@@ -753,8 +826,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             enterReaderForURL = cleaned
         case "readerClear":
             guard ownPage else { return }
-            ReaderStore.setHistory(ReaderHistory(), store: store)
+            // The tombstone, not an empty list: it's what makes the clear win over another
+            // device's copy of the list on its next sync instead of being merged away.
+            ReaderStore.clearHistory(store: store)
             cache.prune(keeping: [])
+            sync.localStateChanged()
         case "readerHide":
             // The reader page's floating affordance, where the Edit-menu item used to be:
             // learns the selection as a phrase, strips it from the article live, and hides
@@ -776,6 +852,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "readerOpenSettings":
             guard isShowingStartPage else { return }
             showSettingsPage()
+        case "readerOpenSync":
+            guard isShowingSettings else { return }
+            showSyncSheet(nil)
         case "readerHome":
             guard ownPage || isShowingFallback else { return }
             showStartPage()

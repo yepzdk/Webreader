@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Sync appearance settings and recents between devices through a folder you pick — inside
+  your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
+  own file, so nothing collides and no device can wipe another's list. Set it up in
+  Settings (⌘,) or under Sync… in the WebReader menu; page zoom stays local. Mac only for
+  now — the Linux app has no folder picker yet.
+
 ### Changed
 - **Recents live on the start page** (#32). The start page drops its recents and hidden-text
   buttons: the recents popover duplicated the inline list in a worse form, and the
@@ -23,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with its switch off carries no images, reserves no space for them and fetches nothing.
   Anyone who had turned the old switch off gets both new ones off, and Reset Reader
   Appearance now leaves both alone.
+- Recents now record when an article was read, and clearing history leaves a timestamp, so
+  two devices merge in the right order and a clear isn't undone by a device that was off.
+  Existing lists are read as before, on both platforms.
 
 ## [0.11.0] - 2026-08-31
 
