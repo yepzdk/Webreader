@@ -153,11 +153,11 @@ public enum SettingsPage {
           }
           main {
             max-width: 34rem; margin: 0 auto;
-            /* Mobile first, and the top padding has to clear the fixed nav button — 10vh is
-               84px on a portrait phone but only 39px in landscape, where the button (44px
-               tall on touch, at a 14px inset) would sit on top of the heading. */
-            padding-top: calc(68px + env(safe-area-inset-top, 0px));
-            padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+            /* Mobile first. The base top padding clears the fixed nav button for the one
+               case that still has it at the top: a pointer in a window narrower than the
+               breakpoint. */
+            padding-top: 56px;
+            padding-bottom: 48px;
             padding-left: max(16px, env(safe-area-inset-left, 0px));
             padding-right: max(16px, env(safe-area-inset-right, 0px));
           }
@@ -166,6 +166,15 @@ public enum SettingsPage {
               padding-top: 10vh; padding-bottom: 64px;
               padding-left: max(24px, env(safe-area-inset-left, 0px));
               padding-right: max(24px, env(safe-area-inset-right, 0px));
+            }
+          }
+          /* Last, so it wins at every width. The chrome is a floating button in the
+             bottom-right corner on a coarse pointer, so the headroom goes back to what the
+             content wants and the foot clears the button, which ends 58px up. */
+          @media (pointer: coarse) {
+            main {
+              padding-top: 32px;
+              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
             }
           }
           h1 {
@@ -280,10 +289,13 @@ public enum SettingsPage {
             .langs { gap: 0 18px; }
             #syncOpen { min-height: 44px; padding: 10px 14px; font-size: 15px; }
           }
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
+          \(ReaderChrome.backdrop())
+          \(ReaderChrome.indent(ReaderChrome.chrome(nav: ReaderChrome.navHome()), by: 2))
           <main>
             <h1>Settings</h1>
             <p class="lede">\(syncSection.isEmpty ? "Sources feed the suggestions on the start page."

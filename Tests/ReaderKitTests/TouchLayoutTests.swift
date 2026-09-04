@@ -81,17 +81,21 @@ final class TouchLayoutTests: XCTestCase {
         // right edge is ~273px in on a 390px phone. A panel wider than that starts
         // off-screen, and the `max-width` guard never fires because the panel is narrower
         // than the viewport while still outside it. Re-anchoring is the only fix.
+        //
+        // Anchored to the *bottom* since the chrome moved to the bottom-right corner: a
+        // panel opening at the far end of the screen from the button just pressed would be
+        // a different gesture entirely.
         let css = ReaderChrome.controlsCSS()
-        guard let coarse = css.range(of: "@media (pointer: coarse) {") else {
-            return XCTFail("the controls need a coarse-pointer block")
+        guard let coarse = css.range(of: "#readerPanel, #readerRecents, #readerHidden {\n"
+                                         + "    position: fixed;") else {
+            return XCTFail("the panels need a coarse-pointer anchoring")
         }
         let touch = String(css[coarse.lowerBound...])
-        XCTAssertTrue(touch.contains("#readerPanel, #readerRecents, #readerHidden {"))
-        XCTAssertTrue(touch.contains("position: fixed;"))
+        XCTAssertTrue(touch.contains("top: auto;"))
         XCTAssertTrue(touch.contains("left: max(14px, env(safe-area-inset-left, 0px));"))
         XCTAssertTrue(touch.contains("right: max(14px, env(safe-area-inset-right, 0px));"))
-        // Below the chrome: a 14px inset, a 44px button and the 8px gap the pointer uses.
-        XCTAssertTrue(touch.contains("top: calc(66px + env(safe-area-inset-top, 0px));"))
+        // Clear of the toggle: the 14px inset, the 44px button and the 10px column gap.
+        XCTAssertTrue(touch.contains("bottom: calc(68px"))
         // And capped, so a landscape phone doesn't get an 816px band of 13px rows.
         XCTAssertTrue(touch.contains("max-width: 30rem; margin-left: auto;"))
     }
@@ -174,18 +178,29 @@ final class TouchLayoutTests: XCTestCase {
         }
     }
 
-    // MARK: - Layout
+    func testTouchPagesClearTheBottomChromeInsteadOfTheTop() {
+        // The chrome is a floating column in the bottom-right corner on a coarse pointer, so
+        // the headroom goes back to what the content wants and the *foot* is what has to
+        // clear it: the toggle ends 58px up, and 78px leaves the last line readable rather
+        // than parked under a button.
+        for html in [StartPage.html(appName: "R"), SettingsPage.html(appName: "R")] {
+            XCTAssertTrue(html.contains("padding-top: 32px;"))
+            XCTAssertTrue(html.contains(
+                "padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));"))
+        }
+        // The reader's 96px foot already cleared it, so it needs no coarse override at all.
+        let reader = ReaderPage.html(article: article)
+        XCTAssertTrue(reader.contains(
+            "padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));"))
+        XCTAssertFalse(reader.contains("padding-top: calc(68px"))
+    }
 
-    func testEveryPageClearsItsOwnFixedChrome() {
-        // 18vh and 10vh top paddings are generous in portrait and less than the chrome's
-        // 58px in landscape, where the heading ended up underneath the nav button. Measured
-        // as an overlap on the start page at 320px and 390px before this.
-        XCTAssertTrue(StartPage.html(appName: "R")
-            .contains("padding-top: calc(68px + env(safe-area-inset-top, 0px));"))
-        XCTAssertTrue(SettingsPage.html(appName: "R")
-            .contains("padding-top: calc(68px + env(safe-area-inset-top, 0px));"))
-        XCTAssertTrue(ReaderPage.html(article: article)
-            .contains("main { padding-top: calc(68px + env(safe-area-inset-top, 0px)); }"))
+    func testANarrowPointerWindowStillClearsItsTopChrome() {
+        // The one case that keeps the chrome at the top: a mouse in a window narrower than
+        // the measure breakpoint. 56px clears the 41px the pointer cluster occupies.
+        for html in [StartPage.html(appName: "R"), SettingsPage.html(appName: "R")] {
+            XCTAssertTrue(html.contains("padding-top: 56px;"))
+        }
     }
 
     func testTheDesktopLayoutKeepsItsGenerousTopPadding() {
@@ -196,5 +211,86 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(start.contains("padding-top: 18vh;"))
         XCTAssertTrue(start.contains("@media (min-width: 60rem) {"))
         XCTAssertTrue(SettingsPage.html(appName: "R").contains("padding-top: 10vh;"))
+    }
+
+    // MARK: - The collapsing bottom-right chrome
+
+    func testTouchChromeSitsInTheThumbCornerAndCollapses() {
+        // Both halves of the report this answers: the top edge is the hardest place on a
+        // phone to reach one-handed, and six always-visible buttons over prose compete with
+        // the prose.
+        let css = ReaderChrome.chromeCSS()
+        XCTAssertTrue(css.contains("bottom: calc(14px + env(safe-area-inset-bottom, 0px));"))
+        XCTAssertTrue(css.contains("right: calc(14px + env(safe-area-inset-right, 0px));"))
+        // Collapsed hides the buttons, and does it with `visibility` so they leave the tab
+        // order too — an invisible-but-focusable control is the trap the suggested-row
+        // actions were in. `opacity` alone would not do: it composites the whole subtree,
+        // and the popover sitting beside its own button could not opt back out of it.
+        XCTAssertTrue(css.contains(":not([data-open=\"true\"]) .reader-nav > button,"))
+        XCTAssertTrue(css.contains(":not([data-open=\"true\"]) .reader-control > button {"))
+        XCTAssertTrue(css.contains("visibility: hidden; opacity: 0; pointer-events: none;"))
+    }
+
+    func testTheStackReversesSoHomeLandsNearestTheThumb() {
+        // `column` on the wrapper puts the toggle at the foot; `column-reverse` inside sends
+        // the nav slot — first in the markup — to the bottom of the stack, directly above
+        // it. Verified as rendered geometry in a touch browser; this pins the two directions
+        // that produce it, because getting either backwards silently inverts the column.
+        let css = ReaderChrome.chromeCSS()
+        guard let wrapper = css.range(of: ".reader-chrome {"),
+              let stack = css.range(of: ".reader-chrome-stack {\n"
+                                        + "    display: flex; flex-direction: column-reverse;") else {
+            return XCTFail("the chrome column needs both directions")
+        }
+        XCTAssertTrue(css[wrapper.lowerBound...].hasPrefix(
+            ".reader-chrome {\n    position: fixed; z-index: 10;"))
+        XCTAssertTrue(css.contains("display: flex; flex-direction: column; align-items: flex-end;"))
+        XCTAssertLessThan(wrapper.lowerBound, stack.lowerBound)
+    }
+
+    func testNothingOnAPointerLayoutMoves() {
+        // The wrapper leaves the box tree entirely on a pointer, which is what keeps the two
+        // opposite corners — and every desktop measurement — exactly as they were.
+        let css = ReaderChrome.chromeCSS()
+        XCTAssertTrue(css.contains(".reader-chrome, .reader-chrome-stack { display: contents; }"))
+        // And the toggle is a coarse-pointer control only.
+        XCTAssertTrue(css.contains("#readerChromeToggle { display: none; }"))
+    }
+
+    func testOnlyAPageWithSomethingToHideGetsAToggle() {
+        // A control that reveals one control is a tap for nothing. Everything with two or
+        // more collapses, which is also what keeps a popover clearing exactly one button.
+        // Asserted against the markup, not the stylesheet: every page carries the selectors.
+        for html in [ReaderPage.html(article: article), StartPage.html(appName: "R")] {
+            XCTAssertTrue(html.contains("id=\"readerChromeToggle\""))
+            XCTAssertTrue(html.contains("<div class=\"reader-chrome\" data-collapsible=\"true\">"))
+        }
+        for html in [SettingsPage.html(appName: "R"),
+                     OfflineFallback.html(appName: "R", host: "e.test", kind: .offline)] {
+            XCTAssertFalse(html.contains("id=\"readerChromeToggle\""))
+            XCTAssertTrue(html.contains("<div class=\"reader-chrome\">"))
+        }
+    }
+
+    func testTheToggleSaysWhatItDoesToAScreenReader() {
+        // It is an icon-only control that owns the whole chrome, so the label and the
+        // expanded state are the only things telling a screen reader what it is. The label
+        // is swapped by the script; this pins the resting state and the wiring.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("aria-label=\"Show reader controls\""))
+        XCTAssertTrue(html.contains("aria-expanded=\"false\""))
+        XCTAssertTrue(html.contains("aria-controls=\"readerChromeStack\""))
+        XCTAssertTrue(html.contains("id=\"readerChromeStack\""))
+        XCTAssertTrue(html.contains("open ? 'Hide reader controls' : 'Show reader controls'"))
+    }
+
+    func testOpeningAPopoverCollapsesTheStack() {
+        // One thing on screen at a time: the panel fills the space above the toggle, so the
+        // column that opened it would only be in the way.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("if (which) { setChromeOpen(false); }"))
+        // And the stack dismisses on the same gestures as the popovers.
+        XCTAssertTrue(html.contains("if (!e.target.closest('.reader-chrome')) { setChromeOpen(false); }"))
+        XCTAssertTrue(html.contains("if (chromeIsOpen()) { setChromeOpen(false); chromeToggle.focus(); }"))
     }
 }

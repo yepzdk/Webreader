@@ -432,13 +432,10 @@ public enum ReaderPage {
             padding-left: max(24px, env(safe-area-inset-left, 0px));
             padding-right: max(24px, env(safe-area-inset-right, 0px));
           }
-          /* The chrome is fixed at the top edge, and on touch it grows to a 44px target —
-             so it now ends below where 48px of padding used to clear it, and the headline
-             would run under the cluster. 68px keeps the same sliver of air above the title
-             that the pointer layout has. */
-          @media (pointer: coarse) {
-            main { padding-top: calc(68px + env(safe-area-inset-top, 0px)); }
-          }
+          /* No coarse-pointer override of the top padding: the chrome has moved to the
+             bottom-right corner, so nothing but the progress hairline is up there and 48px
+             is simply the article's own headroom. The 96px foot is what clears the toggle,
+             which ends 58px up. */
           header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
           h1 { font-size: 1.65em; line-height: 1.25; letter-spacing: -0.01em; margin: 0; }
           .meta {
@@ -480,19 +477,24 @@ public enum ReaderPage {
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
+          \(ReaderChrome.backdrop())
           \(ReaderChrome.progressBar())
-          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
-          \(ReaderChrome.indent(ReaderChrome.controls(
-                recents: history.recents(limit: ReaderChrome.popoverRecents,
-                                         excluding: currentURL),
-                canClear: !history.entries.isEmpty,
-                showsRating: true, rating: rating,
-                showsHidden: true), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.chrome(
+                nav: ReaderChrome.navHome(),
+                controls: ReaderChrome.controls(
+                    recents: history.recents(limit: ReaderChrome.popoverRecents,
+                                             excluding: currentURL),
+                    canClear: !history.entries.isEmpty,
+                    showsRating: true, rating: rating,
+                    showsHidden: true),
+                collapsible: true), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>

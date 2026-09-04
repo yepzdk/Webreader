@@ -139,10 +139,11 @@ public enum OfflineFallback {
             .card button { padding: 12px 22px; min-height: 44px; }
           }
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 2))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.chrome(nav: ReaderChrome.navHome()), by: 2))
           <div class="card">
             <div class="icon" aria-hidden="true">
               <!-- wifi-off, Lucide-style line icon, inherits currentColor -->

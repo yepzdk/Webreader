@@ -439,16 +439,24 @@ enum ReaderChrome {
         @media (pointer: coarse) {
           #readerPanel, #readerRecents, #readerHidden {
             position: fixed;
-            top: calc(66px + env(safe-area-inset-top, 0px));
-            left: max(14px, env(safe-area-inset-left, 0px));
-            right: max(14px, env(safe-area-inset-right, 0px));
+            /* Anchored to the bottom now, not the top: the chrome that opens these sits in
+               the bottom-right corner, and a panel that appeared at the far end of the
+               screen from the button you just pressed would be a different gesture
+               entirely. It grows upward from just above the toggle — which is all that is
+               left on screen, because opening a panel collapses the stack. */
+            top: auto;
+            bottom: calc(\(chromeEdge + touchTarget + chromeGap)px
+                         + env(safe-area-inset-bottom, 0px));
+            left: max(\(chromeEdge)px, env(safe-area-inset-left, 0px));
+            right: max(\(chromeEdge)px, env(safe-area-inset-right, 0px));
             width: auto;
             /* Full width on a portrait phone, but a landscape one is 844px wide and a
                816px band of 13px rows is not a list anyone wants to read. Capped, and
                pushed back to the right so it still reads as hanging from the cluster that
                opened it. */
             max-width: 30rem; margin-left: auto;
-            max-height: calc(100vh - 80px - env(safe-area-inset-top, 0px)
+            max-height: calc(100vh - \(chromeEdge * 2 + touchTarget + chromeGap)px
+                             - env(safe-area-inset-top, 0px)
                              - env(safe-area-inset-bottom, 0px));
             overflow-y: auto;
           }
@@ -545,6 +553,209 @@ enum ReaderChrome {
     /// `aria-hidden` because a scroll fraction is decorative; the article text is the content.
     static func progressBar() -> String {
         "<div id=\"readerProgress\" hidden aria-hidden=\"true\"></div>"
+    }
+
+    /// The gradient behind the fixed chrome, and the element it paints on.
+    ///
+    /// The article scrolls *under* the chrome, and a button's own `--bg` only covers the
+    /// button — the gaps between them, and the space between the two corners, let text
+    /// through. The result is a line of article running between the icons, with neither the
+    /// text nor the icons readable.
+    ///
+    /// A gradient rather than a bar: it fades to nothing instead of drawing a toolbar edge
+    /// across a page whose whole point is not having one. And it costs no script and no
+    /// state, because it is invisible until something is behind it — `--bg` over `--bg` is
+    /// no change, so at the top of the document there is nothing to see, and the fade only
+    /// reads once text has scrolled up into it.
+    ///
+    /// `z-index: 7` puts it under everything that has to stay legible over it — the hide
+    /// affordance (8), the progress line (9) and the chrome itself (10) — and over the
+    /// article, which is in normal flow. `pointer-events: none` so a band across the top of
+    /// the page doesn't swallow taps meant for the text under it.
+    ///
+    /// The height covers the chrome plus room to fade: on a pointer the cluster ends 41px
+    /// down, and the solid stop clears it.
+    ///
+    /// It exists only for the pointer layout. On a coarse pointer the chrome has moved to
+    /// the bottom-right corner (see `chromeCSS`), so a fade along the top edge would be a
+    /// gradient over nothing — the only thing left up there is the progress hairline, and a
+    /// 2.5px line needs no backing to stay legible.
+    static func backdropCSS() -> String {
+        """
+        #readerBackdrop {
+          position: fixed; top: 0; left: 0; right: 0; z-index: 7;
+          height: calc(72px + env(safe-area-inset-top, 0px));
+          pointer-events: none;
+          background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);
+        }
+        @media (pointer: coarse) {
+          #readerBackdrop { display: none; }
+        }
+        """
+    }
+
+    /// `aria-hidden` because it is a legibility device with no content of its own.
+    static func backdrop() -> String {
+        "<div id=\"readerBackdrop\" aria-hidden=\"true\"></div>"
+    }
+
+    /// The gap between stacked chrome buttons, and the chrome's inset from the window edge.
+    /// Shared with `inset(_:_:)` so the bottom-right column and the popovers that open above
+    /// it agree on where the stack ends without either measuring the other.
+    private static let chromeGap = 10
+    private static let chromeEdge = 14
+
+    /// Wraps the nav slot and the control cluster in one element, plus — where a page has
+    /// more than one control — the button that reveals them.
+    ///
+    /// On a pointer the wrapper does nothing: it is `display: contents`, and the two
+    /// children keep the fixed opposite corners they have always had. The whole point is
+    /// the coarse-pointer layout, where they become one bottom-right column (see
+    /// `chromeCSS`), which a wrapper is the only way to express — CSS cannot reparent two
+    /// elements into a shared flex line.
+    ///
+    /// DOM order is stack-then-toggle. `.reader-chrome` runs as a plain column so the
+    /// toggle lands at the foot, and the stack inside it reverses so the nav slot — first
+    /// in the markup — ends up nearest the thumb. Bottom-up the column reads: toggle, Home,
+    /// Aa, hidden text, recents, less, more. Home is nearest because going back is the one
+    /// action you take without reading anything first, and the cluster keeps its document
+    /// order so its right-to-left arrangement on a pointer becomes bottom-to-top here.
+    ///
+    /// `collapsible` is false only for a page whose chrome is a single button (settings,
+    /// offline): a control that reveals one control is a tap for nothing, and with one
+    /// button there is no popover for it to stand behind. Those pages still get the
+    /// bottom-right position, which is the half of this that is about reach.
+    ///
+    /// Everything with two or more controls collapses, and that is what keeps the geometry
+    /// uniform: a popover has to clear exactly one 44px button, because the toggle is all
+    /// that is ever left beside it. The start page's two buttons would otherwise have stood
+    /// behind its own appearance panel.
+    static func chrome(nav: String, controls: String = "",
+                       collapsible: Bool = false) -> String {
+        let toggle = !collapsible ? "" : """
+        <button id="readerChromeToggle" type="button" aria-label="Show reader controls"
+                  title="Reader controls" aria-expanded="false" aria-controls="readerChromeStack">
+            <!-- ellipsis-vertical, Lucide-style line icon; swapped for the X when open -->
+            <svg class="chrome-toggle-open" width="15" height="15" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/>
+              <circle cx="12" cy="19" r="1"/>
+            </svg>
+            <svg class="chrome-toggle-close" width="15" height="15" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        """
+        return """
+        <div class="reader-chrome"\(collapsible ? " data-collapsible=\"true\"" : "")>
+          <div class="reader-chrome-stack" id="readerChromeStack">
+            \(indent(nav, by: 4))
+            \(indent(controls, by: 4))
+          </div>
+          \(toggle)
+        </div>
+        """
+    }
+
+    /// The chrome's coarse-pointer layout: one collapsing column in the bottom-right.
+    ///
+    /// Two complaints, from reading on an actual phone. The cluster sat along the top edge,
+    /// which is the hardest place on a phone to reach one-handed; and six always-visible
+    /// buttons over prose compete with the prose. So on a coarse pointer the chrome moves
+    /// into the thumb's corner and, where there is more than one control, hides behind a
+    /// single button until asked for.
+    ///
+    /// `display: contents` on the two wrappers is what keeps the pointer layout untouched —
+    /// they leave the box tree entirely, so `.reader-nav` and `.reader-controls` fix
+    /// themselves to the same corners as before and no desktop byte moves.
+    ///
+    /// Collapsed uses `visibility: hidden`, not `opacity: 0`: an invisible button still in
+    /// the tab order is exactly the trap the suggested-row actions were in. And the stack
+    /// leaves the flow to do it — `visibility` alone still reserves the space, which parked
+    /// the toggle halfway up the screen instead of in the corner.
+    static func chromeCSS(platform: Platform = .macOS) -> String {
+        """
+        /* A pointer keeps the two opposite corners; the wrappers are not in the box tree. */
+        .reader-chrome, .reader-chrome-stack { display: contents; }
+        @media (pointer: coarse) {
+          .reader-chrome {
+            position: fixed; z-index: 10;
+            bottom: \(inset(chromeEdge, "bottom")); right: \(inset(chromeEdge, "right"));
+            display: flex; flex-direction: column; align-items: flex-end;
+            gap: \(chromeGap)px;
+            font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+          }
+          /* `column` here and `column-reverse` inside, which together put the toggle at the
+             bottom and Home directly above it. `column-reverse` sends the *first* child to
+             the bottom, so the stack — nav then controls in the markup — reverses to leave
+             the nav slot nearest the thumb, while the cluster keeps document order and
+             lands Aa at its foot. Bottom-up: toggle, Home, Aa, hidden, recents, less, more. */
+          .reader-chrome-stack {
+            display: flex; flex-direction: column-reverse; align-items: flex-end;
+            gap: \(chromeGap)px;
+          }
+          /* The two clusters stop being fixed and become rows of the column. */
+          .reader-nav, .reader-controls {
+            position: static; top: auto; right: auto; left: auto;
+            flex-direction: column; align-items: flex-end; gap: \(chromeGap)px;
+          }
+          /* Only a collapsible chrome takes its stack out of the flow: it has to, or the
+             hidden stack reserves its own height and pushes the toggle off the corner. A
+             page whose chrome is one button has nothing to hide and stays in the flow. */
+          .reader-chrome[data-collapsible="true"] .reader-chrome-stack {
+            position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
+          }
+          /* Collapsing hides the *buttons*, not the clusters that hold them. A popover is
+             opened from the stack and then outlives the collapse, and it sits inside
+             `.reader-control` beside its own button because that is what the pointer layout
+             anchors against. Two ways of hiding an ancestor both took the open panel with
+             it: `visibility: hidden` inherits, and `opacity: 0` composites the whole subtree
+             at that alpha — which a descendant cannot opt back out of, so the panel measured
+             correctly and still painted nothing. A button is the panel's *sibling*, so
+             hiding it leaves the panel alone.
+
+             No `transform` on the stack either. A transformed ancestor becomes the
+             containing block for a `position: fixed` descendant, so the panels stopped
+             measuring against the viewport and sized themselves to this 45px column —
+             measured at 19px wide. */
+          .reader-chrome[data-collapsible="true"] .reader-nav > button,
+          .reader-chrome[data-collapsible="true"] .reader-control > button {
+            transition: opacity 140ms ease-out;
+          }
+          .reader-chrome[data-collapsible="true"]:not([data-open="true"]) .reader-nav > button,
+          .reader-chrome[data-collapsible="true"]:not([data-open="true"]) .reader-control > button {
+            visibility: hidden; opacity: 0; pointer-events: none;
+          }
+          /* The toggle swaps its glyph rather than its box, so nothing shifts on open. */
+          #readerChromeToggle .chrome-toggle-close,
+          #readerChromeToggle[aria-expanded="true"] .chrome-toggle-open { display: none; }
+          #readerChromeToggle[aria-expanded="true"] .chrome-toggle-close { display: block; }
+        }
+        /* Combined rather than nested: the reveal only animates in the coarse layout, and
+           one query saying both things reads better than a query inside a query. */
+        @media (pointer: coarse) and (prefers-reduced-motion: reduce) {
+          .reader-chrome[data-collapsible="true"] .reader-nav > button,
+          .reader-chrome[data-collapsible="true"] .reader-control > button {
+            transition: none;
+          }
+        }
+        /* The toggle's box comes from the same shared declaration as every other chrome
+           button, so it cannot drift from the controls it reveals. Emitted at the top level
+           because `buttonBox` carries its own coarse block, and a media query nested inside
+           one reads far worse than it computes. */
+        \(buttonBox("#readerChromeToggle"))
+        /* It exists only for the coarse layout; `display` is settled last, after the box. */
+        #readerChromeToggle { display: none; }
+        @media (pointer: coarse) {
+          #readerChromeToggle {
+            display: inline-flex; align-items: center; justify-content: center;
+          }
+          #readerChromeToggle svg { display: block; }
+        }
+        """
     }
 
     /// Drives the reading-progress line from scroll position. A separate fragment from
@@ -1017,6 +1228,22 @@ enum ReaderChrome {
             clear.textContent = 'Clear history';
             recents.appendChild(clear);
           };
+          // The collapsing bottom-right chrome, on a coarse pointer. Absent on a pointer
+          // layout and on the pages whose chrome is a single button, so everything below
+          // checks before touching it.
+          var chrome = document.querySelector('.reader-chrome');
+          var chromeToggle = document.getElementById('readerChromeToggle');
+          function setChromeOpen(open) {
+            if (!chrome || !chromeToggle) { return; }
+            if (open) { chrome.setAttribute('data-open', 'true'); }
+            else { chrome.removeAttribute('data-open'); }
+            chromeToggle.setAttribute('aria-expanded', String(open));
+            chromeToggle.setAttribute('aria-label',
+              open ? 'Hide reader controls' : 'Show reader controls');
+          }
+          function chromeIsOpen() {
+            return !!chrome && chrome.getAttribute('data-open') === 'true';
+          }
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {
             popovers.forEach(function (p) {
@@ -1024,9 +1251,19 @@ enum ReaderChrome {
               p.panel.hidden = !open;
               p.btn.setAttribute('aria-expanded', String(open));
             });
+            // A panel fills the screen above the toggle, so the column of buttons that
+            // opened it would only be in the way. One thing on screen at a time.
+            if (which) { setChromeOpen(false); }
             // Rows that were behind a closed panel have their thumbnails withheld until
             // here, so opening one is what asks the publishers for its images.
             if (which) { window.readerRevealThumbs(); }
+          }
+          if (chromeToggle) {
+            chromeToggle.addEventListener('click', function () {
+              // Pressing it while a panel is open means "give me the controls back": the
+              // document handler below has already closed the panel by this point.
+              setChromeOpen(!chromeIsOpen());
+            });
           }
           panel.addEventListener('click', function (e) {
             var b = e.target.closest('button');
@@ -1205,12 +1442,19 @@ enum ReaderChrome {
           }
           document.addEventListener('click', function (e) {
             if (!e.target.closest('.reader-controls')) { setOpen(null); }
+            // The stack dismisses on the same gesture, keyed one level out: the toggle sits
+            // beside `.reader-controls`, not inside it, and pressing it must not be read as
+            // a tap outside itself.
+            if (!e.target.closest('.reader-chrome')) { setChromeOpen(false); }
           });
           document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') { return; }
             // Return focus to the button that opened the popover being dismissed.
             var open = popovers.filter(function (p) { return !p.panel.hidden; })[0];
-            if (open) { setOpen(null); open.btn.focus(); }
+            if (open) { setOpen(null); open.btn.focus(); return; }
+            // Nothing open but the stack: close it and hand focus back to the toggle, or
+            // Escape would leave focus on a button that has just become invisible.
+            if (chromeIsOpen()) { setChromeOpen(false); chromeToggle.focus(); }
           });
           // Like / dislike the article being read. Present only on the reader page; the
           // host owns the toggle, and calls back with the rating now in force so the two

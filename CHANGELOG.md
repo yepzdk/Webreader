@@ -34,16 +34,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   two devices merge in the right order and a clear isn't undone by a device that was off.
   Existing lists are read as before, on both platforms.
 - **The pages work on a touch screen** (#36). Every generated page now adapts to a coarse
-  pointer: controls reach a 44px target, the fixed chrome clears notches and home
-  indicators, popovers stay on screen, and the layout stops spending desktop gutters and
-  18vh of headroom on a phone. Groundwork for the mobile apps; the desktop rendering is
-  unchanged.
+  pointer: controls reach a 44px target, popovers stay on screen and clear the safe areas,
+  and the layout stops spending desktop gutters and 18vh of headroom on a phone.
+  Groundwork for the mobile apps; the desktop rendering is unchanged.
+- **On touch, the reader's controls move to the bottom-right and hide behind one button**
+  (#36). The top edge is the hardest place on a phone to reach one-handed, and six
+  always-visible buttons over an article compete with the article. Tapping the button opens
+  a vertical column with Home nearest your thumb; tapping anywhere else, or Escape, closes
+  it again. Opening recents, hidden text or Aa collapses the column so only the panel is on
+  screen. Unchanged with a mouse, where the controls keep both top corners.
 
 ### Fixed
 - **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
   Block on a suggested row were revealed on hover, which meant they were invisible and
   unusable on any touch screen. They are now visible by default and only hidden where a
   pointer can actually hover.
+- **Article text ran through the top buttons while scrolling.** Each button painted its own
+  background, but the gaps between them let the article through, leaving a line of text
+  crossing the icons with neither readable. A gradient now sits behind them, fading into the
+  page so it stays invisible until something scrolls under it, and following the theme. On
+  touch the controls have left the top edge entirely, so the problem goes with them.
 
 ## [0.11.0] - 2026-08-31
 

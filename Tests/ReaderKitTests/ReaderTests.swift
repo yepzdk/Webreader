@@ -616,6 +616,71 @@ final class ReaderPageTests: XCTestCase {
     }
 }
 
+// MARK: - The chrome backdrop
+
+/// The gradient behind the fixed chrome. Without it the article scrolls through the gaps
+/// between the buttons — each button's own `--bg` covers only itself — and neither the text
+/// nor the icons are readable. Reported from a real device, so these pin the parts that
+/// would let it come back.
+final class ChromeBackdropTests: XCTestCase {
+    private let article = Article(title: "T", byline: nil, siteName: nil,
+                                  content: "<p>x</p>", image: nil)
+
+    func testItSitsUnderEveryPieceOfChromeAndOverTheArticle() {
+        // The stacking order is the whole design: above the article (normal flow), below the
+        // hide affordance (8), the progress line (9) and the chrome itself (10). One wrong
+        // number and it either does nothing or hides the controls it exists to make legible.
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains("z-index: 7;"))
+        let reader = ReaderPage.html(article: article)
+        for (element, z) in [("#readerHideBtn", 8), ("#readerProgress", 9)] {
+            XCTAssertTrue(reader.contains("z-index: \(z);"), "\(element) moved")
+        }
+        XCTAssertTrue(reader.contains("z-index: 10;"))
+    }
+
+    func testItNeverSwallowsATapMeantForTheArticle() {
+        // It is a band across the top of every page; without this it would eat every tap
+        // and selection drag that started up there.
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains("pointer-events: none;"))
+    }
+
+    func testItFadesFromThePageBackgroundSoNoSeamShows() {
+        // The opaque stop has to *be* the page background, not a colour that resembles it,
+        // or a hard edge appears across the page. Reading `--bg` also means it follows every
+        // theme — and a host-supplied palette for `auto` — with no extra rule.
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains(
+            "background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);"))
+    }
+
+    func testItIsAPointerLayoutDeviceAndRetiresOnTouch() {
+        // On a pointer the cluster ends 41px down, and 65% of 72px is 47px — so the buttons
+        // sit on solid colour rather than on the fade.
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains("height: calc(72px + env(safe-area-inset-top, 0px));"))
+        // On a coarse pointer the chrome has moved to the bottom-right, so a fade along the
+        // top edge would cover nothing. Retired rather than resized.
+        XCTAssertTrue(css.contains("@media (pointer: coarse) {\n  #readerBackdrop { display: none; }"))
+    }
+
+    func testEveryScrollingPageCarriesItAndTheOfflinePageDoesNot() {
+        // Both halves or it silently never appears, like the hide affordance above.
+        for (name, html) in [
+            "reader": ReaderPage.html(article: article),
+            "start": StartPage.html(appName: "R"),
+            "settings": SettingsPage.html(appName: "R"),
+        ] {
+            XCTAssertTrue(html.contains("<div id=\"readerBackdrop\" aria-hidden=\"true\"></div>"), name)
+            XCTAssertTrue(html.contains("#readerBackdrop {"), name)
+        }
+        // The offline page is a centred card at exactly viewport height: nothing scrolls
+        // under its Home button, so it needs no backdrop — and its body is a flex container,
+        // which is a reason not to add stray children to it on a hunch.
+        let offline = OfflineFallback.html(appName: "R", host: "example.com", kind: .offline)
+        XCTAssertFalse(offline.contains("readerBackdrop"))
+    }
+}
+
 // MARK: - The page-to-host transport
 
 /// `readerPost` is the single route every generated page has to its host. These pin the

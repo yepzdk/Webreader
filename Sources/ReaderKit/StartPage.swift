@@ -143,12 +143,11 @@ public enum StartPage {
             max-width: 34rem; margin: 0 auto;
             /* Mobile first. A phone has no room to spend 18vh above the title, and the side
                padding has to clear a landscape notch as well as give the text room. Both
-               grow at 34rem, which is where the measure stops being the constraint.
-               The top padding also has to clear the fixed chrome: Settings on the left and
-               Aa on the right sit at a 14px inset, and at 44px tall on touch they end at
-               58px — which ran straight through a centred heading on a narrow phone. */
-            padding-top: calc(68px + env(safe-area-inset-top, 0px));
-            padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+               grow at 34rem, where the measure stops being the constraint.
+               The base top padding clears the chrome for the one case that still has it at
+               the top: a pointer in a window narrower than the breakpoint. */
+            padding-top: 56px;
+            padding-bottom: 48px;
             padding-left: max(16px, env(safe-area-inset-left, 0px));
             padding-right: max(16px, env(safe-area-inset-right, 0px));
           }
@@ -157,6 +156,16 @@ public enum StartPage {
               padding-top: 18vh; padding-bottom: 64px;
               padding-left: max(24px, env(safe-area-inset-left, 0px));
               padding-right: max(24px, env(safe-area-inset-right, 0px));
+            }
+          }
+          /* Last, so it wins at every width. On a coarse pointer the chrome is a floating
+             column in the bottom-right corner: nothing sits at the top but the progress
+             hairline, so the headroom goes back to what the content wants — and the foot has
+             to clear the toggle, which ends 58px up. */
+          @media (pointer: coarse) {
+            main {
+              padding-top: 32px;
+              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
             }
           }
           /* The front door — title and URL field — stays narrow and centred whatever the
@@ -291,12 +300,17 @@ public enum StartPage {
           }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(), by: 2))
-          \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
+          \(ReaderChrome.backdrop())
+          \(ReaderChrome.indent(ReaderChrome.chrome(
+                nav: ReaderChrome.navSettings(),
+                controls: ReaderChrome.controls(),
+                collapsible: true), by: 2))
           <main>
             <div class="intro">
             <h1>\(name)</h1>
