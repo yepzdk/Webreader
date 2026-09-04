@@ -61,7 +61,8 @@ Two SwiftPM targets, no dependencies:
 - **`Sources/WebReader`** — the AppKit host. `AppDelegate.swift` owns the window, `WKWebView`,
   menu, URL handling (`application(_:open:)` + the GetURL Apple Event), the reader state
   machine, offline fallback, and the script-message handlers. `ProgressLine.swift` is the
-  native load-progress hairline. `LegacyImport.swift` is the one-time import from the
+  native load-progress hairline and `LoadingCover.swift` the plain "Loading" screen that
+  stands in for a site while it loads. `LegacyImport.swift` is the one-time import from the
   webwrap-generated app's defaults domain (`dk.yepz.webwrap.webreader`).
   `SyncController.swift` drives sync cycles (triggers, folder bookmark, applying results)
   and `SyncSheet.swift` is the Sync… sheet — the only native window in the app.
@@ -76,7 +77,9 @@ Two SwiftPM targets, no dependencies:
   `Application.swift` owns the `GtkApplication` (`HANDLES_OPEN`, so a `.desktop` `%u` and
   `xdg-open` arrive on the `open` signal), the window/overlay, the nine `GSimpleAction`
   accelerators and zoom. `ReaderHost.swift` is the reader state machine and the script-message
-  handlers. `ProgressStrip.swift` is the load hairline. `OmarchyTheme.swift` and `XDG.swift`
+  handlers. `ProgressStrip.swift` is the load hairline and `LoadingCover.swift` the loading
+  screen (an overlay child, added before the strip so the strip stays on top).
+  `OmarchyTheme.swift` and `XDG.swift`
   are the platform services. There is **no menu bar**: the WM owns quit and the window verbs,
   WebKitGTK owns the edit verbs, and the web shell already carries the rest.
 
@@ -163,6 +166,109 @@ Two SwiftPM targets, no dependencies:
 - The start page renders before suggestions exist: the section ships hidden and empty, the
   host fills it via `window.readerSetSuggestions` when the fetch lands, and the task is
   cancelled on any navigation away. Nothing about suggestions can block or fail the page.
+- The chrome is **two fixed corners on one baseline**: `.reader-controls` top-right, and
+  `.reader-nav` top-left holding exactly one button (Home on the reader, settings and offline
+  pages; Settings on the start page, which *is* home). Both declare `top: 14px` and
+  share one `buttonBox` declaration, so a button on one side cannot drift from the other; a
+  test pins both. The nav slot is deliberately NOT a second `.reader-controls` —
+  `controlsScript` dismisses an open popover on any click outside that class, and reusing it
+  would silently break the dismissal. Its button posts inline rather than through
+  `controlsScript`, because the offline page carries no chrome script.
+- `readerHome` is reachable from any page of ours **and** the offline page (`ownPage ||
+  isShowingFallback`), not just Settings. Try Again retries the URL that failed, so without
+  Home the offline page was a dead end — and on Linux there is no menu bar to escape through.
+- The settings page has **no "Done"**. It had one, after the shortcut table, and with a handful
+  of sources it sat below the fold: the only route home was off screen. It also committed
+  nothing — every change on that page posts the moment it is made — so the label promised a
+  transaction that does not exist. The nav slot is the one way out, as on every other page.
+- The loading cover is **native, not a generated page**. A `loadHTMLString` cover would be a
+  real back/forward entry between every pair of pages; `PageState.navigationStarted()`
+  early-returns while a load of ours is pending, so the real navigation's completion would be
+  consumed as "our own page landed" and extraction would never run; and the hairline tracks
+  the web view's own `estimatedProgress`, so a cover page's load would drive it to full and
+  fade it before the real load started. Stacking between the web view and the hairline avoids
+  all three — hence `ProgressLine` adds its bar `relativeTo: nil` (front-most), and the GTK
+  cover is added to the overlay *before* `ProgressStrip`.
+- The cover comes down at **choke points**, not per-flag: `loadOwnPage` (AppKit) /
+  `loadHTML` (GTK) is the single own-document funnel and hides it, setting a one-shot
+  `coverSuppressedOnce` that the next navigation-start consumes. A test over the page flags
+  instead would have missed the offline page, which sets none of them — that is how a page
+  gets stuck behind "Loading". The other reveals are extraction declining, the own-page
+  sentinel, an ignorable load failure, and the reader toggle (which wants the site).
+- The cover's watchdog measures **silence, not elapsed time**. It shipped as a fixed 10 s cap
+  from the moment the cover went up, which on a slow connection fired mid-load and revealed the
+  site the cover exists to hide. Each host now watches `estimatedProgress` /
+  `estimated-load-progress` itself and re-arms `LoadProgress.coverStallPatience` on every
+  change, so a load that is still moving is waited for however long it takes and only a stall
+  reveals the page. Measured against a deliberately slow local server: trickling for 24 s keeps
+  the cover up, headers-then-nothing drops it at 6.3 s. The cover owns this rather than being
+  fed progress by the delegate — whether it may come down is its own business.
+- The cover's copy is `LoadProgress.coverMessages`, one picked per appearance. All short and
+  all in the same register (what the reader does to a page — stripping it back to type), 138–237 px
+  at 20 pt: a sentence risks clipping in a narrow window, and mixing a two-word message with a
+  nine-word one makes the cover lurch between loads. Picked per load, never per frame — a label
+  changing under you mid-wait reads as a glitch.
+- `ReaderPalette.stock(for:prefersDark:)` is the **one** place the theme colours live;
+  `ReaderChrome.themeCSS` renders its stylesheet from those values and the native covers read
+  the same ones, so a cover cannot be a different colour from the page behind it. Same
+  arrangement as `LoadProgress.lineThickness`. A test pins the CSS against the palette.
+- Suggestion thumbnails come from the **feed**, not from the article: a suggested piece has
+  not been visited, so there is no document to read an `og:image` from, and fetching every
+  candidate's page for a thumbnail would be one request per row to publishers the reader
+  never opened. `media:thumbnail` / `media:content` / an image `enclosure` first, then the
+  first `<img>` in the item's summary — Information, The Verge and The New Stack carry no
+  structured tag at all, while The Guardian and Ars Technica carry nothing else. Coverage is
+  genuinely uneven and **wallnot.dk, the shipped default, publishes no images whatsoever**,
+  so imageless rows are the normal case, not an edge case.
+- `Feed.bestImage` picks the **smallest** declared width at or above 128px (a 64px row at 2x),
+  not the first or the largest: The Guardian ships 140/460/700 per item and Ars a 1152px hero,
+  so first-wins is either soft or several hundred KB a row. Measured: 5 KB for the Guardian's
+  140 against 236 KB for The Verge's undeclared original.
+- Feed image URLs go through `unescapeAmpersands`, because The Verge escapes `&` numerically
+  *inside* already-escaped summary HTML — `&amp;` alone leaves `?quality=90&#038;strip=all`,
+  which hands the server a parameter called `#038;strip`.
+- An `<img>` declaring width or height of 1 is skipped: that is a tracking beacon, not a
+  picture.
+- `window.readerRevealThumbs` is the **only** thing that ever sets a thumbnail's `src`, and it
+  refuses while `data-thumbs="off"`. Rows render carrying `data-src` alone — server-side for
+  recents, in the host callback for suggestions — so "images off" really means the page makes
+  no requests. Suggestion rows must still be *built* with the element while the setting is
+  off, or toggling back on leaves a reserved column with nothing to put in it; a test pins
+  that there is exactly one assignment of `src` in the page.
+- A recents row's thumbnail is the article's own `og:image`, captured from the **live**
+  document (Readability's result has no image field, and the vendored copy is not ours to
+  patch) and stored on `ReaderHistory.Entry`, not in `ArticleCache` — the cache is evictable,
+  so a row would outlive its thumbnail. No first-body-`<img>` fallback: that is usually a logo
+  or a tracking pixel. The key is omitted rather than written as null when absent, so a blob
+  from before the feature round-trips unchanged.
+- Thumbnails carry `data-src`, never `src`: the appearance script is the only thing that sets
+  a src, so **with article images off the start page requests nothing** — which is what it did
+  before, the start page having been entirely offline. `data-thumbs="off"` is baked by
+  `themeAttribute` (like `data-quotes`) so nothing flashes before the script runs.
+- Rows are a grid, and only in a list that has at least one image (`.has-thumbs`), with the
+  text column pinned: an article that named no image still lines its title up with the rest.
+  A flex row would have moved `.recent-host` from below the title to beside it, and `float`
+  cannot work because the clamped title is a `-webkit-box`.
+- A row in such a list whose article named no image gets `thumbnailPlaceholder` — the same box
+  in `--surface` with a quiet picture glyph — not a gap. Coverage is uneven by nature, so
+  lists normally mix the two and a blank column reads as a failed load. A list where *nothing*
+  has an image gets neither images nor placeholders and is laid out exactly as before, which
+  is also the state right after upgrading. A failed image swaps itself for the placeholder
+  rather than leaving the browser's broken-image glyph.
+- The placeholder markup is one Swift constant, handed to the page script through
+  `HTML.jsString` so the server-rendered recents rows and the host-delivered suggestion rows
+  cannot drift. `HTML.jsLiteral` is NOT interchangeable: it takes an already-serialised
+  expression and does not quote, so a bare string through it emits raw markup mid-statement
+  (which is exactly the `SyntaxError` it caused first time round).
+- The cover's label is a `CAGradientLayer` masked by a `CATextLayer` on macOS and cairo text
+  filled with a moving linear gradient on Linux, both driven by `LoadProgress.coverLabelSize`
+  / `coverShimmerPeriod` / `coverShimmerSpread` so neither host shimmers at its own speed.
+  Sweeping the stops past both ends works because a gradient layer (and `CAIRO_EXTEND_PAD`)
+  holds its end colours, so the word stays fully painted in `--muted` and only the `--fg`
+  band moves. The CSS equivalent, `background-clip: text`, goes *transparent* past the ends
+  and has to tile the gradient to avoid the word vanishing — worth knowing if this is ever
+  ported to a page. Both hosts hold the label still when the system asks for reduced motion,
+  and stop the animation when the cover comes down.
 - Reset Reader Appearance clears settings + zoom, never history (user data, no undo).
 - `ProgressLine.height` and `ReaderChrome.progressCSS` both read
   `LoadProgress.lineThickness` — one constant, so a new host can't drift. The two lines are

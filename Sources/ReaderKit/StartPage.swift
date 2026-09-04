@@ -63,7 +63,6 @@ public enum StartPage {
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
-                            hidden: HiddenPhrases = HiddenPhrases(),
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
@@ -72,19 +71,25 @@ public enum StartPage {
         // Recents are listed inline here rather than tucked in the popover: this page has
         // the whole window and nothing competing for it, and picking up where you left off
         // is the most likely reason you're looking at it.
+        // A list shows thumbnails only when something in it has an image; otherwise every row
+        // would carry an empty slot and the list would look worse than it did before #25.
+        let hasThumbs = history.entries.contains { !($0.image ?? "").isEmpty }
         let recentsList = history.entries.isEmpty
             ? """
             <p class="hint empty">\(copy.emptyRecents)</p>
             """
             : """
             <h2 class="section">Recent articles</h2>
-                  <div class="recents-inline">
-                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history), by: 8))
+                  <div class="recents-inline\(hasThumbs ? " has-thumbs" : "")">
+                    \(ReaderChrome.indent(ReaderChrome.recentsRows(history, thumbnails: hasThumbs), by: 8))
                   </div>
+                  <p class="clear-history">
+                    <button type="button" class="link" id="startClear">Clear history</button>
+                  </p>
             """
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -196,21 +201,25 @@ public enum StartPage {
             padding: 0; border: 0; background: none; cursor: pointer;
             font: inherit; color: var(--accent); text-decoration: underline;
           }
-          /* A quiet way into Settings from the page whose content it governs. */
-          #startSettings {
-            position: fixed; bottom: 14px; left: 14px;
-            padding: 5px 10px; font-family: inherit; font-size: 12px;
-            color: var(--muted); background: var(--bg);
-            border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+          /* Clearing history sits under the list it clears — the reader page keeps its own
+             copy inside the recents popover, since neither page ever shows the other's (#32).
+             Muted rather than accented like "Add a source": it is the one destructive control
+             on the page, and should not be the first thing the eye lands on. The underline
+             comes back on hover and focus, and the padding takes the target to 24px — quiet
+             is not the same as hard to hit (WCAG 2.5.8). */
+          .clear-history { margin: 6px 0 0; font-size: 12px; }
+          .clear-history .link { padding: 4px 2px; color: var(--muted); text-decoration: none; }
+          .clear-history .link:hover, .clear-history .link:focus-visible {
+            color: var(--fg); text-decoration: underline;
           }
-          #startSettings:hover { color: var(--fg); }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history), by: 2))
-          <button id="startSettings" type="button">Settings</button>
+          \(ReaderChrome.indent(ReaderChrome.controls(), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
           <main>
             <div class="intro">
             <h1>\(name)</h1>
@@ -240,9 +249,15 @@ public enum StartPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
+                                                             thumbnails: .startPage,
+                                                             hidden: HiddenPhrases([]),
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
+          // What the whole column falls back to once cleared — heading and list included, so
+          // it is this page's own empty state rather than the popover's one-line
+          // `readerEmptyRecents`. Ours, never feed text.
+          window.readerEmptyColumn = \(HTML.jsString("<p class=\"hint empty\">\(copy.emptyRecents)</p>"));
           (function () {
             var form = document.getElementById('open');
             var field = document.getElementById('url');
@@ -271,6 +286,24 @@ public enum StartPage {
             // to the popover.
             document.querySelector('main').addEventListener('click', function (e) {
               if (e.target.closest('#suggestSettings')) { post('readerOpenSettings', ''); return; }
+              // Clearing history: the host empties the store (and prunes the offline cache
+              // with it), the page empties the column. A separate id from the popover's
+              // #readerClear, which carries the popover's own styling and is handled by the
+              // shared chrome script.
+              if (e.target.closest('#startClear')) {
+                // Ancestor of the button by construction, so no null to guard.
+                var column = e.target.closest('.recents-column');
+                column.textContent = '';
+                column.insertAdjacentHTML('afterbegin', window.readerEmptyColumn);
+                post('readerClear', '');
+                // The button that was focused is gone. Say what happened — the offline copies
+                // went too, which the list disappearing does not convey — and put focus on
+                // the paragraph that replaced it rather than letting it fall to <body>.
+                window.readerToast('History cleared, including saved copies.');
+                var empty = column.querySelector('.empty');
+                if (empty) { empty.tabIndex = -1; empty.focus(); }
+                return;
+              }
               // Row controls come first: they sit inside the row, and clicking one must not
               // also open the article.
               var control = e.target.closest('.row-action');
@@ -294,10 +327,6 @@ public enum StartPage {
               if (!row) { return; }
               post('readerOpen', row.dataset.url);
             });
-            document.getElementById('startSettings').addEventListener('click', function () {
-              post('readerOpenSettings', '');
-            });
-
             // Lucide-style line icons: thumbs-up, thumbs-down, and the same X the other
             // remove controls use. Markup is ours, never feed text.
             var ICON_MORE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';
@@ -323,6 +352,9 @@ public enum StartPage {
               var list = section.querySelector('.suggestions');
               var empty = section.querySelector('.empty-suggestions');
               list.textContent = '';
+              // Same rule as the server-rendered recents list: a column only where this batch
+              // actually brought images.
+              var thumbs = (items || []).some(function (item) { return !!item.image; });
               (items || []).forEach(function (item) {
                 var wrap = document.createElement('div');
                 wrap.className = 'suggestion';
@@ -333,6 +365,25 @@ public enum StartPage {
                 row.className = 'recent';
                 row.type = 'button';
                 row.dataset.url = item.url;
+                // The same thumbnail a recents row gets, and built the same way: the element
+                // carries `data-src` only, so whether it ever fetches is decided in one place
+                // (`readerRevealThumbs`, called below) rather than here.
+                if (thumbs && item.image) {
+                  var thumb = document.createElement('img');
+                  thumb.className = 'recent-thumb';
+                  thumb.alt = '';
+                  thumb.loading = 'lazy';
+                  thumb.referrerPolicy = 'no-referrer';
+                  thumb.dataset.src = item.image;
+                  thumb.onerror = function () {
+                    thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
+                    thumb.remove();
+                  };
+                  row.appendChild(thumb);
+                } else if (thumbs) {
+                  // No image for this one, but the list has a column — fill the slot.
+                  row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
+                }
                 var title = document.createElement('span');
                 title.className = 'recent-title';
                 title.textContent = item.title;
@@ -353,8 +404,13 @@ public enum StartPage {
                 wrap.appendChild(actions);
                 list.appendChild(wrap);
               });
+              list.classList.toggle('has-thumbs', thumbs);
               empty.hidden = (items || []).length > 0;
+              // Unhide before revealing: these rows were built after the appearance script
+              // last ran, and the one function allowed to turn a data-src into a fetch
+              // withholds it while the row is still behind a `hidden` ancestor.
               section.hidden = false;
+              if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
             };
           })();
           </script>

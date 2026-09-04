@@ -8,6 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Sync appearance settings and recents between devices through a folder you pick — inside
+  your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
+  own file, so nothing collides and no device can wipe another's list. Set it up in
+  Settings (⌘,) or under Sync… in the WebReader menu; page zoom stays local. Mac only for
+  now — the Linux app has no folder picker yet.
+
+### Changed
+- **Recents live on the start page** (#32). The start page drops its recents and hidden-text
+  buttons: the recents popover duplicated the inline list in a worse form, and the
+  hidden-text panel had no article to group phrases against. Clearing history moves under
+  the inline list, and hidden phrases are managed on the settings page beside blocked
+  outlets.
+- **Five recent, five suggested** (#33). The reader's recents popover lists five recent
+  articles instead of the whole history, followed by five suggestions — both with
+  thumbnails — so you can pick up something new without going home first.
+- **Article images move to settings.** The Aa popover's **Images / No images** switch is
+  gone: sitting among the type and theme controls it read as governing the article's own
+  images, which it never did. The settings page now has an **Article images** section with
+  one switch per surface — the start page's lists and the reader's dropdown — and a list
+  with its switch off carries no images, reserves no space for them and fetches nothing.
+  Anyone who had turned the old switch off gets both new ones off, and Reset Reader
+  Appearance now leaves both alone.
+- Recents now record when an article was read, and clearing history leaves a timestamp, so
+  two devices merge in the right order and a clear isn't undone by a device that was off.
+  Existing lists are read as before, on both platforms.
+
+## [0.11.0] - 2026-08-31
+
+### Fixed
+- **Keyboard focus** (#26). `Tab` now reaches the whole page on macOS — buttons, recents
+  rows, the appearance controls — instead of stopping at the URL field.
+
+### Added
+- **A way home** (#15). The reader, settings and offline pages now carry a Home button in the
+  top-left corner, aligned with the controls opposite it. On the start page that slot holds
+  Settings, which moves up from the bottom-left corner. Settings loses its "Done" button: it
+  sat below the fold and committed nothing, since changes there apply as you make them.
+- **A loading screen** (#24). While a page loads, WebReader shows a plain screen with the
+  progress line at the top instead of letting the original site paint itself only to be
+  replaced by the reader a moment later. It picks one of fifteen short messages per load, with
+  a highlight travelling across it — held still if the system asks for reduced motion. On a
+  slow connection the screen stays up as long as the load keeps moving, and gives way only if
+  nothing happens for six seconds.
+- **Article thumbnails** (#25). Recent and suggested articles on the start page show the
+  article's own lead image where there is one — read from the page for recents, and from the
+  feed for suggestions. Articles without one get a placeholder rather than a blank gap, so
+  rows stay lined up. Turn them off under **Aa → No images**; with them off the page
+  requests nothing.
 - **A Linux app** (#16). WebReader now runs on Linux as a GTK4 + WebKitGTK application,
   developed against Arch/Omarchy on Hyprland. It registers as an `http`/`https` handler, so
   the browser chooser and `xdg-open` route links to it, and opens them in the same reader
@@ -22,20 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   system light/dark switch. Explicit themes still pin their own palette.
 - Reader font stacks are now chosen per platform, so Linux gets faces that actually resolve
   there (Noto Serif, Adwaita Sans) instead of falling through to Liberation.
-- Sync appearance settings and recents between devices through a folder you pick — inside
-  your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
-  own file, so nothing collides and no device can wipe another's list. Set it up in
-  Settings (⌘,) or under Sync… in the WebReader menu; page zoom stays local. Mac only for
-  now — the Linux app doesn't offer it yet.
 
 ### Changed
 - Hiding boilerplate is now part of the reader itself: select a line and a **Hide text**
   button appears beside it. The Edit-menu and right-click routes are gone — one way to do it,
   and it works on a platform with no menu bar.
 - Both progress hairlines read one shared thickness constant instead of two hand-kept copies.
-- Recents now record when an article was read, and clearing history leaves a timestamp, so
-  two devices merge in the right order and a clear isn't undone by a device that was off.
-  Existing lists are read as before.
 
 ## [0.10.1] - 2026-08-28
 
@@ -94,7 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/yepzdk/webreader/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/yepzdk/webreader/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yepzdk/webreader/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/yepzdk/webreader/releases/tag/v0.9.0

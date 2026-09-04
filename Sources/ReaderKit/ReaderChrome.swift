@@ -26,12 +26,20 @@ enum ReaderChrome {
             .joined(separator: "\n")
     }
 
-    /// The `data-theme` and `data-quotes` attributes for `<html>`. Each is absent at its
-    /// default (`auto` follows the system; bordered quotes are the stylesheet's baseline), so
-    /// the stock page is attribute-free.
-    static func themeAttribute(_ settings: ReaderSettings) -> String {
-        (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
+    /// The `data-theme`, `data-quotes` and `data-thumbs` attributes for `<html>`. Each is
+    /// absent at its default (`auto` follows the system; bordered quotes are the
+    /// stylesheet's baseline; thumbnails are on), so the stock page is attribute-free.
+    ///
+    /// `thumbnails` is the scope of *this page's* lists — `.startPage` or `.reader` — because
+    /// each page renders only its own, and a page with no lists at all (settings, offline)
+    /// passes nothing. Baked here so the first paint is right; `controlsScript` keeps the
+    /// attribute in step with the same field afterwards.
+    static func themeAttribute(_ settings: ReaderSettings,
+                               thumbnails scope: ReaderSettings.ThumbnailScope? = nil) -> String {
+        let thumbnails = scope.map { settings.thumbnails($0) } ?? .on
+        return (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
             + (settings.quoteStyle == .bordered ? "" : " data-quotes=\"\(settings.quoteStyle.rawValue)\"")
+            + (thumbnails == .on ? "" : " data-thumbs=\"off\"")
     }
 
     /// The palette custom properties: light defaults, the dark media query, and the four
@@ -53,16 +61,8 @@ enum ReaderChrome {
     static func themeCSS(_ settings: ReaderSettings, platform: Platform = .macOS,
                          palette: ReaderPalette? = nil) -> String {
         let hosted = settings.theme == .auto ? palette : nil
-        let rootPalette = hosted.map {
-            """
-            --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
-            --border: \($0.border); --surface: \($0.surface);
-            color-scheme: \($0.isDark ? "dark" : "light");
-            """
-        } ?? """
-        --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-        --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
-        """
+        let rootPalette = hosted.map { properties($0, colorScheme: true) }
+            ?? properties(.stock(for: .light, prefersDark: false), colorScheme: false)
         var blocks = ["""
         :root {
           \(indent(rootPalette, by: 2))
@@ -76,37 +76,74 @@ enum ReaderChrome {
             blocks.append("""
             @media (prefers-color-scheme: dark) {
               :root {
-                --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-                --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
+                \(indent(properties(.stock(for: .dark, prefersDark: true), colorScheme: false), by: 4))
               }
             }
             """)
         }
+        let pinned = [ReaderSettings.Theme.light, .sepia, .dark, .black].map { theme in
+            """
+            :root[data-theme="\(theme.rawValue)"] {
+              \(indent(properties(.stock(for: theme, prefersDark: false), colorScheme: true), by: 2))
+            }
+            """
+        }.joined(separator: "\n")
         blocks.append("""
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
-        :root[data-theme="light"] {
-          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-          --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
-          color-scheme: light;
-        }
-        :root[data-theme="sepia"] {
-          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #2563eb;
-          --border: rgba(61,50,37,0.18); --surface: rgba(61,50,37,0.07);
-          color-scheme: light;
-        }
-        :root[data-theme="dark"] {
-          --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-          --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
-          color-scheme: dark;
-        }
-        :root[data-theme="black"] {
-          --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #3b82f6;
-          --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
-          color-scheme: dark;
-        }
+        \(pinned)
         """)
         return blocks.joined(separator: "\n")
+    }
+
+    /// A palette's six custom properties, two declarations to a line, as every block in
+    /// `themeCSS` has always written them. `colorScheme` adds the `color-scheme` line: the
+    /// blocks that answer the light/dark question outright carry it, the light defaults and
+    /// the dark media query (which the browser has already decided) do not.
+    private static func properties(_ palette: ReaderPalette, colorScheme: Bool) -> String {
+        var lines = [
+            "--bg: \(palette.bg); --fg: \(palette.fg); --muted: \(palette.muted); --accent: \(palette.accent);",
+            "--border: \(palette.border); --surface: \(palette.surface);",
+        ]
+        if colorScheme { lines.append("color-scheme: \(palette.isDark ? "dark" : "light");") }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The shared chrome button box: the same padding, colours, hairline and radius for the
+    /// top-right cluster and the top-left nav slot. One declaration and two selector lists,
+    /// so a button on one side of the window can't drift from a button on the other.
+    private static func buttonBox(_ selectors: String) -> String {
+        """
+        \(selectors) {
+          padding: 4px 10px; font-family: inherit; font-size: 14px;
+          color: var(--muted); background: var(--bg);
+          border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+        }
+        """
+    }
+
+    /// The top-left nav slot: one button on the same 14px baseline as the top-right cluster,
+    /// so the two read as one row of chrome rather than two stray corners.
+    ///
+    /// Deliberately *not* a second `.reader-controls`: `controlsScript`'s outside-click
+    /// dismissal keys off that class, and clicking the nav button must still close an open
+    /// popover. The occupant differs per page (`navHome`, `navSettings`) and both ids are
+    /// styled here, since a page renders one or the other and never both. Nothing here may
+    /// reach for `--surface` — the offline page renders a nav button and defines no such
+    /// custom property.
+    static func navCSS(platform: Platform = .macOS) -> String {
+        """
+        .reader-nav {
+          position: fixed; top: 14px; left: 14px; z-index: 10;
+          display: flex; gap: 6px;
+          font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+        }
+        \(buttonBox("#readerHomeBtn, #startSettings"))
+        #readerHomeBtn:hover, #startSettings:hover { color: var(--fg); }
+        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor. */
+        #readerHomeBtn { display: flex; align-items: center; padding: 5px 9px; }
+        #readerHomeBtn svg { display: block; }
+        """
     }
 
     /// CSS for the chrome controls: the button row, both popovers, the appearance segments
@@ -123,11 +160,7 @@ enum ReaderChrome {
         }
         /* Each button owns the popover anchored under it. */
         .reader-control { position: relative; }
-        #readerAa, #readerRecentsBtn, #readerHiddenBtn {
-          padding: 4px 10px; font-family: inherit; font-size: 14px;
-          color: var(--muted); background: var(--bg);
-          border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-        }
+        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn"))
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
@@ -165,14 +198,17 @@ enum ReaderChrome {
           display: flex; flex-direction: column; gap: 10px;
         }
         #readerPanel[hidden], #readerRecents[hidden], #readerHidden[hidden] { display: none; }
-        /* Recents: a plain list of titles. Padding is on the rows, so the panel itself
-           sheds its gap and lets a long list scroll instead of running off-screen.
-           Right-anchored like the Aa panel: the controls sit at the window's right edge,
-           so the panel has to hang leftward to stay on screen. `max-width` keeps it from
-           running off the LEFT edge on a narrow window. */
+        /* Recents: two short groups of rows. Padding is on the rows, so the panel itself
+           sheds its gap. Right-anchored like the Aa panel: the controls sit at the window's
+           right edge, so the panel has to hang leftward to stay on screen. `max-width` keeps
+           it from running off the LEFT edge on a narrow window.
+           The height cap was 60vh when this listed the whole 30-entry history. Ten rows with
+           thumbnails and two-line titles measure ~660px, which 60vh only clears on an
+           1100px-tall window; 76vh fits them from ~870px up, and still cannot overflow the
+           viewport — the panel starts ~52px down, and 24vh is more than that above 220px. */
         #readerRecents, #readerHidden {
           width: 280px; max-width: calc(100vw - 28px);
-          padding: 6px; gap: 0; max-height: 60vh; overflow-y: auto;
+          padding: 6px; gap: 0; max-height: 76vh; overflow-y: auto;
         }
         .recent {
           display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: 5px;
@@ -185,6 +221,48 @@ enum ReaderChrome {
         }
         .recent-host { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
         .recent-empty, .phrase-empty { margin: 0; padding: 7px 8px; color: var(--muted); }
+        /* Two lines in the popover as well as inline (#33): a 64px thumbnail and its gap
+           leave roughly 194px of title in a 280px panel, and one line cuts most Danish
+           headlines before they say what the article is about. Still clamped — a row is a
+           glance, not the article. */
+        #readerRecents .recent-title {
+          white-space: normal;
+          display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        }
+        /* Thumbnails (#25), for recents and suggestions alike, on the start page and in the
+           reader's popover (#33). A grid rather than a flex line, and only in a list carrying
+           `has-thumbs` — set by the server for rendered rows and by the host's callback for
+           delivered ones, in both cases only when something in that list actually has an
+           image. The text column is pinned, so a row whose article named no image still lines
+           its title up with the rest instead of starting 74px to their left, and a list with
+           no images at all is laid out exactly as it always was. */
+        .has-thumbs .recent {
+          display: grid; grid-template-columns: 64px 1fr; gap: 0 10px; align-items: start;
+        }
+        .has-thumbs .recent-thumb { grid-row: 1 / span 2; }
+        /* Pinned, or auto-placement would drop an imageless row's title into the 64px
+           column and squeeze it. */
+        .has-thumbs .recent-title,
+        .has-thumbs .recent-host { grid-column: 2; }
+        /* 64x40 rather than a square: a lead image is usually landscape, and this is about
+           the height two clamped title lines already take, so rows barely grow. */
+        .recent-thumb {
+          width: 64px; height: 40px; object-fit: cover;
+          border-radius: 4px; background: var(--surface);
+        }
+        /* The empty slot. Only ever shown inside a list that has a column at all, so a
+           list where nothing has an image is laid out exactly as it was before #25. */
+        .recent-thumb-empty { display: none; }
+        .has-thumbs .recent-thumb-empty {
+          display: flex; align-items: center; justify-content: center;
+          color: var(--muted); opacity: 0.45;
+        }
+        .recent-thumb-empty svg { display: block; }
+        /* Article images off: no image, no reserved column, and nothing fetched — the
+           appearance script is the only thing that ever sets a src. Load-bearing on both
+           pages now, so it travels with the rest of the block rather than staying behind. */
+        :root[data-thumbs="off"] .recent-thumb { display: none; }
+        :root[data-thumbs="off"] .has-thumbs .recent { display: block; }
         /* Hidden-text rows: the phrase and a remove control. Built by the page script from
            the phrase list via textContent — no phrase ever becomes markup. */
         .phrase {
@@ -200,12 +278,14 @@ enum ReaderChrome {
         .phrase-remove:hover { color: var(--fg); background: var(--border); }
         .phrase-remove svg { display: block; }
         .phrase-count { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-        /* Phrases that hit this article are listed first; the rest follow under a rule. */
-        .phrase-group {
+        /* Group labels inside a list panel: the hidden-text panel puts the phrases that hit
+           this article first and the rest under a rule, and the recents panel separates its
+           suggested group the same way. */
+        .panel-group {
           margin: 6px 6px 2px; padding: 0 2px; font-size: 10px; font-weight: 600;
           letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
         }
-        .phrase-group.rest { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+        .panel-group.rest { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
         /* Clearing history lives next to the history itself — Restore Defaults is for
            presentation settings and deliberately leaves user data alone. */
         #readerClear {
@@ -214,6 +294,12 @@ enum ReaderChrome {
           font-family: inherit; font-size: 11px; color: var(--muted);
         }
         #readerClear:hover { color: var(--fg); }
+        /* Clear history already draws a rule, so the suggested group below it doesn't draw a
+           second one 8px away. With no history there is no clear button and the heading
+           keeps its own. */
+        #readerClear + #readerSuggested > .panel-group.rest {
+          margin-top: 8px; padding-top: 0; border-top: 0;
+        }
         /* Popover headings — the popovers are opened from unlabelled icon buttons, so
            each one names itself once opened. */
         .panel-title {
@@ -378,36 +464,153 @@ enum ReaderChrome {
     /// so titles and URLs (other sites' content) run through the same escaping as the rest
     /// of the page. The URL lives in a data attribute; the host re-validates it before
     /// navigating.
-    static func recentsRows(_ history: ReaderHistory) -> String {
+    static func recentsRows(_ history: ReaderHistory, thumbnails: Bool = false) -> String {
         history.entries.map { entry in
             let host = URL(string: entry.url)?.host ?? ""
             let hostLine = host.isEmpty ? ""
                 : "<span class=\"recent-host\">\(HTML.escape(host))</span>"
             return "<button class=\"recent\" data-url=\"\(HTML.escape(entry.url))\">"
+                + (thumbnails ? thumbnail(entry) : "")
                 + "<span class=\"recent-title\">\(HTML.escape(entry.title))</span>"
                 + "\(hostLine)</button>"
         }.joined(separator: "\n")
     }
 
-    /// The recents popover's contents: the heading, the rows, and the clear action — or the
-    /// empty state. The clear action only appears when there's something to clear.
-    static func recentsBody(_ history: ReaderHistory) -> String {
-        let heading = "<h2 class=\"panel-title\" id=\"readerRecentsTitle\">Recent articles</h2>"
-        guard !history.entries.isEmpty else {
-            return heading + "\n<p class=\"recent-empty\">No recent articles</p>"
-        }
-        return heading + "\n" + recentsRows(history)
-            + "\n<button id=\"readerClear\">Clear history</button>"
+    /// What fills a thumbnail slot when the article named no image: the same box, in the
+    /// row surface, with a quiet picture glyph.
+    ///
+    /// A slot rather than a gap. Coverage is uneven by nature — an article need not name an
+    /// image and plenty of feeds name none — so a list will normally mix the two, and leaving
+    /// the column blank on those rows reads as a failed load rather than as a design.
+    ///
+    /// Only ever rendered into a list that carries `has-thumbs`; the CSS keeps it out of a
+    /// list where nothing has an image, so such a list looks exactly as it always did.
+    static let thumbnailPlaceholder =
+        "<span class=\"recent-thumb recent-thumb-empty\" aria-hidden=\"true\">"
+        + "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\""
+        + " stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\""
+        + " stroke-linejoin=\"round\">"
+        + "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/>"
+        + "<circle cx=\"9\" cy=\"9\" r=\"1.5\"/>"
+        + "<path d=\"m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21\"/>"
+        + "</svg></span>"
+
+    /// A row's lead-image thumbnail, or the placeholder when the article named none.
+    ///
+    /// The URL goes in `data-src`, not `src`: `readerRevealThumbs` is the only thing that ever
+    /// promotes one to a fetch, so with article images off the page requests nothing — which
+    /// is what the start page did before this existed. `no-referrer` keeps the reading list
+    /// from travelling back to the publisher, and an image that fails falls back to the
+    /// placeholder rather than leaving a broken glyph.
+    private static func thumbnail(_ entry: ReaderHistory.Entry) -> String {
+        guard let image = entry.image, !image.isEmpty else { return thumbnailPlaceholder }
+        return "<img class=\"recent-thumb\" alt=\"\" loading=\"lazy\""
+            + " referrerpolicy=\"no-referrer\""
+            + " onerror=\"this.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);"
+            + " this.remove()\""
+            + " data-src=\"\(HTML.escape(image))\">"
     }
 
-    /// The chrome markup: the recents button with its popover, the hidden-text button with
-    /// its (script-filled) list, then the "Aa" button with the appearance popover. All carry
-    /// hover tooltips and name their own panel, since the buttons themselves are unlabelled.
+    /// How many rows each of the popover's two groups carries. Short and fixed: the panel
+    /// used to be the entire 30-entry history in a 60vh scroller, where nobody ever reached
+    /// row 24 (#33).
+    static let popoverRecents = 5
+    static let popoverSuggestions = 5
+
+    /// The recents popover's contents: the recents group — heading, rows, and the clear
+    /// action — then the suggested group the host fills in later.
+    ///
+    /// Rows carry thumbnails, as the start page's lists do, and the column is reserved only
+    /// when something in this list has an image — the same rule the inline list follows.
+    /// `history` arrives already trimmed by the caller (`ReaderHistory.recents(limit:
+    /// excluding:)`), so this renders exactly what it is given.
+    ///
+    /// `canClear` is asked separately because the trimmed list can be empty while the stored
+    /// history is not: read one article and the only entry is the one on screen, which the
+    /// popover deliberately excludes. The rows say "nothing else to go back to"; the button
+    /// has to follow the store, or there would be history with no way to clear it.
+    ///
+    /// The two lists are separate containers because `has-thumbs` is a per-list decision and
+    /// the clear action empties one of them in place.
+    static func recentsBody(_ history: ReaderHistory, canClear: Bool) -> String {
+        // Matches the script-side rule (`!!item.image`): an entry carrying an empty string
+        // renders a placeholder, so it must not be what reserves the column.
+        let hasThumbs = history.entries.contains { !($0.image ?? "").isEmpty }
+        let rows = history.entries.isEmpty
+            ? emptyRecentsMarkup
+            : recentsRows(history, thumbnails: hasThumbs)
+        let clear = canClear ? "\n<button id=\"readerClear\">Clear history</button>" : ""
+        return """
+        <h2 class="panel-title" id="readerRecentsTitle">Recent articles</h2>
+        <div id="readerRecentsList"\(hasThumbs ? " class=\"has-thumbs\"" : "")>
+          \(indent(rows, by: 2))
+        </div>\(clear)
+        <section id="readerSuggested" hidden aria-labelledby="readerSuggestedTitle">
+          <h3 class="panel-group rest" id="readerSuggestedTitle">Suggested</h3>
+          <div id="readerSuggestedList"></div>
+        </section>
+        """
+    }
+
+    /// The recents empty state. One definition: the server renders it, and the clear action
+    /// swaps it in client-side (through `window.readerEmptyRecents`), so the two cannot come
+    /// to word it differently.
+    static let emptyRecentsMarkup = "<p class=\"recent-empty\">No recent articles</p>"
+
+    /// The nav slot's occupant on the reader and offline pages: back to the start page.
+    ///
+    /// The click posts inline rather than through `controlsScript`, because the offline page
+    /// carries no chrome script at all — one mechanism for one button beats a listener here
+    /// and an inline handler there. Every handler name is registered for the window's life,
+    /// so there is nothing for the bare `postMessage` to throw on.
+    static func navHome() -> String {
+        """
+        <div class="reader-nav">
+          <button id="readerHomeBtn" type="button" aria-label="Home" title="Start page"
+                  onclick="window.webkit.messageHandlers.readerHome.postMessage('')">
+            <!-- house, Lucide-style line icon -->
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>
+              <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </button>
+        </div>
+        """
+    }
+
+    /// The start page's nav occupant. The start page *is* home, so the slot carries the one
+    /// piece of navigation it does have — and Settings sits where Home sits on every other
+    /// page instead of hiding in the opposite corner.
+    static func navSettings() -> String {
+        """
+        <div class="reader-nav">
+          <button id="startSettings" type="button"
+                  onclick="window.webkit.messageHandlers.readerOpenSettings.postMessage('')">Settings</button>
+        </div>
+        """
+    }
+
+    /// The chrome markup: the "Aa" button with the appearance popover, plus — where the page
+    /// asks for them — the recents button with its popover and the hidden-text button with
+    /// its (script-filled) list. All carry hover tooltips and name their own panel, since the
+    /// buttons themselves are unlabelled.
+    ///
+    /// Everything but the appearance popover is opt-in, the way `showsRating:` already is.
     /// `rating` adds the like/dislike pair — the reader page passes the current article's
     /// rating (nil = unrated); the start page omits it, since there is no article to rate.
-    static func controls(history: ReaderHistory,
+    /// The start page also omits both lists (#32): its recents live inline in the page, where
+    /// they get thumbnails and two-line titles, and it has no article for the hidden-text
+    /// panel to group phrases against, so every phrase would fall under "the rest".
+    /// `recents` is the popover's list — already trimmed, and `nil` on a page that renders no
+    /// popover, so the data cannot go missing while the button is asked for or be handed to a
+    /// page that discards it. `canClear` follows the stored history rather than that list; see
+    /// `recentsBody`.
+    static func controls(recents: ReaderHistory? = nil,
+                         canClear: Bool = false,
                          showsRating: Bool = false,
-                         rating: TopicPreferences.Rating? = nil) -> String {
+                         rating: TopicPreferences.Rating? = nil,
+                         showsHidden: Bool = false) -> String {
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -431,10 +634,8 @@ enum ReaderChrome {
             </button>
           </div>
         """
-        return """
-        <div class="reader-controls">
-          \(ratingControls)
-          <div class="reader-control">
+        let recentsControl = recents == nil ? "" : """
+        <div class="reader-control">
             <button id="readerRecentsBtn" aria-label="Recent articles"
                     title="Recent articles" aria-haspopup="true"
                     aria-expanded="false" aria-controls="readerRecents">
@@ -444,10 +645,12 @@ enum ReaderChrome {
               </svg>
             </button>
             <div id="readerRecents" hidden aria-labelledby="readerRecentsTitle">
-              \(indent(recentsBody(history), by: 6))
+              \(indent(recentsBody(recents ?? ReaderHistory(), canClear: canClear), by: 6))
             </div>
           </div>
-          <div class="reader-control">
+        """
+        let hiddenControl = !showsHidden ? "" : """
+        <div class="reader-control">
             <button id="readerHiddenBtn" aria-label="Hidden text"
                     title="Hidden text" aria-haspopup="true"
                     aria-expanded="false" aria-controls="readerHidden">
@@ -465,6 +668,12 @@ enum ReaderChrome {
               <div id="readerHiddenList"></div>
             </div>
           </div>
+        """
+        return """
+        <div class="reader-controls">
+          \(ratingControls)
+          \(recentsControl)
+          \(hiddenControl)
           <div class="reader-control">
             <button id="readerAa" aria-label="Reader appearance"
                     title="Text &amp; appearance" aria-haspopup="true"
@@ -517,9 +726,17 @@ enum ReaderChrome {
     /// phrase from the selection: it strips matching blocks from the article live, adds
     /// what it removed to the hit counts, and redraws the badge and list.
     ///
-    /// `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
+    /// `window.readerSetSettings(next)` is the host's entry point for a document it did not
+    /// just render — a back/forward restore reuses the original bytes, so its `s` is as old as
+    /// the document and would otherwise be posted back over newer values by the next `save()`.
+    ///
+    /// `thumbnails` names the switch this page's lists obey; the script reads `s[THUMBS]`, so
+    /// a pushed settings object drives `data-thumbs` exactly as the server-rendered attribute
+    /// did. `hitsJSON` is the extraction pass's `{normalizedPhrase: count}` (the reader page);
     /// the start page has no article and passes nothing.
-    static func controlsScript(settings: ReaderSettings, hidden: HiddenPhrases = HiddenPhrases(),
+    static func controlsScript(settings: ReaderSettings,
+                               thumbnails: ReaderSettings.ThumbnailScope,
+                               hidden: HiddenPhrases = HiddenPhrases(),
                                hitsJSON: String = "{}", platform: Platform = .macOS) -> String {
         let sans = platform.sansStack
         let serif = platform.serifStack
@@ -527,6 +744,7 @@ enum ReaderChrome {
         (function () {
           \(indent(HiddenPhrases.hideScript, by: 2))
           var s = \(settings.json);
+          var THUMBS = '\(thumbnails.rawValue)';
           var HIDDEN = \(hidden.scriptLiteral);
           var HITS = \(hitsJSON);
           var MIN = \(ReaderSettings.fontSizeRange.lowerBound), MAX = \(ReaderSettings.fontSizeRange.upperBound);
@@ -542,12 +760,52 @@ enum ReaderChrome {
           var hiddenPanel = document.getElementById('readerHidden');
           var hiddenList = document.getElementById('readerHiddenList');
           var badge = document.getElementById('readerHiddenCount');
-          // The popovers, so opening one closes the others.
+          // The popovers, so opening one closes the others. Built from what this page
+          // actually rendered rather than from what the chrome can emit: the start page
+          // carries the appearance popover alone (#32), and the shared script must no more
+          // assume the other two than it assumes the progress bar.
           var popovers = [{ btn: btn, panel: panel }, { btn: recentsBtn, panel: recents },
-                          { btn: hiddenBtn, panel: hiddenPanel }];
+                          { btn: hiddenBtn, panel: hiddenPanel }]
+            .filter(function (p) { return p.btn && p.panel; });
           var REMOVE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" ' +
             'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
             '<path d="M18 6 6 18M6 6l12 12"/></svg>';
+          // The placeholder markup lives in Swift so every list that fills a thumbnail slot
+          // from script — the start page's suggestions, the popover's — renders the same box
+          // the server-rendered rows do. Ours, never feed text.
+          window.readerThumbPlaceholder = \(HTML.jsString(thumbnailPlaceholder));
+          // Likewise the recents empty state, which the clear action swaps in: one wording,
+          // whether the server rendered it or the panel did.
+          window.readerEmptyRecents = \(HTML.jsString(emptyRecentsMarkup));
+
+          // The only thing in the app that ever sets a thumbnail's src. Rows are rendered
+          // carrying `data-src` and nothing else, so while article images are off the page
+          // asks the publishers for nothing at all — which is what the start page did before
+          // thumbnails existed. Called by `apply`, and again whenever the host delivers rows,
+          // which arrive long after this has first run.
+          window.readerRevealThumbs = function () {
+            if (root.getAttribute('data-thumbs') === 'off') { return; }
+            document.querySelectorAll('.recent-thumb').forEach(function (img) {
+              // A row inside a closed panel asks for nothing until the panel is opened.
+              // Whether an engine honours loading="lazy" inside display:none is not worth
+              // betting ten thumbnail fetches per article render on, and the popover is
+              // closed on every render.
+              if (img.closest('[hidden]')) { return; }
+              if (!img.getAttribute('src') && img.dataset.src) { img.src = img.dataset.src; }
+            });
+          };
+
+          // How the host hands a document it did not just render the settings as they now
+          // stand. A back/forward restore reuses the original bytes, so `s` is as old as the
+          // document: without this the next `save()` would post those stale values back over
+          // whatever the settings page changed in between, and `readerSettings` replaces the
+          // stored object. Assign, apply, and deliberately do not save — this is the store
+          // telling the page, not the other way round.
+          window.readerSetSettings = function (next) {
+            if (!next) { return; }
+            Object.keys(next).forEach(function (key) { s[key] = next[key]; });
+            apply();
+          };
 
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
@@ -558,6 +816,12 @@ enum ReaderChrome {
             else { root.setAttribute('data-theme', s.theme); }
             if (s.quoteStyle === 'italic') { root.setAttribute('data-quotes', 'italic'); }
             else { root.removeAttribute('data-quotes'); }
+            // This page's own switch: `THUMBS` names it, so one attribute follows one field
+            // whichever page this is. Baked into the markup too (see `themeAttribute`) so the
+            // first paint is right before this script runs.
+            if (s[THUMBS] === 'off') { root.setAttribute('data-thumbs', 'off'); }
+            else { root.removeAttribute('data-thumbs'); }
+            window.readerRevealThumbs();
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });
@@ -624,6 +888,9 @@ enum ReaderChrome {
               p.panel.hidden = !open;
               p.btn.setAttribute('aria-expanded', String(open));
             });
+            // Rows that were behind a closed panel have their thumbnails withheld until
+            // here, so opening one is what asks the publishers for its images.
+            if (which) { window.readerRevealThumbs(); }
           }
           panel.addEventListener('click', function (e) {
             var b = e.target.closest('button');
@@ -643,6 +910,10 @@ enum ReaderChrome {
             var result = readerHideBlocks(document.querySelector('article'), HIDDEN);
             Object.keys(result.hits).forEach(function (k) { HITS[k] = (HITS[k] || 0) + result.hits[k]; });
             if (window.readerOnLayoutChange) { window.readerOnLayoutChange(); }
+            // Hiding runs on every page that has an article; only the drawing below needs
+            // the panel. The button, its badge and the list are one markup block, so one
+            // check covers all three.
+            if (!hiddenList) { return; }
             // The badge counts blocks actually removed from this page — a phrase dropped
             // from the list later doesn't bring its blocks back until a reload.
             var total = 0;
@@ -661,7 +932,7 @@ enum ReaderChrome {
             }
             function heading(label, extra) {
               var h = document.createElement('p');
-              h.className = 'phrase-group' + (extra ? ' ' + extra : '');
+              h.className = 'panel-group' + (extra ? ' ' + extra : '');
               h.textContent = label;
               hiddenList.appendChild(h);
             }
@@ -705,37 +976,100 @@ enum ReaderChrome {
               hiddenList.appendChild(row);
             }
           };
-          btn.addEventListener('click', function () { setOpen(panel.hidden ? panel : null); });
-          recentsBtn.addEventListener('click', function () {
-            setOpen(recents.hidden ? recents : null);
+          popovers.forEach(function (p) {
+            p.btn.addEventListener('click', function () {
+              setOpen(p.panel.hidden ? p.panel : null);
+            });
           });
-          hiddenBtn.addEventListener('click', function () {
-            setOpen(hiddenPanel.hidden ? hiddenPanel : null);
-          });
-          // A recents row hands its URL to the host, which re-validates it against the
-          // app's domain scope before navigating — the same path an incoming link takes.
-          recents.addEventListener('click', function (e) {
-            if (e.target.closest('#readerClear')) {
-              // Removing the button detaches the click target, so the document-level
-              // close handler would see a node outside .reader-controls and hide the
-              // panel — hiding the empty state we're about to show. Stop it here.
-              e.stopPropagation();
-              // Empty the panel in place — the host clears the stored list.
-              recents.querySelectorAll('.recent, #readerClear').forEach(function (n) {
-                n.remove();
-              });
-              recents.insertAdjacentHTML('beforeend',
-                '<p class="recent-empty">No recent articles</p>');
-              try { window.webkit.messageHandlers.readerClear.postMessage(''); }
+          // A row hands its URL to the host, which re-validates it against the app's domain
+          // scope before navigating — the same path an incoming link takes. One listener for
+          // both of the panel's lists: a suggested row is a recents row.
+          if (recents) {
+            var recentsList = document.getElementById('readerRecentsList');
+            recents.addEventListener('click', function (e) {
+              if (e.target.closest('#readerClear')) {
+                // Removing the button detaches the click target, so the document-level
+                // close handler would see a node outside .reader-controls and hide the
+                // panel — hiding the empty state we're about to show. Stop it here.
+                e.stopPropagation();
+                // Empty the recents list in place — the host clears the stored list. Scoped
+                // to that container, so the suggested group below it is left alone.
+                recentsList.textContent = '';
+                recentsList.removeAttribute('class');
+                recentsList.insertAdjacentHTML('beforeend', window.readerEmptyRecents);
+                e.target.closest('#readerClear').remove();
+                // The button the user just activated is gone, and the panel stays open to
+                // show the empty state — so focus has to go somewhere deliberate, or it
+                // falls to <body> and the next Tab restarts at the top of the document.
+                recentsBtn.focus();
+                try { window.webkit.messageHandlers.readerClear.postMessage(''); }
+                catch (err) {}
+                return;
+              }
+              var row = e.target.closest('button[data-url]');
+              if (!row) { return; }
+              setOpen(null);
+              try { window.webkit.messageHandlers.readerOpen.postMessage(row.dataset.url); }
               catch (err) {}
-              return;
-            }
-            var row = e.target.closest('button[data-url]');
-            if (!row) { return; }
-            setOpen(null);
-            try { window.webkit.messageHandlers.readerOpen.postMessage(row.dataset.url); }
-            catch (err) {}
-          });
+            });
+          }
+          // The panel's second group: what to read next, so finishing an article doesn't
+          // mean going home first (#33). Delivered by the host long after the page — or
+          // never, which is why the group ships hidden.
+          //
+          // Plain rows, unlike the start page's: More/Less/Block are gated to that page,
+          // three icon buttons don't fit a 280px row, and this page already carries its own
+          // rating pair for the article on screen. Defined only where the container exists,
+          // so the start page's richer implementation of the same host call is never
+          // shadowed by this one, whatever order the scripts run in.
+          var suggested = document.getElementById('readerSuggested');
+          var suggestedList = document.getElementById('readerSuggestedList');
+          if (suggested && suggestedList) {
+            window.readerSetSuggestions = function (items) {
+              var rows = (items || []).slice(0, \(popoverSuggestions));
+              suggestedList.textContent = '';
+              if (!rows.length) { suggested.hidden = true; return; }
+              // Same rule as every other list: a column only where this one brought images.
+              var thumbs = rows.some(function (item) { return !!item.image; });
+              rows.forEach(function (item) {
+                var row = document.createElement('button');
+                row.className = 'recent';
+                row.type = 'button';
+                row.dataset.url = item.url;
+                if (thumbs && item.image) {
+                  var thumb = document.createElement('img');
+                  thumb.className = 'recent-thumb';
+                  thumb.alt = '';
+                  thumb.loading = 'lazy';
+                  thumb.referrerPolicy = 'no-referrer';
+                  thumb.dataset.src = item.image;
+                  thumb.onerror = function () {
+                    thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
+                    thumb.remove();
+                  };
+                  row.appendChild(thumb);
+                } else if (thumbs) {
+                  row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
+                }
+                // Titles and outlet names come from other people's feeds: text, never markup.
+                var title = document.createElement('span');
+                title.className = 'recent-title';
+                title.textContent = item.title;
+                var source = document.createElement('span');
+                source.className = 'recent-host';
+                source.textContent = item.source || '';
+                row.appendChild(title);
+                row.appendChild(source);
+                suggestedList.appendChild(row);
+              });
+              suggestedList.classList.toggle('has-thumbs', thumbs);
+              // Unhide first: the reveal withholds a src while the row is still behind a
+              // `hidden` ancestor. The panel itself may well be closed, in which case
+              // `setOpen` reveals these when it is opened.
+              suggested.hidden = false;
+              if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
+            };
+          }
           document.addEventListener('click', function (e) {
             if (!e.target.closest('.reader-controls')) { setOpen(null); }
           });

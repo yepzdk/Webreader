@@ -26,7 +26,7 @@ public struct SyncEngine: Sendable {
     private let clock: @Sendable () -> Double
 
     public init(folder: SyncFolder, store: KeyValueStore, device: DeviceState.Device,
-                clock: @escaping @Sendable () -> Double = Timestamp.now) {
+                clock: @escaping @Sendable () -> Double = { Timestamp.now() }) {
         self.folder = folder
         self.store = store
         self.device = device

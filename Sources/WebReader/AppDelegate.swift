@@ -30,6 +30,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var isShowingStartPage: Bool { pageState.isShowingStartPage }
     private var isShowingSettings: Bool { pageState.isShowingSettings }
     private var isShowingFallback = false
+    /// The plain "Loading" screen that stands in for a site while it loads (#24). Shown when
+    /// a navigation of someone else's starts, hidden by every path that settles what's on
+    /// screen.
+    private var loadingCover: LoadingCover!
+    /// Set by `loadOwnPage` and consumed by the next `didStartProvisionalNavigation`: one of
+    /// our own documents is already the answer, so its load must not raise the cover again.
+    /// A one-shot rather than a test over the page flags — the flags differ per own page
+    /// (the offline page sets none of them), and enumerating them is how a page gets stuck
+    /// behind "Loading".
+    private var coverSuppressedOnce = false
     /// The URL whose load produced the offline page, so Try Again retries *that*
     /// navigation rather than going home.
     private var failedURL: URL?
@@ -48,6 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var suppressReaderOnce = false
     private var enterReaderForURL: URL?
     private var pendingReaderRender = false
+    /// Set when the render about to happen is the offline fallback's saved copy, so its
+    /// `didFinish` skips the suggestion fetch. The network just failed, the fetch would fail
+    /// too, and `FeedFetcher` caches an empty result for its whole TTL — one offline article
+    /// would otherwise leave every list empty for ten minutes.
+    private var suggestionsSuppressedOnce = false
     private var readerSourceURL: URL?
     /// The title of the article currently rendered, so a like/dislike learns terms from the
     /// headline rather than from the URL. Set when the reader renders, and cleared when
@@ -91,6 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Without this, Tab in a WKWebView visits text fields and nothing else: every button,
+        // link, recents row and popover control is skipped, so the start page has exactly one
+        // tab stop and no focus ring is ever drawn. It defaults to NO, and macOS's own Full
+        // Keyboard Access is off by default too, so the app has to ask — this is not something
+        // to leave to the reader's system settings. WebKitGTK's counterpart
+        // (`enable-tabs-to-links`) already defaults to TRUE, which is why Linux behaves and
+        // macOS does not (#26).
+        config.preferences.tabFocusesLinks = true
         config.applicationNameForUserAgent = Self.safariApplicationName
         // Our generated pages post here: the offline page's Try Again, the reader's Aa,
         // recents and hidden-text popovers, its floating Hide-text button, and the start
@@ -117,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.allowsBackForwardNavigationGestures = true
         webView.pageZoom = ReaderStore.zoom(store: store)
         window.contentView!.addSubview(webView)
+        loadingCover = LoadingCover(over: webView, in: window.contentView!)
         progressLine = ProgressLine(webView: webView, in: window.contentView!)
 
         sync = SyncController(store: store) { [weak self] result in
@@ -345,6 +369,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             // Back/forward landed on one of our own reader documents: it IS the reader, so
             // just say so. Nothing to extract, record, or cache.
             if result as? String == Reader.ownPageSentinel {
+                // Back/forward landed on a reader document of ours; it is already the page.
+                self.loadingCover.hide()
                 self.isShowingReader = true
                 self.readerSourceURL = url
                 // Back/forward landed here rather than `renderReader`, so the title from the
@@ -361,6 +387,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 // The restored document still shows the rating baked in when it was first
                 // rendered; it may have changed since.
                 self.pushRating(for: url)
+                // Reused bytes, not a fresh render: its settings are as old as the document,
+                // and its popover's suggested group was filled by a script call on the way in
+                // that this navigation did not repeat (#33).
+                self.pushSettings()
+                self.loadSuggestions()
                 return
             }
             // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
@@ -368,6 +399,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             // wants any more — rendering it would file page A's body under page B's key.
             guard self.webView.url == url else { return }
             guard let article = Reader.decode(result) else {
+                // Not an article. The site itself is the honest answer, so reveal it.
+                self.loadingCover.hide()
                 if manual { NSSound.beep() }
                 return
             }
@@ -391,7 +424,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // The cleaned URL, because opening a row routes through `openIncoming`, which
         // cleans — recording the raw one would make the replay look like a new article.
         var history = ReaderStore.history(store: store)
-        history.record(title: article.title, url: URLCleaner.clean(source).absoluteString)
+        let key = URLCleaner.clean(source).absoluteString
+        history.record(title: article.title, url: key, image: article.image)
         ReaderStore.setHistory(history, store: store)
         sync.localStateChanged()
         cache.prune(keeping: history.entries.map(\.url))
@@ -399,10 +433,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                                    settings: ReaderStore.settings(store: store),
                                    history: history,
                                    hidden: ReaderStore.hiddenPhrases(store: store),
-                                   rating: ReaderStore.topics(store: store)
-                                       .rating(for: URLCleaner.clean(source).absoluteString))
+                                   rating: ReaderStore.topics(store: store).rating(for: key),
+                                   currentURL: key)
         pendingReaderRender = true
-        webView.loadHTMLString(html, baseURL: source)
+        loadOwnPage(html, baseURL: source)
     }
 
     // MARK: - Incoming URLs
@@ -439,6 +473,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         return true
     }
 
+    /// Loads one of our own generated documents. The single place `loadHTMLString` is called
+    /// (mirroring the GTK host's `loadHTML`), which is what gives the loading cover one place
+    /// to come down: every own page — reader, start, settings, offline — settles here.
+    private func loadOwnPage(_ html: String, baseURL: URL?) {
+        loadingCover.hide()
+        coverSuppressedOnce = true
+        webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
     /// The start page: URL field, recents, and the appearance controls — reading the same
     /// persisted settings as the reader page.
     private func showStartPage() {
@@ -446,11 +489,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         failedURL = nil
         pageState.willShow(.startPage)
         sync.startPageShown()
-        webView.loadHTMLString(StartPage.html(appName: appName,
-                                              settings: ReaderStore.settings(store: store),
-                                              history: ReaderStore.history(store: store),
-                                              hidden: ReaderStore.hiddenPhrases(store: store)),
-                               baseURL: nil)
+        loadOwnPage(StartPage.html(appName: appName,
+                                   settings: ReaderStore.settings(store: store),
+                                   history: ReaderStore.history(store: store)),
+                    baseURL: nil)
     }
 
     /// The settings page: the suggestion sources and their language filter.
@@ -459,21 +501,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         isShowingFallback = false
         failedURL = nil
         pageState.willShow(.settings)
-        webView.loadHTMLString(SettingsPage.html(appName: appName,
-                                                 settings: ReaderStore.settings(store: store),
-                                                 suggestions: ReaderStore.suggestions(store: store),
-                                                 syncFolder: sync.folderDisplayPath,
-                                                 syncSummary: sync.summary),
-                               baseURL: nil)
+        loadOwnPage(SettingsPage.html(appName: appName,
+                                      settings: ReaderStore.settings(store: store),
+                                      suggestions: ReaderStore.suggestions(store: store),
+                                      hidden: ReaderStore.hiddenPhrases(store: store),
+                                      syncFolder: sync.folderDisplayPath,
+                                      syncSummary: sync.summary),
+                    baseURL: nil)
     }
 
     // MARK: - Suggestions
 
-    /// Fetches the sources, ranks them against what's been read, and hands the result to the
-    /// start page. Everything here is best-effort: the fetch and ranking run off the main
-    /// actor inside the task, and the page is already on screen and stays usable whatever
-    /// happens. Main-actor isolated because it reads the page flags and hands off to the
-    /// web view; every caller is already on the main thread.
+    /// Fetches the sources, ranks them against what's been read, and hands the result to
+    /// whichever of our pages shows suggestions — the start page's list, or the reader's
+    /// recents popover (#33). Everything here is best-effort: the fetch and ranking run off
+    /// the main actor inside the task, and the page is already on screen and stays usable
+    /// whatever happens. Main-actor isolated because it reads the page flags and hands off to
+    /// the web view; every caller is already on the main thread.
     @MainActor
     private func loadSuggestions() {
         suggestionTask?.cancel()
@@ -511,9 +555,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     @MainActor
     private func showSuggestions(_ items: [FeedItem]) {
-        // The page may have been replaced while the feeds were in flight.
-        guard isShowingStartPage else { return }
-        let rows = items.map { ["title": $0.title, "url": $0.url, "source": $0.host] }
+        // The page may have been replaced while the feeds were in flight. Both surfaces
+        // implement `readerSetSuggestions`; each renders the shape that fits it.
+        guard isShowingStartPage || isShowingReader else { return }
+        let rows: [[String: String]] = items.map { item in
+            var row = ["title": item.title, "url": item.url, "source": item.host]
+            if let image = item.image { row["image"] = image }
+            return row
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else { return }
         webView.evaluateJavaScript(
             "window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
@@ -604,6 +653,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // `loadHTMLString` fires this too, and the load THIS app just started must not clear
         // the flag it just set. `PageState` owns that distinction (and is tested on it).
         pageState.navigationStarted()
+        // Someone else's page is on its way: cover it rather than let the site paint itself
+        // only to be replaced by the reader a moment later (#24).
+        if coverSuppressedOnce {
+            coverSuppressedOnce = false
+        } else {
+            loadingCover.show(theme: ReaderStore.settings(store: store).theme)
+        }
         // Whatever is loading isn't the start page any more; a late result must not land on it.
         suggestionTask?.cancel()
     }
@@ -616,10 +672,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if pendingReaderRender {
             pendingReaderRender = false
             isShowingReader = true
+            // The article is up; its popover's suggested group catches up when it can (#33).
+            // Usually free — arriving from the start page leaves the feeds warm in
+            // `FeedFetcher`'s cache — but a link opened from another app fetches here.
+            if suggestionsSuppressedOnce {
+                suggestionsSuppressedOnce = false
+            } else {
+                loadSuggestions()
+            }
             return
         }
         if suppressReaderOnce {
             suppressReaderOnce = false
+            // ⇧⌘R asked for the original page; showing it is the whole point.
+            loadingCover.hide()
             return
         }
         // Our own start/settings load has landed; the page it set still stands.
@@ -639,6 +705,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // own `loadHTMLString` documents (they carry no URL of their own — `about:blank`),
         // so ask the document what it is rather than trying to extract it.
         guard let url = webView.url, WebURL.isWebURL(url) else {
+            loadingCover.hide()
             remarkOwnPage()
             return
         }
@@ -650,6 +717,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             switch PageState.Page(generator: generator) {
             case .startPage:
                 self.pageState.restored(generator: generator)
+                // Reused bytes, not a fresh render: hand it the current settings before the
+                // suggestions arrive, since filling a list reveals thumbnails and this
+                // document's idea of the switch is as old as it is.
+                self.pushSettings()
                 self.loadSuggestions()
             case .settings:
                 self.pageState.restored(generator: generator)
@@ -681,7 +752,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // The load a recents row asked for never arrived; cleared before the ignorable
         // guard because cancelled loads are the likeliest way a row's navigation dies.
         enterReaderForURL = nil
-        guard !OfflineFallback.isIgnorable(errorCode: nsError.code) else { return }
+        guard !OfflineFallback.isIgnorable(errorCode: nsError.code) else {
+            loadingCover.hide()
+            return
+        }
 
         failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
             ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
@@ -691,13 +765,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // consumes `suppressReaderOnce` exactly as before.
         if !suppressReaderOnce, let failed = failedURL,
            let cached = cache.article(for: URLCleaner.clean(failed)) {
+            // The load that just failed is the network answer for this whole render; asking
+            // the feeds now only poisons their cache with an empty result.
+            suggestionsSuppressedOnce = true
             renderReader(cached, source: URLCleaner.clean(failed))
             return
         }
         let html = OfflineFallback.html(appName: appName, host: failedURL?.host,
                                         kind: OfflineFallback.classify(errorCode: nsError.code))
         isShowingFallback = true
-        webView.loadHTMLString(html, baseURL: nil)
+        loadOwnPage(html, baseURL: nil)
     }
 
     // MARK: - Messages from our pages
@@ -721,8 +798,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 showStartPage()
             }
         case "readerSettings":
+            // Merged onto what is stored rather than decoded from defaults, so a page may
+            // post only the fields it owns — the settings page posts one switch — and a
+            // payload that is complete but stale cannot push its own idea of the rest.
             guard ownPage else { return }
-            ReaderStore.setSettings(ReaderSettings.decode(message.body), store: store)
+            let current = ReaderStore.settings(store: store)
+            ReaderStore.setSettings(ReaderSettings.decode(message.body, onto: current),
+                                    store: store)
             sync.localStateChanged()
         case "readerOpen":
             guard ownPage, let raw = message.body as? String, let url = URL(string: raw) else { return }
@@ -774,7 +856,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard isShowingSettings else { return }
             showSyncSheet(nil)
         case "readerHome":
-            guard isShowingSettings else { return }
+            guard ownPage || isShowingFallback else { return }
             showStartPage()
         case "readerAddSource":
             // The page has already disabled its button; it waits for one of the two callbacks.
@@ -876,6 +958,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard let self else { return }
             let generator = (result as? String) ?? ""
             self.pageState.restored(generator: generator)
+            // Same reasoning as the other two restore paths: reused bytes carry the settings
+            // they were rendered with. Harmless where the page defines no hook.
+            self.pushSettings()
             if self.pageState.isShowingStartPage { self.loadSuggestions() }
         }
     }
@@ -892,6 +977,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let value = rating.map { "'\($0.rawValue)'" } ?? "null"
         webView.evaluateJavaScript(
             "window.readerSetRating && window.readerSetRating(\(value), true)")
+    }
+
+    /// Hands a restored document the settings as they now stand. Its `s` was baked when it
+    /// was rendered, so without this the next Aa interaction posts those values back over
+    /// anything the settings page changed in between — and `data-thumbs` would keep showing
+    /// the switch as it was, which for images-off means fetching what the user declined.
+    @MainActor
+    private func pushSettings() {
+        let json = ReaderStore.settings(store: store).json
+        webView.evaluateJavaScript(
+            "window.readerSetSettings && window.readerSetSettings(\(json))")
     }
 
     /// Stores a resolved source and tells the settings page to show its row.

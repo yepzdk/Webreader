@@ -53,6 +53,29 @@ final class ReaderDecodeTests: XCTestCase {
     }
 }
 
+final class ArticleLeadImageTests: XCTestCase {
+    func testDecodesTheLeadImage() {
+        let json = """
+        {"title":"T","content":"<p>x</p>","image":"https://x.test/lead.jpg"}
+        """
+        XCTAssertEqual(Reader.decode(json)?.image, "https://x.test/lead.jpg")
+    }
+
+    func testAnArticleCachedBeforeTheImageExistedStillDecodes() {
+        // ArticleCache blobs on disk predate #25 and carry no image key.
+        let article = Reader.decode("{\"title\":\"T\",\"content\":\"<p>x</p>\"}")
+        XCTAssertNotNil(article)
+        XCTAssertNil(article?.image)
+    }
+
+    func testTheImageSurvivesTheCacheRoundTrip() {
+        let article = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>",
+                              image: "https://x.test/lead.jpg")
+        let data = try! JSONEncoder().encode(article)
+        XCTAssertEqual(try! JSONDecoder().decode(Article.self, from: data), article)
+    }
+}
+
 final class ReaderSettingsTests: XCTestCase {
     func testDecodesFullPayload() {
         let payload: [String: Any] = ["fontSize": 21, "fontFamily": "sans", "width": "wide",
@@ -110,6 +133,65 @@ final class ReaderSettingsTests: XCTestCase {
     }
 }
 
+final class ThumbnailSettingTests: XCTestCase {
+    func testDecodesAndRoundTrips() {
+        var settings = ReaderSettings()
+        XCTAssertEqual(settings.startPageThumbnails, .on, "images are the point of the feature")
+        XCTAssertEqual(settings.readerThumbnails, .on)
+        settings.readerThumbnails = .off
+        let decoded = ReaderSettings.fromJSON(settings.json)
+        XCTAssertEqual(decoded.readerThumbnails, .off)
+        XCTAssertEqual(decoded.startPageThumbnails, .on, "one surface off leaves the other on")
+        XCTAssertEqual(decoded.json, settings.json)
+    }
+
+    func testAStoredBlobFromBeforeTheSettingKeepsImagesOn() {
+        let settings = ReaderSettings.fromJSON("{\"fontSize\":17}")
+        XCTAssertEqual(settings.startPageThumbnails, .on)
+        XCTAssertEqual(settings.readerThumbnails, .on)
+    }
+
+    func testAnUnrecognisedValueKeepsTheDefault() {
+        // A future value, or a hand-edited blob, must not silently turn
+        // the feature off by accident.
+        XCTAssertEqual(ReaderSettings.decode(["readerThumbnails": "nonsense"]).readerThumbnails, .on)
+        XCTAssertEqual(ReaderSettings.decode(["readerThumbnails": "off"]).readerThumbnails, .off)
+    }
+
+    func testTheOneShippedSwitchSeedsBoth() {
+        // 0.11.0 stored `startPageImages`, when the start page was the only surface with
+        // thumbnails. Someone who turned it off asked for no thumbnails, so the reader's
+        // popover must not arrive switched on and fetch what they opted out of.
+        let migrated = ReaderSettings.fromJSON("{\"startPageImages\":\"off\"}")
+        XCTAssertEqual(migrated.startPageThumbnails, .off)
+        XCTAssertEqual(migrated.readerThumbnails, .off)
+        // …and an explicit new key still wins over the legacy one in the same blob.
+        let mixed = ReaderSettings.decode(["startPageImages": "off", "readerThumbnails": "on"])
+        XCTAssertEqual(mixed.startPageThumbnails, .off)
+        XCTAssertEqual(mixed.readerThumbnails, .on)
+        // Only the current keys are written back.
+        XCTAssertFalse(ReaderSettings().json.contains("startPageImages"))
+    }
+
+    func testEachPageBakesItsOwnSwitchAndNoOther() {
+        // Each page renders only its own lists, so one attribute per page decides it. Tested
+        // on the html tag: the `[data-thumbs="off"]` rules are in both pages' stylesheets.
+        let article = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>")
+        var settings = ReaderSettings()
+        settings.startPageThumbnails = .off
+        XCTAssertTrue(StartPage.html(appName: "R", settings: settings)
+            .contains("<html lang=\"en\" data-thumbs=\"off\">"))
+        XCTAssertTrue(ReaderPage.html(article: article, settings: settings)
+            .contains("<html lang=\"en\">"))
+        settings.startPageThumbnails = .on
+        settings.readerThumbnails = .off
+        XCTAssertTrue(ReaderPage.html(article: article, settings: settings)
+            .contains("<html lang=\"en\" data-thumbs=\"off\">"))
+        XCTAssertTrue(StartPage.html(appName: "R", settings: settings)
+            .contains("<html lang=\"en\">"))
+    }
+}
+
 final class ReaderExtractionScriptTests: XCTestCase {
     func testContainsVendoredSourcesAndGate() {
         let script = Reader.extractionScript()
@@ -153,6 +235,29 @@ final class ReaderExtractionScriptTests: XCTestCase {
         let hide = script.range(of: "var hidden = readerHideBlocks(")!
         let wrap = script.range(of: "readerWrapQuotes(doc.body);")!
         XCTAssertTrue(hide.lowerBound < wrap.lowerBound)
+    }
+}
+
+final class LeadImageExtractionTests: XCTestCase {
+    func testTheScriptReadsThePagesNominatedImage() {
+        let script = Reader.extractionScript()
+        XCTAssertTrue(script.contains("meta[property=\"og:image\"]"))
+        XCTAssertTrue(script.contains("meta[name=\"twitter:image\"]"))
+        XCTAssertTrue(script.contains("image: readerLeadImage()"))
+    }
+
+    func testTheImageIsAbsolutisedAndSchemeRestricted() {
+        // The start page is an about:blank document, so a relative URL resolves to nothing;
+        // and the value is somebody else's markup, so only http(s) belongs in an <img src>.
+        let script = Reader.extractionScript()
+        XCTAssertTrue(script.contains("new URL(raw.trim(), document.baseURI)"))
+        XCTAssertTrue(script.contains("url.protocol === 'http:' || url.protocol === 'https:'"))
+    }
+
+    func testTheLookupReadsTheLiveDocumentNotTheParsedCopy() {
+        // Readability's result carries no image field, and the DOMParser copy is a filtered
+        // body — the meta tags only exist on the real document.
+        XCTAssertTrue(Reader.extractionScript().contains("document.querySelector(selectors[i])"))
     }
 }
 
@@ -312,6 +417,75 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("messageHandlers.readerClear.postMessage"))
     }
 
+    // MARK: - Recents popover: five and five (#33)
+
+    func testThePopoverListsFiveRecentsNotThirty() {
+        // The panel used to be the whole 30-entry history in a 60vh scroller.
+        var history = ReaderHistory()
+        for index in 1...12 {
+            history.record(title: "Article \(index)", url: "https://x.test/\(index)")
+        }
+        let html = ReaderPage.html(article: article, history: history)
+        XCTAssertEqual(html.components(separatedBy: "class=\"recent\" data-url=").count - 1,
+                       ReaderChrome.popoverRecents)
+        // Newest first, so the oldest of the twelve is not in the panel.
+        XCTAssertTrue(html.contains("Article 12"))
+        XCTAssertFalse(html.contains("Article 1<"))
+    }
+
+    func testThePopoverSkipsTheArticleBeingRead() {
+        // The article is recorded before the page renders, so without this it is always row
+        // one — a fifth of the panel spent on what is already on screen.
+        var history = ReaderHistory()
+        history.record(title: "Older", url: "https://x.test/older")
+        history.record(title: "On screen", url: "https://x.test/current")
+        let html = ReaderPage.html(article: article, history: history,
+                                   currentURL: "https://x.test/current")
+        XCTAssertFalse(html.contains("data-url=\"https://x.test/current\""))
+        XCTAssertTrue(html.contains("data-url=\"https://x.test/older\""))
+    }
+
+    func testTheSuggestedGroupShipsEmptyHiddenAndNamed() {
+        // The host fills it after the page lands, and may never fill it at all — no sources,
+        // no network — so the panel has to be complete without it.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("<section id=\"readerSuggested\" hidden aria-labelledby=\"readerSuggestedTitle\">"))
+        XCTAssertTrue(html.contains("id=\"readerSuggestedList\""))
+        XCTAssertTrue(html.contains("window.readerSetSuggestions = function"))
+        XCTAssertFalse(html.contains("data-url="))
+        // A heading, not a paragraph: it is the second of the panel's two groups, and the
+        // other one names itself with an <h2>. Heading navigation has to reach it.
+        XCTAssertTrue(html.contains("<h3 class=\"panel-group rest\" id=\"readerSuggestedTitle\">Suggested</h3>"))
+    }
+
+    func testTheSuggestedGroupIsCappedAndCarriesNoRowControls() {
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains(".slice(0, \(ReaderChrome.popoverSuggestions))"))
+        // More/Less/Block are the start page's; their handlers are gated to it, and three
+        // icon buttons do not fit a 280px row.
+        XCTAssertFalse(html.contains("readerTopicFeedback"))
+        XCTAssertFalse(html.contains("readerBlockHost"))
+        // Rows open through the panel's existing listener.
+        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+    }
+
+    func testTheStartPageKeepsItsOwnRicherSuggestionRows() {
+        // Both pages implement the same host call; the popover's version installs only where
+        // its container exists, so neither can shadow the other.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("if (suggested && suggestedList) {"))
+        XCTAssertTrue(html.contains("readerTopicFeedback"))
+        XCTAssertEqual(html.components(separatedBy: "window.readerSetSuggestions = function").count - 1, 2)
+    }
+
+    func testClearingHistoryEmptiesOnlyTheRecentsGroup() {
+        // The clear action used to strip every `.recent` in the panel; with a second list
+        // below it that would take the suggestions with it.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("recentsList.textContent = '';"))
+        XCTAssertFalse(html.contains("recents.querySelectorAll('.recent, #readerClear')"))
+    }
+
     func testRecentsRowTitleCannotBreakOutOfItsAttribute() {
         // A crafted URL must not escape the data-url attribute into new markup.
         var history = ReaderHistory()
@@ -362,6 +536,19 @@ final class ReaderPageTests: XCTestCase {
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("height: \(LoadProgress.lineThickness)px; z-index: 9;"))
         XCTAssertTrue(html.contains("right: 14px; z-index: 10;"))
+    }
+
+    // MARK: - Nav slot
+
+    func testReaderOffersAWayHome() {
+        // Before #15 the only route back to the start page was a menu item — and on Linux
+        // there is no menu bar at all.
+        let page = ReaderPage.html(article: article)
+        XCTAssertTrue(page.contains("<div class=\"reader-nav\">"))
+        XCTAssertTrue(page.contains("id=\"readerHomeBtn\""))
+        XCTAssertTrue(page.contains("messageHandlers.readerHome.postMessage"))
+        // The slot's occupant here is Home, never the start page's Settings button.
+        XCTAssertFalse(page.contains("id=\"startSettings\""))
     }
 
     // MARK: - Rating the article being read

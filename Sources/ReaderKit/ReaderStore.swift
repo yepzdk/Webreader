@@ -78,13 +78,21 @@ public enum ReaderStore {
     /// a presentation default, and this action offers no undo — clearing it lives behind
     /// its own affordance in the recents panel.
     ///
+    /// The two thumbnail switches survive for the same reason. They stopped being appearance
+    /// when they left the Aa popover for the settings page's own "Article images" section
+    /// (#33): one of their states means "fetch no images from publishers", and a menu item
+    /// called Reset Reader Appearance has no business turning that back on.
+    ///
     /// The reset is stamped like any other settings write, so it propagates to the other
     /// devices instead of being overwritten by their older settings on the next sync.
     public static func resetAppearance(store: KeyValueStore,
                                        at now: Double = Timestamp.now()) {
-        store.set(nil, forKey: Key.settings)
+        let kept = settings(store: store)
+        var stock = ReaderSettings()
+        stock.startPageThumbnails = kept.startPageThumbnails
+        stock.readerThumbnails = kept.readerThumbnails
+        setSettings(stock, store: store, at: now)
         store.set(nil, forKey: Key.zoom)
-        store.set(String(Timestamp.stamp(now)), forKey: Key.settingsUpdatedAt)
     }
 
     // MARK: - History

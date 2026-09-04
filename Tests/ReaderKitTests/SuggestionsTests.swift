@@ -399,3 +399,117 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertEqual(Suggestions.rank(items, read: read).first?.url, "https://a.test/k")
     }
 }
+
+/// Feed-declared article images for the start page's suggestion thumbnails (#25).
+///
+/// The shapes here are the ones real feeds actually use, checked against wallnot.dk, DR,
+/// Information, Politiken, The Guardian, Ars Technica, The Verge and The New Stack.
+final class FeedImageTests: XCTestCase {
+    private func parse(_ xml: String, from origin: String = "https://x.test/feed") -> [FeedItem] {
+        Feed.parse(Data(xml.utf8), from: URL(string: origin)!)?.items ?? []
+    }
+
+    private func item(_ inner: String) -> String {
+        """
+        <rss><channel><title>C</title>
+        <item><title>T</title><link>https://x.test/a</link>\(inner)</item>
+        </channel></rss>
+        """
+    }
+
+    // MARK: - Structured tags
+
+    func testMediaThumbnail() {
+        // Ars Technica's shape.
+        let items = parse(item("<media:thumbnail url=\"https://cdn.test/t.jpg\" width=\"500\"/>"))
+        XCTAssertEqual(items.first?.image, "https://cdn.test/t.jpg")
+    }
+
+    func testMediaContentWithNeitherTypeNorMedium() {
+        // The Guardian declares only a width, so a strict type check would find nothing.
+        let items = parse(item("<media:content url=\"https://cdn.test/g.jpg\" width=\"460\"/>"))
+        XCTAssertEqual(items.first?.image, "https://cdn.test/g.jpg")
+    }
+
+    func testMediaContentThatSaysItIsNotAnImageIsIgnored() {
+        let items = parse(item("<media:content url=\"https://cdn.test/v.mp4\" medium=\"video\"/>"))
+        XCTAssertNil(items.first?.image)
+    }
+
+    func testEnclosureMustDeclareAnImageType() {
+        // Politiken's shape — but an enclosure also carries podcasts, and an mp3 in an
+        // <img src> is a broken row.
+        XCTAssertEqual(parse(item("<enclosure url=\"https://cdn.test/p.jpg\" type=\"image/jpeg\" width=\"960\"/>"))
+            .first?.image, "https://cdn.test/p.jpg")
+        XCTAssertNil(parse(item("<enclosure url=\"https://cdn.test/p.mp3\" type=\"audio/mpeg\"/>"))
+            .first?.image)
+    }
+
+    // MARK: - Choosing between several
+
+    func testPrefersTheSmallestVariantThatIsStillSharp() {
+        // The Guardian ships 140/460/700 for one article. A 64px row at 2x needs 128, so the
+        // 140 is the right one to fetch — the 700 is five times the bytes for no gain.
+        XCTAssertEqual(Feed.bestImage([("small.jpg", 140), ("mid.jpg", 460), ("big.jpg", 700)]),
+                       "small.jpg")
+    }
+
+    func testFallsBackToTheWidestWhenEveryVariantIsTooSmall() {
+        XCTAssertEqual(Feed.bestImage([("a.jpg", 60), ("b.jpg", 100)]), "b.jpg")
+    }
+
+    func testAnUndeclaredWidthStillYieldsAThumbnail() {
+        XCTAssertEqual(Feed.bestImage([("only.jpg", nil)]), "only.jpg")
+        XCTAssertNil(Feed.bestImage([]))
+    }
+
+    // MARK: - The summary's lead image
+
+    func testFallsBackToTheFirstImageInTheSummary() {
+        // Information, The Verge and The New Stack carry no structured tag at all.
+        let items = parse(item("<description><![CDATA[<p><img src=\"https://cdn.test/lead.jpg\"> Body]]></description>"))
+        XCTAssertEqual(items.first?.image, "https://cdn.test/lead.jpg")
+    }
+
+    func testSkipsTrackingBeacons() {
+        // A 1x1 is FeedBurner's counter, not the article's picture.
+        XCTAssertEqual(Feed.firstImage(inHTML:
+            "<img src=\"https://feeds.test/~r/x/~4/beacon\" height=\"1\" width=\"1\">"
+            + "<img src=\"https://cdn.test/real.jpg\">"), "https://cdn.test/real.jpg")
+        XCTAssertNil(Feed.firstImage(inHTML: "<p>No pictures here</p>"))
+    }
+
+    func testAStructuredTagBeatsTheSummarysImage() {
+        let items = parse(item("<media:thumbnail url=\"https://cdn.test/t.jpg\" width=\"300\"/>"
+                               + "<description><![CDATA[<img src=\"https://cdn.test/body.jpg\">]]></description>"))
+        XCTAssertEqual(items.first?.image, "https://cdn.test/t.jpg")
+    }
+
+    // MARK: - Hygiene
+
+    func testRelativeImagesResolveAgainstTheFeed() {
+        let items = parse(item("<media:thumbnail url=\"/img/lead.jpg\" width=\"300\"/>"),
+                          from: "https://news.test/rss/feed.xml")
+        XCTAssertEqual(items.first?.image, "https://news.test/img/lead.jpg")
+    }
+
+    func testOnlyHTTPImagesSurvive() {
+        // The value is somebody else's markup; nothing else belongs in an <img src>.
+        XCTAssertNil(parse(item("<media:thumbnail url=\"data:image/png;base64,AAAA\" width=\"300\"/>"))
+            .first?.image)
+    }
+
+    func testEscapedAmpersandsAreDecoded() {
+        // The Verge escapes them numerically inside already-escaped summary HTML, so the URL
+        // arrives as `?quality=90&#038;strip=all` and the server sees a `#038;strip` parameter.
+        let items = parse(item("<description><![CDATA[<img src=\"https://cdn.test/l.jpg?a=1&#038;b=2&amp;c=3\">]]></description>"))
+        XCTAssertEqual(items.first?.image, "https://cdn.test/l.jpg?a=1&b=2&c=3")
+    }
+
+    func testAFeedWithoutImagesYieldsItemsWithoutThem() {
+        // wallnot.dk, the shipped default, declares none — and must still suggest articles.
+        let items = parse(item("<pubDate>Mon, 31 Aug 2026 10:00:00 GMT</pubDate>"))
+        XCTAssertEqual(items.count, 1)
+        XCTAssertNil(items.first?.image)
+    }
+}

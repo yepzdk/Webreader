@@ -15,19 +15,25 @@ public struct Article: Codable, Equatable {
     /// Blocks the hidden-phrase pass removed, per normalized phrase — what the eye-off badge
     /// and the popover's grouping show. Empty when nothing matched (or nothing was sent).
     public let hiddenHits: [String: Int]
+    /// The page's lead image (`og:image`), absolute and http(s), or nil when the page named
+    /// none. Carried through to recents so the start page can show a thumbnail (#25).
+    public let image: String?
 
     public init(title: String, byline: String?, siteName: String?, content: String,
-                hiddenHits: [String: Int] = [:]) {
+                hiddenHits: [String: Int] = [:], image: String? = nil) {
         self.title = title
         self.byline = byline
         self.siteName = siteName
         self.content = content
         self.hiddenHits = hiddenHits
+        self.image = image
     }
 
     /// Only the decoder is hand-written (for tolerance); with the key spelled out here the
     /// compiler synthesizes `encode(to:)`, so a new field can't be forgotten on the way out.
-    private enum CodingKeys: String, CodingKey { case title, byline, siteName, content, hiddenHits = "hidden" }
+    private enum CodingKeys: String, CodingKey {
+        case title, byline, siteName, content, image, hiddenHits = "hidden"
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +43,8 @@ public struct Article: Codable, Equatable {
         content = try c.decode(String.self, forKey: .content)
         // Tolerant: a missing or malformed map is "no hits", never a failed article.
         hiddenHits = (try? c.decodeIfPresent([String: Int].self, forKey: .hiddenHits)) ?? [:]
+        // Absent in every article cached before #25, and in any page that names no image.
+        image = try c.decodeIfPresent(String.self, forKey: .image)
     }
 }
 
@@ -96,23 +104,44 @@ public struct ReaderSettings: Equatable, Sendable {
         case bordered, italic
     }
 
+    /// Whether a list of articles shows lead-image thumbnails (#25). An enum rather than a
+    /// Bool so it decodes and encodes exactly like every other setting — including keeping
+    /// the default when a stored value is unrecognised.
+    public enum ArticleImages: String, CaseIterable, Sendable {
+        case on, off
+    }
+
     public var fontSize = 17
     public var fontFamily = FontFamily.serif
     public var width = Width.normal
     public var lineHeight = LineHeight.normal
     public var theme = Theme.auto
     public var quoteStyle = QuoteStyle.bordered
+    /// Thumbnails beside the start page's recents and suggestions, and beside the reader
+    /// popover's two groups (#33) — one switch per surface, since each page shows only its
+    /// own lists and a thumbnail nobody sees is a request nobody asked for.
+    ///
+    /// On by default — the images are the point of the feature — and off is a real choice:
+    /// with a surface off, its rows carry no image, reserve no column and fetch nothing,
+    /// which is what the start page did before #25.
+    public var startPageThumbnails = ArticleImages.on
+    public var readerThumbnails = ArticleImages.on
 
     public init() {}
 
     public static let fontSizeRange = 12...28
 
     /// Tolerant decode of a settings payload — a `WKScriptMessage.body` dictionary or
-    /// a `JSONSerialization` object. Missing/unknown fields keep their defaults and
-    /// the font size is clamped, so a garbled payload can never poison the reader.
-    public static func decode(_ value: Any?) -> ReaderSettings {
-        guard let dict = value as? [String: Any] else { return ReaderSettings() }
-        var settings = ReaderSettings()
+    /// a `JSONSerialization` object. Unknown fields are ignored and the font size is clamped,
+    /// so a garbled payload can never poison the reader.
+    ///
+    /// `onto` is what an absent field falls back to, and it is the reason a page may post only
+    /// the fields it owns: the host seeds this with the settings as stored, so a payload
+    /// carrying one key changes one key. Defaulting it to a fresh `ReaderSettings` keeps the
+    /// "missing means default" behaviour for every other caller.
+    public static func decode(_ value: Any?, onto base: ReaderSettings = ReaderSettings()) -> ReaderSettings {
+        guard let dict = value as? [String: Any] else { return base }
+        var settings = base
         if let size = dict["fontSize"] as? Int {
             settings.fontSize = min(max(size, fontSizeRange.lowerBound), fontSizeRange.upperBound)
         }
@@ -131,6 +160,20 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["quoteStyle"] as? String, let value = QuoteStyle(rawValue: raw) {
             settings.quoteStyle = value
         }
+        // 0.11.0 stored one `startPageImages`, when the start page was the only surface with
+        // thumbnails. It meant "no thumbnails", so it seeds both switches rather than leaving
+        // the reader's on and fetching images the user had already opted out of. Only the two
+        // current keys are ever written.
+        if let raw = dict["startPageImages"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.startPageThumbnails = value
+            settings.readerThumbnails = value
+        }
+        if let raw = dict["startPageThumbnails"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.startPageThumbnails = value
+        }
+        if let raw = dict["readerThumbnails"] as? String, let value = ArticleImages(rawValue: raw) {
+            settings.readerThumbnails = value
+        }
         return settings
     }
 
@@ -144,6 +187,8 @@ public struct ReaderSettings: Equatable, Sendable {
             "lineHeight": lineHeight.rawValue,
             "theme": theme.rawValue,
             "quoteStyle": quoteStyle.rawValue,
+            "startPageThumbnails": startPageThumbnails.rawValue,
+            "readerThumbnails": readerThumbnails.rawValue,
         ]
     }
 
@@ -156,11 +201,30 @@ public struct ReaderSettings: Equatable, Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Decodes stored JSON, with the same tolerance as `decode` — nil/garbage means
-    /// defaults, never an error.
-    public static func fromJSON(_ string: String?) -> ReaderSettings {
-        guard let string, let data = string.data(using: .utf8) else { return ReaderSettings() }
-        return decode(try? JSONSerialization.jsonObject(with: data))
+    /// Decodes stored JSON, with the same tolerance as `decode` — nil/garbage means the
+    /// fallback, never an error.
+    public static func fromJSON(_ string: String?,
+                                onto base: ReaderSettings = ReaderSettings()) -> ReaderSettings {
+        guard let string, let data = string.data(using: .utf8) else { return base }
+        return decode(try? JSONSerialization.jsonObject(with: data), onto: base)
+    }
+
+    /// Which of the two thumbnail switches governs a page's lists.
+    ///
+    /// The raw value is the settings key, so the page's `data-thumbs` decision, the chrome
+    /// script's live lookup and the settings page's checkbox ids all name the field exactly
+    /// once. A page with no article lists (settings, offline) has no scope.
+    public enum ThumbnailScope: String, CaseIterable {
+        case startPage = "startPageThumbnails"
+        case reader = "readerThumbnails"
+    }
+
+    /// The switch governing `scope`.
+    public func thumbnails(_ scope: ThumbnailScope) -> ArticleImages {
+        switch scope {
+        case .startPage: return startPageThumbnails
+        case .reader: return readerThumbnails
+        }
     }
 }
 
@@ -211,6 +275,34 @@ public enum Reader {
     }
     """
 
+    /// Reads the page's own lead image — the one the publisher nominated for a link
+    /// preview — for the start page's recents thumbnails (#25).
+    ///
+    /// `og:image` (then Twitter's equivalent) rather than the first `<img>` in the body: an
+    /// editorially chosen image beats a logo or a tracking pixel, which is what the first
+    /// body image usually is. Read from the LIVE document, because Readability's result
+    /// carries no image field and patching the vendored copy to expose one is not on.
+    ///
+    /// Absolutised against the document, since the start page is an `about:blank` document
+    /// where a relative URL resolves to nothing, and restricted to http(s): the value is
+    /// somebody else's markup, and no other scheme has any business in an `<img src>`.
+    static let leadImageScript = """
+    function readerLeadImage() {
+      var selectors = ['meta[property="og:image"]', 'meta[property="og:image:url"]',
+                       'meta[name="twitter:image"]', 'meta[name="twitter:image:src"]'];
+      for (var i = 0; i < selectors.length; i++) {
+        var tag = document.querySelector(selectors[i]);
+        var raw = tag && tag.getAttribute('content');
+        if (!raw || !raw.trim()) { continue; }
+        try {
+          var url = new URL(raw.trim(), document.baseURI);
+          if (url.protocol === 'http:' || url.protocol === 'https:') { return url.href; }
+        } catch (err) {}
+      }
+      return null;
+    }
+    """
+
     /// The script the host evaluates on a loaded page. Returns `ownPageSentinel` for our own
     /// reader document (back/forward can land on one), otherwise gates on the cheap
     /// `isProbablyReaderable` check, parses a CLONE of the document (Readability's parse is
@@ -227,6 +319,7 @@ public enum Reader {
         \(ReadabilityJS.readerable)
         \(HiddenPhrases.hideScript)
         \(quoteScript)
+        \(leadImageScript)
         if (document.querySelector('meta[name="generator"][content="WebReader"]')) { return "\(ownPageSentinel)"; }
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
@@ -239,7 +332,8 @@ public enum Reader {
           byline: article.byline,
           siteName: article.siteName,
           content: doc.body.innerHTML,
-          hidden: hidden.hits
+          hidden: hidden.hits,
+          image: readerLeadImage()
         });
         })()
         """
@@ -269,9 +363,14 @@ public enum ReaderPage {
     /// `data-theme` attribute; the in-page "Aa" popover adjusts the same properties
     /// live and posts the new settings to the host (`readerSettings`) for persistence.
     ///
-    /// `history` is the recents list, baked into a sibling popover; its rows post the
-    /// chosen URL to the host (`readerOpen`), which validates and navigates.
-    /// Titles are escaped there too — they come from other sites' pages.
+    /// `history` is the recents list. The popover shows the newest few of them, and its rows
+    /// post the chosen URL to the host (`readerOpen`), which validates and navigates. Titles
+    /// are escaped there too — they come from other sites' pages.
+    ///
+    /// `currentURL` is the article this page is showing, as the *cleaned* key
+    /// `ReaderHistory.record` was given (`URLCleaner.clean(source).absoluteString`) — it is
+    /// compared against the stored rows, so a raw URL silently matches nothing and the
+    /// article on screen comes back as row one. nil excludes nothing.
     ///
     /// `hidden` is the phrase list for the third popover; the page also re-applies it live
     /// when the host learns a new phrase (`window.readerSetHidden`).
@@ -287,6 +386,7 @@ public enum ReaderPage {
                             history: ReaderHistory = ReaderHistory(),
                             hidden: HiddenPhrases = HiddenPhrases(),
                             rating: TopicPreferences.Rating? = nil,
+                            currentURL: String? = nil,
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let title = HTML.escape(article.title)
@@ -304,7 +404,7 @@ public enum ReaderPage {
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .reader))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -364,6 +464,7 @@ public enum ReaderPage {
           /* Appearance ("Aa") popover and recents list. Chrome UI, so it keeps the sans
              stack and fixed sizes regardless of the reading settings. */
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
@@ -371,8 +472,13 @@ public enum ReaderPage {
         </head>
         <body>
           \(ReaderChrome.progressBar())
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history, showsRating: true,
-                                                      rating: rating), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.controls(
+                recents: history.recents(limit: ReaderChrome.popoverRecents,
+                                         excluding: currentURL),
+                canClear: !history.entries.isEmpty,
+                showsRating: true, rating: rating,
+                showsHidden: true), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>
@@ -382,7 +488,9 @@ public enum ReaderPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
+                                                             thumbnails: .reader,
+                                                             hidden: hidden,
                                                              hitsJSON: HTML.jsLiteral(hits),
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))

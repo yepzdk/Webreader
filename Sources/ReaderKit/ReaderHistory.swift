@@ -17,11 +17,17 @@ public struct ReaderHistory: Equatable, Sendable {
         /// existed and in hand-written JSON: they sort last, and a `clearedAt` tombstone
         /// drops them, because anything untimestamped predates every clear.
         public let readAt: Double?
+        /// The article's lead image (`Article.image`), for the start page's thumbnails (#25).
+        /// Optional because a page need not name one — and because every row stored before
+        /// #25 has none. Kept here rather than in `ArticleCache`, which is evictable: a row
+        /// whose cache file had been pruned would silently lose its thumbnail.
+        public let image: String?
 
-        public init(title: String, url: String, readAt: Double? = nil) {
+        public init(title: String, url: String, readAt: Double? = nil, image: String? = nil) {
             self.title = title
             self.url = url
             self.readAt = readAt
+            self.image = image
         }
     }
 
@@ -46,12 +52,13 @@ public struct ReaderHistory: Equatable, Sendable {
     /// title, which can change as a page is edited) instead of adding a second row.
     /// Entries without a title or URL are dropped — an untitled row is unnavigable
     /// noise in the panel.
-    public mutating func record(title: String, url: String,
+    public mutating func record(title: String, url: String, image: String? = nil,
                                 at readAt: Double = Timestamp.now()) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !url.isEmpty else { return }
         entries.removeAll { $0.url == url }
-        entries.insert(Entry(title: title, url: url, readAt: Timestamp.stamp(readAt)), at: 0)
+        entries.insert(Entry(title: title, url: url, readAt: Timestamp.stamp(readAt),
+                             image: image), at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
     }
 
@@ -62,7 +69,7 @@ public struct ReaderHistory: Equatable, Sendable {
     ///   that's what stops a device that was offline during a "Clear history" from
     ///   restoring the list on its next sync;
     /// - entries are unioned by URL, keeping the copy with the newer `readAt` and hence
-    ///   its title; a tie (or two untimestamped rows) keeps this list's copy;
+    ///   its title and lead image; a tie (or two untimestamped rows) keeps this list's copy;
     /// - untimestamped rows sort after every timestamped one, in this list's order then
     ///   the other's, so a pre-sync list keeps the order it had;
     /// - the cap is re-applied, so merging can never grow the panel.
@@ -98,14 +105,37 @@ public struct ReaderHistory: Equatable, Sendable {
         return merged
     }
 
+    /// The newest `limit` entries, optionally without `url`.
+    ///
+    /// What the reader's recents popover lists (#33). The article being read is recorded
+    /// before the page renders, so without the exclusion it would always be row one — a
+    /// fifth of a five-row panel spent on the article already on screen. The inline list on
+    /// the start page takes the whole history and does neither.
+    ///
+    /// Exclusion happens before the cap, so the panel still gets `limit` rows. `url` must be
+    /// the same cleaned key `record` was given. Internal on purpose: this is a view for one
+    /// caller in this module, and a five-row `ReaderHistory` must never reach `setHistory`.
+    func recents(limit: Int, excluding url: String? = nil) -> ReaderHistory {
+        var trimmed = ReaderHistory()
+        trimmed.entries = entries
+            .filter { $0.url != url }
+            .prefix(max(0, limit))
+            .map { $0 }
+        return trimmed
+    }
+
     /// The storage format as a `JSONSerialization` object, so a sync device file can nest
     /// it without round-tripping through a string.
     public var jsonObject: [String: Any] {
         var object: [String: Any] = [
             "v": 1,
             "entries": entries.map { entry -> [String: Any] in
+                // An absent optional is omitted rather than written as null, so a blob from
+                // before the key existed round-trips byte-identically instead of being
+                // rewritten (and re-uploaded) on every launch.
                 var row: [String: Any] = ["title": entry.title, "url": entry.url]
                 if let readAt = entry.readAt { row["readAt"] = readAt }
+                if let image = entry.image { row["image"] = image }
                 return row
             },
         ]
@@ -144,7 +174,10 @@ public struct ReaderHistory: Equatable, Sendable {
         history.entries = rows.compactMap { row in
             guard let title = row["title"] as? String, !title.isEmpty,
                   let url = row["url"] as? String, !url.isEmpty else { return nil }
-            return Entry(title: title, url: url, readAt: Timestamp.decode(row["readAt"]))
+            // Read after the guard, so a row missing either optional key decodes as a row
+            // without that value rather than being dropped.
+            return Entry(title: title, url: url, readAt: Timestamp.decode(row["readAt"]),
+                         image: row["image"] as? String)
         }
         if history.entries.count > limit {
             history.entries.removeLast(history.entries.count - limit)
