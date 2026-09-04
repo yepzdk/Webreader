@@ -139,6 +139,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.pageZoom = ReaderStore.zoom(store: store)
+        // Debug builds only, so Safari's Develop menu can inspect the running app. Every
+        // page in this app is generated Swift string, which means a layout question about a
+        // real window ("is this rule applying?") otherwise has no answer short of rebuilding
+        // with a guess in it. `Scripts/build-app.sh` is a debug build; a release is not, so
+        // this never reaches anyone who did not build it themselves.
+        #if DEBUG
+        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        #endif
         window.contentView!.addSubview(webView)
         loadingCover = LoadingCover(over: webView, in: window.contentView!)
         progressLine = ProgressLine(webView: webView, in: window.contentView!)
