@@ -27,7 +27,9 @@ final class SettingsPageTests: XCTestCase {
     func testEmptySourceListSaysSo() {
         let page = html(SuggestionSettings(sources: []))
         XCTAssertTrue(page.contains("No sources."))
-        XCTAssertFalse(page.contains("class=\"source\""))
+        // Scoped to the row's own attribute: blocked outlets and hidden phrases reuse the
+        // `.source` row markup, and the hidden list is never empty (it ships with defaults).
+        XCTAssertFalse(page.contains("<div class=\"source\" data-url="))
     }
 
     func testOffersTheAddFormAndItsHostHooks() {
@@ -72,8 +74,9 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("readerSetLanguages"))
         XCTAssertTrue(page.contains("value=\"da\""))
         XCTAssertTrue(page.contains("value=\"en\""))
-        // No stored filter means every box is ticked.
-        XCTAssertEqual(page.components(separatedBy: "\" checked>").count - 1, 2)
+        // No stored filter means every box is ticked. Counted on the language rows' own
+        // shape, so the start page section's switch is not swept in.
+        XCTAssertEqual(page.components(separatedBy: "\" checked><span>").count - 1, 2)
     }
 
     func testStoredLanguageFilterTicksOnlyItsBoxes() {
@@ -109,6 +112,89 @@ final class SettingsPageTests: XCTestCase {
         settings.blockedHosts = ["evil\" onload=\"alert(1)"]
         let page = html(settings)
         XCTAssertFalse(page.contains("onload=\"alert(1)\""))
+    }
+
+    // MARK: - Hidden text (#32)
+
+    func testListsHiddenPhrasesWithAWayToDropThem() {
+        // Un-hiding used to require opening the start page's copy of the reader popover;
+        // with that button gone this page is where a phrase is dropped.
+        let page = SettingsPage.html(appName: "WebReader",
+                                     hidden: HiddenPhrases(["Artiklen fortsætter efter annoncen"]))
+        XCTAssertTrue(page.contains("Hidden text"))
+        XCTAssertTrue(page.contains("data-phrase=\"Artiklen fortsætter efter annoncen\""))
+        XCTAssertTrue(page.contains("aria-label=\"Stop hiding Artiklen fortsætter efter annoncen\""))
+        XCTAssertTrue(page.contains("readerUnhide"))
+    }
+
+    func testTheStockPhraseListIsAlreadyThere() {
+        // Unlike the blocklist this is seeded, so the section is the feature's only written
+        // trace on a fresh install.
+        XCTAssertTrue(html().contains("Hidden text"))
+        XCTAssertTrue(html().contains("data-phrase=\"Annonce\""))
+    }
+
+    func testTheHiddenSectionStaysWhenTheLastPhraseGoes() {
+        // `HiddenPhrases` never re-seeds an emptied list, so removing the last phrase is
+        // permanent — and with the start page's hidden-text button gone (#32), this section's
+        // help line is the only place the app says how to hide anything. Deleting the section
+        // with its last row would delete the instructions for getting a row back.
+        let page = SettingsPage.html(appName: "WebReader", hidden: HiddenPhrases([]))
+        XCTAssertTrue(page.contains("id=\"hiddenSection\""))
+        XCTAssertTrue(page.contains("Hide a phrase by selecting it"))
+        XCTAssertTrue(page.contains("No hidden text."))
+        XCTAssertFalse(page.contains("data-phrase="))
+        // …so the row handler must not remove the section either.
+        XCTAssertFalse(html().contains("document.getElementById('hiddenSection').remove()"))
+    }
+
+    func testHiddenPhrasesAreEscaped() {
+        // Phrases come from pages the user was reading, so they are someone else's text.
+        let page = SettingsPage.html(appName: "WebReader",
+                                     hidden: HiddenPhrases(["evil\" onload=\"alert(1)"]))
+        XCTAssertFalse(page.contains("onload=\"alert(1)\""))
+        XCTAssertTrue(page.contains("&quot; onload=&quot;"))
+    }
+
+    // MARK: - Article images (#33)
+
+    func testBothThumbnailSwitchesAreOnTheSettingsPage() {
+        // One switch in the Aa popover, labelled "Images / No images", read as governing the
+        // article's own images. It never did — only these lists' thumbnails.
+        let page = html()
+        XCTAssertTrue(page.contains("<h2 class=\"section\">Article images</h2>"))
+        XCTAssertTrue(page.contains("id=\"startPageThumbnails\" type=\"checkbox\" checked"))
+        XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\" checked"))
+        XCTAssertTrue(page.contains("post('readerSettings', change)"))
+        // Each says which surface it governs.
+        XCTAssertTrue(page.contains("on the start page</span>"))
+        XCTAssertTrue(page.contains("in the reader dropdown</span>"))
+    }
+
+    func testEachSwitchReflectsItsOwnStoredChoice() {
+        var settings = ReaderSettings()
+        settings.readerThumbnails = .off
+        let page = SettingsPage.html(appName: "WebReader", settings: settings)
+        XCTAssertTrue(page.contains("id=\"startPageThumbnails\" type=\"checkbox\" checked"))
+        XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\">"))
+    }
+
+    func testTheSwitchesPostOnlyTheKeyTheyOwn() {
+        // This page's copy of the settings is as old as the document — a back/forward restore
+        // reuses the original bytes — so posting a whole object from here would push a stale
+        // font size and theme over newer ones. The host merges one key onto what is stored.
+        var settings = ReaderSettings()
+        settings.fontSize = 22
+        settings.theme = .sepia
+        let page = SettingsPage.html(appName: "WebReader", settings: settings)
+        XCTAssertFalse(page.contains("var settings = \(settings.json);"))
+        XCTAssertTrue(page.contains("var change = {};"))
+        XCTAssertTrue(page.contains("change[key] = box.checked ? 'on' : 'off';"))
+        // The box's id IS the key it writes, so the two cannot drift apart.
+        XCTAssertTrue(page.contains("['startPageThumbnails',"))
+        XCTAssertTrue(page.contains("'readerThumbnails'].forEach"))
+        // …and the lookup is guarded like every other one in this script.
+        XCTAssertTrue(page.contains("if (!box) { return; }"))
     }
 
     func testIdentifiesItselfForBackForwardRestoration() {

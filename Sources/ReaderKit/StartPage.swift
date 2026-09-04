@@ -63,7 +63,6 @@ public enum StartPage {
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
-                            hidden: HiddenPhrases = HiddenPhrases(),
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
@@ -74,7 +73,7 @@ public enum StartPage {
         // is the most likely reason you're looking at it.
         // A list shows thumbnails only when something in it has an image; otherwise every row
         // would carry an empty slot and the list would look worse than it did before #25.
-        let hasThumbs = history.entries.contains { $0.image != nil }
+        let hasThumbs = history.entries.contains { !($0.image ?? "").isEmpty }
         let recentsList = history.entries.isEmpty
             ? """
             <p class="hint empty">\(copy.emptyRecents)</p>
@@ -84,10 +83,13 @@ public enum StartPage {
                   <div class="recents-inline\(hasThumbs ? " has-thumbs" : "")">
                     \(ReaderChrome.indent(ReaderChrome.recentsRows(history, thumbnails: hasThumbs), by: 8))
                   </div>
+                  <p class="clear-history">
+                    <button type="button" class="link" id="startClear">Clear history</button>
+                  </p>
             """
         return """
         <!doctype html>
-        <html lang="en"\(ReaderChrome.themeAttribute(settings))>
+        <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -170,40 +172,6 @@ public enum StartPage {
             white-space: normal;
             display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
           }
-          /* Thumbnails (#25), for recents and suggestions alike. A grid rather than a flex
-             line, and only in a list carrying `has-thumbs` — set by the server for recents and
-             by the host's callback for suggestions, in both cases only when something in that
-             list actually has an image. The text column is pinned, so a row whose article
-             named no image still lines its title up with the rest instead of starting 74px to
-             their left, and a list with no images at all is laid out exactly as it always was.
-             This CSS ships on the start page only, so the reader's 280px recents popover —
-             which never carries the class — is untouched either way. */
-          .has-thumbs .recent {
-            display: grid; grid-template-columns: 64px 1fr; gap: 0 10px; align-items: start;
-          }
-          .has-thumbs .recent-thumb { grid-row: 1 / span 2; }
-          /* Pinned, or auto-placement would drop an imageless row's title into the 64px
-             column and squeeze it. */
-          .has-thumbs .recent-title,
-          .has-thumbs .recent-host { grid-column: 2; }
-          /* 64x40 rather than a square: a lead image is usually landscape, and this is about
-             the height two clamped title lines already take, so rows barely grow. */
-          .recent-thumb {
-            width: 64px; height: 40px; object-fit: cover;
-            border-radius: 4px; background: var(--surface);
-          }
-          /* The empty slot. Only ever shown inside a list that has a column at all, so a
-             list where nothing has an image is laid out exactly as it was before #25. */
-          .recent-thumb-empty { display: none; }
-          .has-thumbs .recent-thumb-empty {
-            display: flex; align-items: center; justify-content: center;
-            color: var(--muted); opacity: 0.45;
-          }
-          .recent-thumb-empty svg { display: block; }
-          /* Article images off: no image, no reserved column, and nothing fetched — the
-             appearance script is the only thing that ever sets a src. */
-          :root[data-thumbs="off"] .recent-thumb { display: none; }
-          :root[data-thumbs="off"] .has-thumbs .recent { display: block; }
           .empty { margin-top: 36px; }
           #suggested[hidden], .empty-suggestions[hidden] { display: none; }
           /* Suggested rows reuse the recents row markup, so they inherit its styling — the
@@ -233,14 +201,24 @@ public enum StartPage {
             padding: 0; border: 0; background: none; cursor: pointer;
             font: inherit; color: var(--accent); text-decoration: underline;
           }
+          /* Clearing history sits under the list it clears — the reader page keeps its own
+             copy inside the recents popover, since neither page ever shows the other's (#32).
+             Muted rather than accented like "Add a source": it is the one destructive control
+             on the page, and should not be the first thing the eye lands on. The underline
+             comes back on hover and focus, and the padding takes the target to 24px — quiet
+             is not the same as hard to hit (WCAG 2.5.8). */
+          .clear-history { margin: 6px 0 0; font-size: 12px; }
+          .clear-history .link { padding: 4px 2px; color: var(--muted); text-decoration: none; }
+          .clear-history .link:hover, .clear-history .link:focus-visible {
+            color: var(--fg); text-decoration: underline;
+          }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(history: history,
-                                                      showsThumbnailToggle: true), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.controls(), by: 2))
           \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
           <main>
             <div class="intro">
@@ -271,12 +249,15 @@ public enum StartPage {
           </main>
           \(ReaderChrome.toastMarkup())
           <script>
-          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings, hidden: hidden,
+          \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
+                                                             thumbnails: .startPage,
+                                                             hidden: HiddenPhrases([]),
                                                              platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
-          // The placeholder markup lives in Swift so the server-rendered recents rows and the
-          // host-delivered suggestion rows cannot drift apart. Ours, never feed text.
-          window.readerThumbPlaceholder = \(HTML.jsString(ReaderChrome.thumbnailPlaceholder));
+          // What the whole column falls back to once cleared — heading and list included, so
+          // it is this page's own empty state rather than the popover's one-line
+          // `readerEmptyRecents`. Ours, never feed text.
+          window.readerEmptyColumn = \(HTML.jsString("<p class=\"hint empty\">\(copy.emptyRecents)</p>"));
           (function () {
             var form = document.getElementById('open');
             var field = document.getElementById('url');
@@ -305,6 +286,24 @@ public enum StartPage {
             // to the popover.
             document.querySelector('main').addEventListener('click', function (e) {
               if (e.target.closest('#suggestSettings')) { post('readerOpenSettings', ''); return; }
+              // Clearing history: the host empties the store (and prunes the offline cache
+              // with it), the page empties the column. A separate id from the popover's
+              // #readerClear, which carries the popover's own styling and is handled by the
+              // shared chrome script.
+              if (e.target.closest('#startClear')) {
+                // Ancestor of the button by construction, so no null to guard.
+                var column = e.target.closest('.recents-column');
+                column.textContent = '';
+                column.insertAdjacentHTML('afterbegin', window.readerEmptyColumn);
+                post('readerClear', '');
+                // The button that was focused is gone. Say what happened — the offline copies
+                // went too, which the list disappearing does not convey — and put focus on
+                // the paragraph that replaced it rather than letting it fall to <body>.
+                window.readerToast('History cleared, including saved copies.');
+                var empty = column.querySelector('.empty');
+                if (empty) { empty.tabIndex = -1; empty.focus(); }
+                return;
+              }
               // Row controls come first: they sit inside the row, and clicking one must not
               // also open the article.
               var control = e.target.closest('.row-action');
@@ -406,11 +405,12 @@ public enum StartPage {
                 list.appendChild(wrap);
               });
               list.classList.toggle('has-thumbs', thumbs);
-              // These rows were built after the appearance script last ran, so they need the
-              // one function allowed to turn a data-src into a fetch.
-              if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
               empty.hidden = (items || []).length > 0;
+              // Unhide before revealing: these rows were built after the appearance script
+              // last ran, and the one function allowed to turn a data-src into a fetch
+              // withholds it while the row is still behind a `hidden` ancestor.
               section.hidden = false;
+              if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
             };
           })();
           </script>

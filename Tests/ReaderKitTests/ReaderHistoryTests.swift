@@ -110,4 +110,51 @@ final class ReaderHistoryTests: XCTestCase {
         XCTAssertNil(decoded.entries[0].image)
         XCTAssertEqual(decoded.entries[0].title, "Old")
     }
+
+    func testRecentsTrimsAndCanDropTheArticleOnScreen() {
+        var history = ReaderHistory()
+        for index in 1...8 { history.record(title: "A\(index)", url: "https://x.test/\(index)") }
+        // Newest first, so 8 is the top row.
+        let five = history.recents(limit: 5)
+        XCTAssertEqual(five.entries.map(\.title), ["A8", "A7", "A6", "A5", "A4"])
+        // Excluding takes effect before the cap, so the panel still gets five rows.
+        let excluded = history.recents(limit: 5, excluding: "https://x.test/8")
+        XCTAssertEqual(excluded.entries.map(\.title), ["A7", "A6", "A5", "A4", "A3"])
+    }
+
+    func testRecentsKeepsTheLeadImage() {
+        // The popover's thumbnails hang off it, and every other thumbnail test reaches
+        // `recentsRows` directly — so this hop is where an image could go missing unnoticed.
+        var history = ReaderHistory()
+        history.record(title: "Illustrated", url: "https://x.test/a", image: "https://x.test/l.jpg")
+        XCTAssertEqual(history.recents(limit: 5).entries.first?.image, "https://x.test/l.jpg")
+    }
+
+    func testRecentsAsksForNothingOrLess() {
+        // `prefix` traps on a negative length, and this is library API on a type whose every
+        // other boundary is defensive.
+        var history = ReaderHistory()
+        for index in 1...3 { history.record(title: "A\(index)", url: "https://x.test/\(index)") }
+        XCTAssertTrue(history.recents(limit: 0).entries.isEmpty)
+        XCTAssertTrue(history.recents(limit: -1).entries.isEmpty)
+        // More than there is, and more than the stored cap, both just give everything.
+        XCTAssertEqual(history.recents(limit: 99).entries.count, 3)
+    }
+
+    func testRecentsDropsEveryCopyOfAnExcludedURL() {
+        // `record` dedupes, but `fromJSON` does not — a hand-edited blob can hold duplicates.
+        let decoded = ReaderHistory.fromJSON("""
+            [{"title":"One","url":"https://x.test/dup"},{"title":"Two","url":"https://x.test/dup"}]
+            """)
+        XCTAssertEqual(decoded.entries.count, 2)
+        XCTAssertTrue(decoded.recents(limit: 5, excluding: "https://x.test/dup").entries.isEmpty)
+    }
+
+    func testRecentsIsHappyWithLessThanItAsksFor() {
+        var history = ReaderHistory()
+        history.record(title: "Only", url: "https://x.test/only")
+        XCTAssertEqual(history.recents(limit: 5).entries.count, 1)
+        XCTAssertTrue(history.recents(limit: 5, excluding: "https://x.test/only").entries.isEmpty)
+        XCTAssertTrue(ReaderHistory().recents(limit: 5).entries.isEmpty)
+    }
 }

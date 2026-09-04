@@ -133,25 +133,62 @@ final class ReaderSettingsTests: XCTestCase {
     }
 }
 
-final class StartPageImagesSettingTests: XCTestCase {
+final class ThumbnailSettingTests: XCTestCase {
     func testDecodesAndRoundTrips() {
         var settings = ReaderSettings()
-        XCTAssertEqual(settings.startPageImages, .on, "images are the point of the feature")
-        settings.startPageImages = .off
+        XCTAssertEqual(settings.startPageThumbnails, .on, "images are the point of the feature")
+        XCTAssertEqual(settings.readerThumbnails, .on)
+        settings.readerThumbnails = .off
         let decoded = ReaderSettings.fromJSON(settings.json)
-        XCTAssertEqual(decoded.startPageImages, .off)
+        XCTAssertEqual(decoded.readerThumbnails, .off)
+        XCTAssertEqual(decoded.startPageThumbnails, .on, "one surface off leaves the other on")
         XCTAssertEqual(decoded.json, settings.json)
     }
 
     func testAStoredBlobFromBeforeTheSettingKeepsImagesOn() {
-        XCTAssertEqual(ReaderSettings.fromJSON("{\"fontSize\":17}").startPageImages, .on)
+        let settings = ReaderSettings.fromJSON("{\"fontSize\":17}")
+        XCTAssertEqual(settings.startPageThumbnails, .on)
+        XCTAssertEqual(settings.readerThumbnails, .on)
     }
 
     func testAnUnrecognisedValueKeepsTheDefault() {
-        // Same tolerance as every other field: a hand-edited or future value must not turn
+        // A future value, or a hand-edited blob, must not silently turn
         // the feature off by accident.
-        XCTAssertEqual(ReaderSettings.decode(["startPageImages": "nonsense"]).startPageImages, .on)
-        XCTAssertEqual(ReaderSettings.decode(["startPageImages": "off"]).startPageImages, .off)
+        XCTAssertEqual(ReaderSettings.decode(["readerThumbnails": "nonsense"]).readerThumbnails, .on)
+        XCTAssertEqual(ReaderSettings.decode(["readerThumbnails": "off"]).readerThumbnails, .off)
+    }
+
+    func testTheOneShippedSwitchSeedsBoth() {
+        // 0.11.0 stored `startPageImages`, when the start page was the only surface with
+        // thumbnails. Someone who turned it off asked for no thumbnails, so the reader's
+        // popover must not arrive switched on and fetch what they opted out of.
+        let migrated = ReaderSettings.fromJSON("{\"startPageImages\":\"off\"}")
+        XCTAssertEqual(migrated.startPageThumbnails, .off)
+        XCTAssertEqual(migrated.readerThumbnails, .off)
+        // …and an explicit new key still wins over the legacy one in the same blob.
+        let mixed = ReaderSettings.decode(["startPageImages": "off", "readerThumbnails": "on"])
+        XCTAssertEqual(mixed.startPageThumbnails, .off)
+        XCTAssertEqual(mixed.readerThumbnails, .on)
+        // Only the current keys are written back.
+        XCTAssertFalse(ReaderSettings().json.contains("startPageImages"))
+    }
+
+    func testEachPageBakesItsOwnSwitchAndNoOther() {
+        // Each page renders only its own lists, so one attribute per page decides it. Tested
+        // on the html tag: the `[data-thumbs="off"]` rules are in both pages' stylesheets.
+        let article = Article(title: "T", byline: nil, siteName: nil, content: "<p>x</p>")
+        var settings = ReaderSettings()
+        settings.startPageThumbnails = .off
+        XCTAssertTrue(StartPage.html(appName: "R", settings: settings)
+            .contains("<html lang=\"en\" data-thumbs=\"off\">"))
+        XCTAssertTrue(ReaderPage.html(article: article, settings: settings)
+            .contains("<html lang=\"en\">"))
+        settings.startPageThumbnails = .on
+        settings.readerThumbnails = .off
+        XCTAssertTrue(ReaderPage.html(article: article, settings: settings)
+            .contains("<html lang=\"en\" data-thumbs=\"off\">"))
+        XCTAssertTrue(StartPage.html(appName: "R", settings: settings)
+            .contains("<html lang=\"en\">"))
     }
 }
 
@@ -378,6 +415,75 @@ final class ReaderPageTests: XCTestCase {
         let html = ReaderPage.html(article: article, history: history)
         XCTAssertTrue(html.contains("id=\"readerClear\""))
         XCTAssertTrue(html.contains("messageHandlers.readerClear.postMessage"))
+    }
+
+    // MARK: - Recents popover: five and five (#33)
+
+    func testThePopoverListsFiveRecentsNotThirty() {
+        // The panel used to be the whole 30-entry history in a 60vh scroller.
+        var history = ReaderHistory()
+        for index in 1...12 {
+            history.record(title: "Article \(index)", url: "https://x.test/\(index)")
+        }
+        let html = ReaderPage.html(article: article, history: history)
+        XCTAssertEqual(html.components(separatedBy: "class=\"recent\" data-url=").count - 1,
+                       ReaderChrome.popoverRecents)
+        // Newest first, so the oldest of the twelve is not in the panel.
+        XCTAssertTrue(html.contains("Article 12"))
+        XCTAssertFalse(html.contains("Article 1<"))
+    }
+
+    func testThePopoverSkipsTheArticleBeingRead() {
+        // The article is recorded before the page renders, so without this it is always row
+        // one — a fifth of the panel spent on what is already on screen.
+        var history = ReaderHistory()
+        history.record(title: "Older", url: "https://x.test/older")
+        history.record(title: "On screen", url: "https://x.test/current")
+        let html = ReaderPage.html(article: article, history: history,
+                                   currentURL: "https://x.test/current")
+        XCTAssertFalse(html.contains("data-url=\"https://x.test/current\""))
+        XCTAssertTrue(html.contains("data-url=\"https://x.test/older\""))
+    }
+
+    func testTheSuggestedGroupShipsEmptyHiddenAndNamed() {
+        // The host fills it after the page lands, and may never fill it at all — no sources,
+        // no network — so the panel has to be complete without it.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("<section id=\"readerSuggested\" hidden aria-labelledby=\"readerSuggestedTitle\">"))
+        XCTAssertTrue(html.contains("id=\"readerSuggestedList\""))
+        XCTAssertTrue(html.contains("window.readerSetSuggestions = function"))
+        XCTAssertFalse(html.contains("data-url="))
+        // A heading, not a paragraph: it is the second of the panel's two groups, and the
+        // other one names itself with an <h2>. Heading navigation has to reach it.
+        XCTAssertTrue(html.contains("<h3 class=\"panel-group rest\" id=\"readerSuggestedTitle\">Suggested</h3>"))
+    }
+
+    func testTheSuggestedGroupIsCappedAndCarriesNoRowControls() {
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains(".slice(0, \(ReaderChrome.popoverSuggestions))"))
+        // More/Less/Block are the start page's; their handlers are gated to it, and three
+        // icon buttons do not fit a 280px row.
+        XCTAssertFalse(html.contains("readerTopicFeedback"))
+        XCTAssertFalse(html.contains("readerBlockHost"))
+        // Rows open through the panel's existing listener.
+        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+    }
+
+    func testTheStartPageKeepsItsOwnRicherSuggestionRows() {
+        // Both pages implement the same host call; the popover's version installs only where
+        // its container exists, so neither can shadow the other.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("if (suggested && suggestedList) {"))
+        XCTAssertTrue(html.contains("readerTopicFeedback"))
+        XCTAssertEqual(html.components(separatedBy: "window.readerSetSuggestions = function").count - 1, 2)
+    }
+
+    func testClearingHistoryEmptiesOnlyTheRecentsGroup() {
+        // The clear action used to strip every `.recent` in the panel; with a second list
+        // below it that would take the suggestions with it.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("recentsList.textContent = '';"))
+        XCTAssertFalse(html.contains("recents.querySelectorAll('.recent, #readerClear')"))
     }
 
     func testRecentsRowTitleCannotBreakOutOfItsAttribute() {

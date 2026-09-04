@@ -23,6 +23,7 @@ public enum SettingsPage {
     public static func html(appName: String,
                             settings: ReaderSettings = ReaderSettings(),
                             suggestions: SuggestionSettings = SuggestionSettings(),
+                            hidden: HiddenPhrases = HiddenPhrases(),
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
@@ -39,9 +40,32 @@ public enum SettingsPage {
               <div class="langs">
                 \(languages.map { code in
                     let checked = suggestions.languages?.contains(code) ?? true
-                    return "<label class=\"lang\"><input type=\"checkbox\" value=\"\(HTML.escape(code))\""
+                    return "<label class=\"check\"><input type=\"checkbox\" value=\"\(HTML.escape(code))\""
                         + (checked ? " checked" : "") + "><span>\(HTML.escape(languageName(code)))</span></label>"
                 }.joined(separator: "\n            "))
+              </div>
+        """
+        // Thumbnails, one switch per surface. They used to be one switch in the Aa popover
+        // labelled "Images / No images", which read as governing the article's own images —
+        // it never did, it only ever governed the thumbnails in these lists. Split and moved
+        // here, where a setting is expected and can afford to say what it does.
+        let startChecked = settings.startPageThumbnails == .on ? " checked" : ""
+        let readerChecked = settings.readerThumbnails == .on ? " checked" : ""
+        let imagesSection = """
+        <h2 class="section">Article images</h2>
+              <p class="help" id="imagesHelp">The article's own lead image, shown beside its
+              row. A list with this off carries no images, reserves no space for them, and
+              fetches nothing.</p>
+              <div class="checks" role="group" aria-label="Article images"
+                   aria-describedby="imagesHelp">
+                <label class="check">
+                  <input id="\(ReaderSettings.ThumbnailScope.startPage.rawValue)" type="checkbox"\(startChecked)>
+                  <span>Show thumbnail image next to recents and suggested on the start page</span>
+                </label>
+                <label class="check">
+                  <input id="\(ReaderSettings.ThumbnailScope.reader.rawValue)" type="checkbox"\(readerChecked)>
+                  <span>Show thumbnail image next to recents and suggested in the reader dropdown</span>
+                </label>
               </div>
         """
         // Only shown once something is blocked: an empty section on first run is noise, and
@@ -54,6 +78,29 @@ public enum SettingsPage {
                 the start page.</p>
                 <div id="blocked">
                   \(blocked.map(blockedRow).joined(separator: "\n              "))
+                </div>
+              </section>
+        """
+        // Hidden text, managed the same way blocked outlets are: created while reading (a
+        // selection in the reader), listed and removed here (#32). The reader's popover
+        // stays, because grouping phrases by whether they hit the article on screen is
+        // something only that page can do.
+        //
+        // Unlike the blocklist this section always renders, empty or not. `HiddenPhrases`
+        // never re-seeds a list that has been emptied, so removing the last phrase is
+        // permanent — and with #readerHiddenBtn gone from the start page, the section's help
+        // line is the only written trace the feature has. Deleting the section with its last
+        // row would delete the instructions for getting a row back.
+        let phraseRows = hidden.phrases.isEmpty
+            ? "<p class=\"empty\">No hidden text.</p>"
+            : hidden.phrases.map(phraseRow).joined(separator: "\n              ")
+        let hiddenSection = """
+        <section id="hiddenSection">
+                <h2 class="section">Hidden text</h2>
+                <p class="help">Removed from every article. Hide a phrase by selecting it in
+                the reader.</p>
+                <div id="hiddenPhrases">
+                  \(phraseRows)
                 </div>
               </section>
         """
@@ -132,8 +179,15 @@ public enum SettingsPage {
           #error { margin: 8px 0 0; font-size: 12px; color: var(--accent); }
           #error[hidden] { display: none; }
           .langs { display: flex; flex-wrap: wrap; gap: 8px 18px; }
-          .lang { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
-          .lang input { accent-color: var(--accent); }
+          /* Checkbox rows: the language filter's boxes and the article-image switches. One
+             definition — they are the same control in the same page's voice. `.langs` wraps
+             its boxes into a row; `.checks` stacks a switch per line.
+             Top-aligned, not centred: a label long enough to wrap would otherwise leave its
+             box floating in the middle of two lines. The nudge lines it up with the first
+             line's text rather than the line box. */
+          .checks { display: flex; flex-direction: column; gap: 10px; }
+          .check { display: flex; align-items: start; gap: 8px; font-size: 13px; cursor: pointer; }
+          .check input { margin-top: 2px; accent-color: var(--accent); }
           /* The shortcut reference: a list you read, so plain markup — nothing in it is a
              control, which is why the section needs no script and no host of its own. The
              columns carry no gap so the hairline is one rule across the row, as the source
@@ -174,6 +228,10 @@ public enum SettingsPage {
             \(languageSection)
 
             \(blockedSection)
+
+            \(hiddenSection)
+
+            \(imagesSection)
 
             \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
           </main>
@@ -268,6 +326,27 @@ public enum SettingsPage {
               });
             }
 
+            var phrases = document.getElementById('hiddenPhrases');
+            if (phrases) {
+              phrases.addEventListener('click', function (e) {
+                var button = e.target.closest('.source-remove');
+                if (!button) { return; }
+                var row = button.closest('.source');
+                post('readerUnhide', row.dataset.phrase);
+                row.remove();
+                // Unlike the blocklist, the last row does NOT take the section with it: the
+                // help line above is the only place the app says how to hide a phrase, and
+                // an emptied list is never re-seeded, so removing it would remove the
+                // instructions for getting a row back. Same empty state the sources list uses.
+                if (!phrases.querySelector('.source')) {
+                  var empty = document.createElement('p');
+                  empty.className = 'empty';
+                  empty.textContent = 'No hidden text.';
+                  phrases.appendChild(empty);
+                }
+              });
+            }
+
             var langs = document.querySelector('.langs');
             if (langs) {
               langs.addEventListener('change', function () {
@@ -276,6 +355,24 @@ public enum SettingsPage {
                 post('readerSetLanguages', checked.map(function (input) { return input.value; }));
               });
             }
+
+            // The two thumbnail switches; each box's id is the settings key it writes.
+            //
+            // Only the changed key is posted. This page's copy of the settings would be as
+            // old as the document — a back/forward restore reuses the original bytes — so
+            // posting a whole object from here would push a stale font size and theme over
+            // newer ones. The host merges a payload onto the settings as stored
+            // (`ReaderSettings.decode(_:onto:)`), which is what makes one key safe to send.
+            ['\(ReaderSettings.ThumbnailScope.startPage.rawValue)',
+             '\(ReaderSettings.ThumbnailScope.reader.rawValue)'].forEach(function (key) {
+              var box = document.getElementById(key);
+              if (!box) { return; }
+              box.addEventListener('change', function () {
+                var change = {};
+                change[key] = box.checked ? 'on' : 'off';
+                post('readerSettings', change);
+              });
+            });
 
             // Called by the host once it has fetched (or failed to fetch) the address.
             window.readerSourceAdded = function (source) {
@@ -326,6 +423,21 @@ public enum SettingsPage {
             <span class="source-title">\(HTML.escape(host))</span>
           </span>
           <button class="source-remove" type="button" aria-label="Unblock \(HTML.escape(host))">
+            \(removeIcon)
+          </button>
+        </div>
+        """
+    }
+
+    /// A hidden phrase's row. The phrase came from a page the user was reading, so it is
+    /// escaped here — in the title and in the attribute the remove control posts back.
+    private static func phraseRow(_ phrase: String) -> String {
+        """
+        <div class="source" data-phrase="\(HTML.escape(phrase))">
+          <span class="source-text">
+            <span class="source-title">\(HTML.escape(phrase))</span>
+          </span>
+          <button class="source-remove" type="button" aria-label="Stop hiding \(HTML.escape(phrase))">
             \(removeIcon)
           </button>
         </div>
