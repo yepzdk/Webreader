@@ -237,6 +237,7 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         return WebURL.isWebURL(url)
     }
 
+
     // MARK: - Sync
 
     /// Applies what a sync cycle merged in. The session decides what the pages need told;

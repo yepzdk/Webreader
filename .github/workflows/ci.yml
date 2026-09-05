@@ -79,29 +79,62 @@ jobs:
           apt-get -q install -y curl unzip
       # Both downloads are large and version-pinned, so they are worth caching: ~1 GB of NDK
       # and ~1 GB of Swift SDK that change only when the pins below do.
-      - name: Cache the Android NDK and the Swift SDK
-        uses: actions/cache@v4
+      #
+      # Restore and save are separate on purpose. The combined action saves at the end of the
+      # job whether or not it passed, which means a run that died halfway through unpacking
+      # can publish a half-populated bundle that every later run then restores and trusts.
+      - name: Restore the Android NDK and the Swift SDK
+        id: android-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.swiftpm/swift-sdks
             /opt/android-ndk
           key: android-sdk-swift-6.3.3-ndk-r27d
       - name: Install the Swift SDK for Android
+        shell: bash
         run: |
-          set -eu
-          if ! swift sdk list | grep -q swift-6.3.3-RELEASE_android; then
+          set -euo pipefail
+          sdks="$HOME/.swiftpm/swift-sdks"
+          # Keyed on the setup script rather than on `swift sdk list`, because a cache that
+          # restored a partial bundle answers the name question yes and the file question no —
+          # which is how this step first failed, with a "not found" that named a path the SDK
+          # was supposed to have put there.
+          setup="$(find "$sdks" -name setup-android-sdk.sh -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$setup" ]; then
+            rm -rf "$sdks"
             swift sdk install \
               https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz \
               --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
+            setup="$(find "$sdks" -name setup-android-sdk.sh -type f | head -1 || true)"
           fi
-          if [ ! -d /opt/android-ndk/android-ndk-r27d ]; then
+          if [ -z "$setup" ]; then
+            echo "::error::the Swift SDK installed but has no setup-android-sdk.sh" >&2
+            swift sdk list >&2 || true
+            find "$sdks" -maxdepth 4 >&2 || true
+            exit 1
+          fi
+          if [ ! -x /opt/android-ndk/android-ndk-r27d/ndk-build ]; then
+            rm -rf /opt/android-ndk
             mkdir -p /opt/android-ndk
             curl -fsSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
             unzip -q /tmp/ndk.zip -d /opt/android-ndk
           fi
-          bundle=~/.swiftpm/swift-sdks/swift-6.3.3-RELEASE_android.artifactbundle/swift-android
-          ANDROID_NDK_HOME=/opt/android-ndk/android-ndk-r27d "$bundle/scripts/setup-android-sdk.sh"
+          # Through `bash`, so neither the executable bit nor the `#!/usr/bin/env bash`
+          # shebang has to survive extraction and caching intact.
+          ANDROID_NDK_HOME=/opt/android-ndk/android-ndk-r27d bash "$setup"
       - name: Cross-build ReaderKit and the JNI facade
+        shell: bash
         run: |
+          set -euo pipefail
           ABIS="aarch64-unknown-linux-android28" Scripts/build-android.sh
           test -f android/app/src/main/jniLibs/arm64-v8a/libReaderKitAndroid.so
+      # Only now, with a `.so` to show for it, is what we downloaded worth keeping.
+      - name: Save the Android NDK and the Swift SDK
+        if: steps.android-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.swiftpm/swift-sdks
+            /opt/android-ndk
+          key: android-sdk-swift-6.3.3-ndk-r27d

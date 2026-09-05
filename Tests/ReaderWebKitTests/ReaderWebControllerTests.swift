@@ -90,6 +90,7 @@ final class ReaderWebControllerTests: XCTestCase {
     func testRejectedURLAsksTheShellToSignalIt() {
         controller.showStartPage()
         waitForGenerator("WebReader Start")
+        waitFor("the URL field to be ready") { self.probe("!!document.querySelector('#open')") }
         evaluate("document.querySelector('#url').value = 'not a url at all';"
             + "document.querySelector('#open').requestSubmit();")
 
@@ -121,7 +122,14 @@ final class ReaderWebControllerTests: XCTestCase {
 
     // MARK: - Driving the page
 
+    /// Clicks a control the user clicks, once the page is ready to answer.
     private func click(_ selector: String, file: StaticString = #filePath, line: UInt = #line) {
+        // The element has to exist *and* its listener has to be attached. Both are covered by
+        // waiting for it to be in the document once `readyState` is `complete`, since the
+        // page's handlers are attached by an inline script.
+        waitFor("\(selector) to be clickable", file: file, line: line) {
+            self.probe("!!document.querySelector('\(selector)')", file: file, line: line)
+        }
         evaluate("document.querySelector('\(selector)').click()", file: file, line: line)
     }
 
@@ -137,24 +145,40 @@ final class ReaderWebControllerTests: XCTestCase {
         wait(for: [done], timeout: 5)
     }
 
-    /// Waits for the document on screen to be the generated page with this marker. The marker
-    /// is what a restored page identifies itself by, so asserting on it is asserting on the
-    /// same fact the controller uses.
+    /// Evaluates a boolean expression in the page, treating any error as false — a page that
+    /// is still loading answers "not yet" rather than failing the test.
+    private func probe(_ expression: String,
+                       file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        var value = false
+        let done = expectation(description: "probe \(expression)")
+        controller.webView.evaluateJavaScript("(function(){ return !!(\(expression)) })()") { result, _ in
+            value = (result as? Bool) ?? false
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        return value
+    }
+
+    /// Waits until the page on screen is the generated one with this marker *and* has finished
+    /// loading.
+    ///
+    /// The marker alone is not enough, and that is what made this suite flaky on a loaded CI
+    /// machine: `<meta name="generator">` is in `<head>`, so it answers long before the inline
+    /// script at the end of the body has attached the click handlers a test then clicks. On a
+    /// fast machine the gap is microseconds; on a slow one the click lands on a page that is
+    /// not listening yet and nothing happens.
     private func waitForGenerator(_ generator: String,
                                   file: StaticString = #filePath, line: UInt = #line) {
         waitFor("the \(generator) page", file: file, line: line) {
-            var found = false
-            let done = self.expectation(description: "generator")
-            self.controller.webView.evaluateJavaScript(ReaderSession.generatorScript) { result, _ in
-                found = (result as? String) == generator
-                done.fulfill()
-            }
-            self.wait(for: [done], timeout: 5)
-            return found
+            self.probe("document.readyState === 'complete' && "
+                + "((document.querySelector('meta[name=\"generator\"]')||{}).content === '\(generator)')",
+                file: file, line: line)
         }
     }
 
-    private func waitFor(_ what: String, timeout: TimeInterval = 10,
+    // 20 seconds, not 5: these wait on a real WebKit process, and a CI machine running several
+    // jobs at once is slow enough that a tighter bound tests the runner rather than the code.
+    private func waitFor(_ what: String, timeout: TimeInterval = 20,
                          file: StaticString = #filePath, line: UInt = #line,
                          until condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(timeout)
