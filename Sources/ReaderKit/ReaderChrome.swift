@@ -608,16 +608,37 @@ enum ReaderChrome {
     private static let chromeGap = 10
     private static let chromeEdge = 14
 
-    /// Every button that stands in the chrome column, by id: what `buttonBox` styles, plus
-    /// the rating pair (its own box, so the pressed accent can override it) and the toggle.
+    /// The buttons that live in the collapsing stack, by id — everything the column holds
+    /// except the toggle, which is the one control that never hides.
     ///
-    /// Spelled out as ids on purpose. The square rule has to beat `#readerHomeBtn`'s and
-    /// `#readerRecentsBtn`'s own padding declarations, which are id-specific and emitted
-    /// after `buttonBox`; a class or element selector would quietly lose to them.
-    private static let chromeButtons = """
-        #readerHomeBtn, #startSettings, #readerAa, #readerRecentsBtn, #readerHiddenBtn, \
-        #readerMoreBtn, #readerLessBtn, #readerChromeToggle
-        """
+    /// Spelled out rather than reached through the tree. Hiding used to run through
+    /// `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`, which is
+    /// four links of structure to say "these seven buttons" — and every link is a chance
+    /// for the engine to mis-invalidate, which is exactly what it did. A list of ids says
+    /// the same thing in a form that cannot drift from the markup without failing loudly,
+    /// and that you can look up directly in an inspector.
+    static let stackButtonIDs = ["readerHomeBtn", "startSettings", "readerAa",
+                                 "readerRecentsBtn", "readerHiddenBtn",
+                                 "readerMoreBtn", "readerLessBtn"]
+
+    /// The same list plus the toggle: everything that takes the column's square sizing.
+    static let chromeButtonIDs = stackButtonIDs + ["readerChromeToggle"]
+
+    /// The selector for "the chrome column is open": one attribute on `<html>`.
+    ///
+    /// `:root` because it is the shortest and most stable thing a rule can hang off — no
+    /// intermediate element to change `display` under it — and because `data-theme`,
+    /// `data-quotes` and `data-thumbs` already live there, so page-wide state has one home.
+    static let chromeOpenRoot = ":root[data-chrome=\"open\"]"
+
+    /// `ids` as a CSS selector list, optionally each under `prefix`.
+    ///
+    /// One id per line so a stylesheet stays readable at eight of them, and so a diff shows
+    /// which button changed rather than one reflowed line.
+    private static func selector(_ ids: [String], under prefix: String = "") -> String {
+        ids.map { prefix.isEmpty ? "#\($0)" : "\(prefix) #\($0)" }
+            .joined(separator: ",\n          ")
+    }
 
     /// The viewport at which the chrome collapses into one bottom-right column.
     ///
@@ -647,11 +668,11 @@ enum ReaderChrome {
     /// Wraps the nav slot and the control cluster in one element, plus — where a page has
     /// more than one control — the button that reveals them.
     ///
-    /// On a pointer the wrapper does nothing: it is `display: contents`, and the two
-    /// children keep the fixed opposite corners they have always had. The whole point is
-    /// the coarse-pointer layout, where they become one bottom-right column (see
-    /// `chromeCSS`), which a wrapper is the only way to express — CSS cannot reparent two
-    /// elements into a shared flex line.
+    /// In the roomy layout the wrapper holds nothing: its two children are `position:
+    /// fixed` to the opposite top corners they have always had, so the layer measures 0x0.
+    /// The whole point is the compact layout, where they come back into flow and become one
+    /// bottom-right column (see `chromeCSS`) — which a wrapper is the only way to express,
+    /// since CSS cannot reparent two elements into a shared flex line.
     ///
     /// DOM order is stack-then-toggle. `.reader-chrome` runs as a plain column so the
     /// toggle lands at the foot, and the stack inside it reverses so the nav slot — first
@@ -689,7 +710,7 @@ enum ReaderChrome {
           </button>
         """
         return """
-        <div class="reader-chrome"\(collapsible ? " data-collapsible=\"true\"" : "")>
+        <div class="reader-chrome">
           <div class="reader-chrome-stack" id="readerChromeStack">
             \(indent(nav, by: 4))
             \(indent(controls, by: 4))
@@ -712,109 +733,100 @@ enum ReaderChrome {
     /// window answers the same way a phone does. Only the button *sizing* asks what is
     /// pointing at them (`comfortableChrome`).
     ///
-    /// `display: contents` on the two wrappers is what keeps the roomy layout untouched —
-    /// they leave the box tree entirely, so `.reader-nav` and `.reader-controls` fix
-    /// themselves to the same corners as before and no wide-window byte moves.
+    /// **Two rules about how this is written, both paid for.**
     ///
-    /// Collapsed uses `visibility: hidden`, not `opacity: 0`: an invisible button still in
-    /// the tab order is exactly the trap the suggested-row actions were in. And the stack
-    /// leaves the flow to do it — `visibility` alone still reserves the space, which parked
-    /// the toggle halfway up the screen instead of in the corner.
-    static func chromeCSS(platform: Platform = .macOS) -> String {
-        """
-        /* A roomy window keeps the two opposite corners; the wrappers are not in the box tree. */
-        .reader-chrome, .reader-chrome-stack { display: contents; }
-        @media \(compactViewport) {
-          .reader-chrome {
-            position: fixed; z-index: 10;
-            bottom: \(inset(chromeEdge, "bottom")); right: \(inset(chromeEdge, "right"));
-            display: flex; flex-direction: column; align-items: flex-end;
-            gap: \(chromeGap)px;
-            font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+    /// *No `display` switch on any ancestor of a chrome button.* The wrapper used to be
+    /// `display: contents` and become `display: flex` at the media boundary. That is a
+    /// display change on an ancestor of every button in the column, and the layout stopped
+    /// resolving reliably across it: buttons stayed visible after a collapse and corrected
+    /// themselves on the next resize. The wrapper is now a fixed layer in both layouts —
+    /// in the roomy one its two clusters take themselves out of flow to their own top
+    /// corners, so it holds nothing and measures 0x0.
+    ///
+    /// *Buttons are addressed by id, and the open state lives on `:root`.* Hiding used to
+    /// run through `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`
+    /// — four links, every one a chance to mis-invalidate, and nothing you can look up in
+    /// an inspector without walking the tree. It is now root-attribute to id: two links,
+    /// no intermediate element, and `:root[data-chrome]` is the same place `data-theme`,
+    /// `data-quotes` and `data-thumbs` already live.
+    ///
+    /// Collapsed is the *default* rather than a state the script applies, so the first
+    /// paint is right without waiting for script. `visibility: hidden` rather than opacity
+    /// alone, so a hidden button leaves the tab order too.
+    ///
+    /// `collapsible` is false for a page whose chrome is a single button; it then emits no
+    /// hiding at all, which is what stops the settings and offline pages from tucking away
+    /// the only control they have.
+    static func chromeCSS(platform: Platform = .macOS, collapsible: Bool = false) -> String {
+        let collapsing = !collapsible ? "" : """
+          /* Collapsed by default. Every id spelled out; see the note above on why this is
+             not a descendant chain. */
+          \(selector(stackButtonIDs)) {
+            visibility: hidden; opacity: 0; pointer-events: none;
+            transition: opacity 140ms ease-out;
           }
-          /* `column` here and `column-reverse` inside, which together put the toggle at the
-             bottom and Home directly above it. `column-reverse` sends the *first* child to
-             the bottom, so the stack — nav then controls in the markup — reverses to leave
-             the nav slot nearest the thumb, while the cluster keeps document order and
-             lands Aa at its foot. Bottom-up: toggle, Home, Aa, hidden, recents, less, more. */
+          /* One attribute on <html> reveals them, and outranks the rule above by the
+             attribute alone — both sides are a single id otherwise. */
+          \(selector(stackButtonIDs, under: chromeOpenRoot)) {
+            visibility: visible; opacity: 1; pointer-events: auto;
+          }
+          /* The stack leaves the flow so the hidden column reserves no space and cannot
+             push the toggle off the corner; it hangs directly above it. */
           .reader-chrome-stack {
-            display: flex; flex-direction: column-reverse; align-items: flex-end;
-            gap: \(chromeGap)px;
+            position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
           }
+        """
+        return """
+        /* A fixed layer in both layouts — never `display: contents`, see the note above.
+           Roomy: the clusters are `position: fixed` to their own corners, so this holds
+           nothing. Compact: they come back into flow and this is the column. */
+        .reader-chrome {
+          position: fixed; z-index: 10;
+          bottom: \(inset(chromeEdge, "bottom")); right: \(inset(chromeEdge, "right"));
+          display: flex; flex-direction: column; align-items: flex-end;
+          gap: \(chromeGap)px;
+          font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+        }
+        /* `column` on the wrapper puts the toggle at the foot; `column-reverse` here sends
+           the nav slot — first in the markup — to the bottom of the stack, directly above
+           it. Bottom-up: toggle, Home, Aa, hidden text, recents, less, more. */
+        .reader-chrome-stack {
+          display: flex; flex-direction: column-reverse; align-items: flex-end;
+          gap: \(chromeGap)px;
+        }
+        @media \(compactViewport) {
           /* The two clusters stop being fixed and become rows of the column. */
           .reader-nav, .reader-controls {
             position: static; top: auto; right: auto; left: auto;
             flex-direction: column; align-items: flex-end; gap: \(chromeGap)px;
           }
-          /* Only a collapsible chrome takes its stack out of the flow: it has to, or the
-             hidden stack reserves its own height and pushes the toggle off the corner. A
-             page whose chrome is one button has nothing to hide and stays in the flow. */
-          .reader-chrome[data-collapsible="true"] .reader-chrome-stack {
-            position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
-          }
-          /* Collapsing hides the *buttons*, not the clusters that hold them. A popover is
-             opened from the stack and then outlives the collapse, and it sits inside
-             `.reader-control` beside its own button because that is what the pointer layout
-             anchors against. Two ways of hiding an ancestor both took the open panel with
-             it: `visibility: hidden` inherits, and `opacity: 0` composites the whole subtree
-             at that alpha — which a descendant cannot opt back out of, so the panel measured
-             correctly and still painted nothing. A button is the panel's *sibling*, so
-             hiding it leaves the panel alone.
-
-             No `transform` on the stack either. A transformed ancestor becomes the
-             containing block for a `position: fixed` descendant, so the panels stopped
-             measuring against the viewport and sized themselves to this 45px column —
-             measured at 19px wide. */
-          .reader-chrome[data-collapsible="true"] .reader-nav > button,
-          .reader-chrome[data-collapsible="true"] .reader-control > button {
-            transition: opacity 140ms ease-out;
-          }
-          .reader-chrome[data-collapsible="true"]:not([data-open="true"]) .reader-nav > button,
-          .reader-chrome[data-collapsible="true"]:not([data-open="true"]) .reader-control > button {
-            visibility: hidden; opacity: 0; pointer-events: none;
-          }
+        \(collapsing)
           /* The toggle swaps its glyph rather than its box, so nothing shifts on open. */
           #readerChromeToggle .chrome-toggle-close,
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-open { display: none; }
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-close { display: block; }
         }
         /* The reveal only animates in the compact layout, so killing the transition
-           unconditionally is enough — there is none anywhere else to kill. Written as its
-           own top-level query rather than combined with `compactViewport`, which is a comma
-           list and cannot be `and`-ed without Level 4 syntax. */
+           unconditionally is enough — there is none anywhere else to kill. */
         @media (prefers-reduced-motion: reduce) {
-          .reader-chrome[data-collapsible="true"] .reader-nav > button,
-          .reader-chrome[data-collapsible="true"] .reader-control > button {
-            transition: none;
-          }
+          \(selector(stackButtonIDs)) { transition: none; }
         }
         /* The toggle's box comes from the same shared declaration as every other chrome
-           button, so it cannot drift from the controls it reveals. Emitted at the top level
-           because `buttonBox` carries its own query, and one nested inside another reads
-           far worse than it computes. */
+           button, so it cannot drift from the controls it reveals. */
         \(buttonBox("#readerChromeToggle"))
         /* It exists only for the compact layout; `display` is settled last, after the box. */
         #readerChromeToggle { display: none; }
+        /* The roomy slot says the word and hides the icon; the column reverses it below. */
+        #startSettings .nav-icon { display: none; }
         @media \(compactViewport) {
           #readerChromeToggle {
             display: inline-flex; align-items: center; justify-content: center;
           }
           #readerChromeToggle svg { display: block; }
-        }
-        /* The roomy slot says the word and hides the icon; the column reverses it below.
-           Stated first so the compact override is the later rule and wins on the tie. */
-        #startSettings .nav-icon { display: none; }
-        /* Last word on the column's geometry. Every button becomes the same square, so the
-           stack reads as one edge rather than a ragged one: "Aa" is text and measured 47px
-           against an icon button's 44px, and the toggle 45px. `padding: 0` with the flex
-           centring already on these boxes is what lets the label sit in the middle of a
-           fixed square; the start page's Settings button drops its word for an icon here
-           (see `navSettings`) rather than being the one wide row.
-
-           Only in the column. The roomy top row stays content-sized, where a wider "Aa"
-           beside narrower icons is exactly right — they sit on a line, not in a stack. */
-        @media \(compactViewport) {
-          \(chromeButtons) {
+          /* Every button in the column is the same square, so the stack reads as one edge:
+             "Aa" is text and measured 47px against an icon button's 44px. Only here — on a
+             line, a wider "Aa" beside narrower icons is exactly right. */
+          \(selector(chromeButtonIDs)) {
             width: \(touchTarget)px; padding: 0;
           }
           #startSettings .nav-label { display: none; }
@@ -1310,21 +1322,24 @@ enum ReaderChrome {
             clear.textContent = 'Clear history';
             recents.appendChild(clear);
           };
-          // The collapsing bottom-right chrome, on a coarse pointer. Absent on a pointer
-          // layout and on the pages whose chrome is a single button, so everything below
-          // checks before touching it.
-          var chrome = document.querySelector('.reader-chrome');
+          // The collapsing bottom-right chrome. The toggle is absent in the roomy layout
+          // and on the pages whose chrome is a single button, so everything below checks.
+          //
+          // The open state is one attribute on <html>, not on the chrome element: the
+          // stylesheet reaches the buttons as `:root[data-chrome="open"] #readerHomeBtn`,
+          // and a root attribute is the shortest, most stable thing a rule can hang off.
+          // It is also where `data-theme`, `data-quotes` and `data-thumbs` already live.
           var chromeToggle = document.getElementById('readerChromeToggle');
           function setChromeOpen(open) {
-            if (!chrome || !chromeToggle) { return; }
-            if (open) { chrome.setAttribute('data-open', 'true'); }
-            else { chrome.removeAttribute('data-open'); }
+            if (!chromeToggle) { return; }
+            if (open) { document.documentElement.setAttribute('data-chrome', 'open'); }
+            else { document.documentElement.removeAttribute('data-chrome'); }
             chromeToggle.setAttribute('aria-expanded', String(open));
             chromeToggle.setAttribute('aria-label',
               open ? 'Hide reader controls' : 'Show reader controls');
           }
           function chromeIsOpen() {
-            return !!chrome && chrome.getAttribute('data-open') === 'true';
+            return document.documentElement.getAttribute('data-chrome') === 'open';
           }
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {

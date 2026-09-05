@@ -302,7 +302,8 @@ public enum StartPage {
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
-          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform,
+                                                       collapsible: true), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>

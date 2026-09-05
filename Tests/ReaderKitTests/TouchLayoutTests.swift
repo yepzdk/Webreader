@@ -243,16 +243,33 @@ final class TouchLayoutTests: XCTestCase {
         // Both halves of the report this answers: the top edge is the hardest place on a
         // phone to reach one-handed, and six always-visible buttons over prose compete with
         // the prose.
-        let css = ReaderChrome.chromeCSS()
+        let css = ReaderChrome.chromeCSS(collapsible: true)
         XCTAssertTrue(css.contains("bottom: calc(14px + env(safe-area-inset-bottom, 0px));"))
         XCTAssertTrue(css.contains("right: calc(14px + env(safe-area-inset-right, 0px));"))
-        // Collapsed hides the buttons, and does it with `visibility` so they leave the tab
-        // order too — an invisible-but-focusable control is the trap the suggested-row
-        // actions were in. `opacity` alone would not do: it composites the whole subtree,
-        // and the popover sitting beside its own button could not opt back out of it.
-        XCTAssertTrue(css.contains(":not([data-open=\"true\"]) .reader-nav > button,"))
-        XCTAssertTrue(css.contains(":not([data-open=\"true\"]) .reader-control > button {"))
+        // Collapsed is the default, so the first paint is right without waiting for script,
+        // and it uses `visibility` so a hidden button leaves the tab order too.
         XCTAssertTrue(css.contains("visibility: hidden; opacity: 0; pointer-events: none;"))
+        XCTAssertTrue(css.contains("visibility: visible; opacity: 1; pointer-events: auto;"))
+    }
+
+    func testHidingAddressesButtonsByIdFromTheRootAndNotThroughTheTree() {
+        // The mechanism this replaced ran through
+        // `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button` — four
+        // links of structure across an ancestor that switched `display` at the media
+        // boundary, which is what left buttons visible after a collapse until the next
+        // resize. Root attribute to id is two links and no intermediate element.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        for id in ReaderChrome.stackButtonIDs {
+            XCTAssertTrue(css.contains("#\(id)"), "\(id) is not addressed by id")
+            XCTAssertTrue(css.contains("\(ReaderChrome.chromeOpenRoot) #\(id)"),
+                          "\(id) has no reveal rule under the root state")
+        }
+        // Nothing reaches a button through the cluster elements any more…
+        XCTAssertFalse(css.contains(".reader-nav > button"))
+        XCTAssertFalse(css.contains(".reader-control > button"))
+        // …and no ancestor of a chrome button changes `display` between the two layouts.
+        // The declaration, not the word: the stylesheet's own comment says why it is gone.
+        XCTAssertFalse(css.contains("display: contents;"))
     }
 
     func testEveryButtonInTheColumnIsTheSameSquare() {
@@ -294,54 +311,60 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertLessThan(roomy.lowerBound, column.lowerBound)
     }
 
-    func testCollapsingHidesTheNavSlotAndNotJustTheCluster() {
-        // Reported: Home stayed on screen after collapsing. The two clusters are separate
-        // elements, so a rule that names only `.reader-control > button` leaves the nav slot
-        // behind — and the nav slot is the one button that is on every page.
-        let css = ReaderChrome.chromeCSS()
-        let collapsed = ".reader-chrome[data-collapsible=\"true\"]:not([data-open=\"true\"]) "
-        XCTAssertTrue(css.contains(collapsed + ".reader-nav > button,"))
-        XCTAssertTrue(css.contains(collapsed + ".reader-control > button {"))
+    func testCollapsingHidesTheNavSlotAlongsideTheCluster() {
+        // Reported: Home stayed on screen after collapsing while the cluster went. The nav
+        // slot is a separate element from the controls and the one button present on every
+        // page, so any mechanism that reaches buttons structurally can miss it. Naming ids
+        // makes that impossible — and this asserts the nav slot's own id specifically.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        XCTAssertTrue(ReaderChrome.stackButtonIDs.contains("readerHomeBtn"))
+        XCTAssertTrue(css.contains("#readerHomeBtn"))
+        XCTAssertTrue(css.contains("\(ReaderChrome.chromeOpenRoot) #readerHomeBtn"))
     }
 
     func testTheStackReversesSoHomeLandsNearestTheThumb() {
         // `column` on the wrapper puts the toggle at the foot; `column-reverse` inside sends
         // the nav slot — first in the markup — to the bottom of the stack, directly above
-        // it. Verified as rendered geometry in a touch browser; this pins the two directions
-        // that produce it, because getting either backwards silently inverts the column.
-        let css = ReaderChrome.chromeCSS()
+        // it. Verified as rendered geometry in a browser; this pins the two directions that
+        // produce it, because getting either backwards silently inverts the column.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
         guard let wrapper = css.range(of: ".reader-chrome {"),
-              let stack = css.range(of: ".reader-chrome-stack {\n"
-                                        + "    display: flex; flex-direction: column-reverse;") else {
-            return XCTFail("the chrome column needs both directions")
+              let stack = css.range(of: ".reader-chrome-stack {") else {
+            return XCTFail("the chrome column needs both elements")
         }
-        XCTAssertTrue(css[wrapper.lowerBound...].hasPrefix(
-            ".reader-chrome {\n    position: fixed; z-index: 10;"))
-        XCTAssertTrue(css.contains("display: flex; flex-direction: column; align-items: flex-end;"))
         XCTAssertLessThan(wrapper.lowerBound, stack.lowerBound)
+        XCTAssertTrue(css.contains("display: flex; flex-direction: column; align-items: flex-end;"))
+        XCTAssertTrue(css.contains("display: flex; flex-direction: column-reverse; align-items: flex-end;"))
     }
 
-    func testNothingOnAPointerLayoutMoves() {
-        // The wrapper leaves the box tree entirely on a pointer, which is what keeps the two
-        // opposite corners — and every desktop measurement — exactly as they were.
-        let css = ReaderChrome.chromeCSS()
-        XCTAssertTrue(css.contains(".reader-chrome, .reader-chrome-stack { display: contents; }"))
-        // And the toggle is a coarse-pointer control only.
+    func testTheWrapperIsAFixedLayerInBothLayoutsRatherThanASwitchingOne() {
+        // The wrapper used to be `display: contents` and become `display: flex` at the media
+        // boundary — a display change on an ancestor of every chrome button, and the thing
+        // the collapse stopped resolving across. It is a fixed layer in both layouts now; in
+        // the roomy one its clusters are `position: fixed` to their own corners, so it holds
+        // nothing.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        XCTAssertFalse(css.contains("display: contents;"))
+        XCTAssertTrue(css.contains(".reader-chrome {\n  position: fixed; z-index: 10;"))
+        // Only the clusters change position between layouts, which is the whole difference.
+        XCTAssertTrue(css.contains(".reader-nav, .reader-controls {\n    position: static;"))
+        // And the toggle is a compact-layout control only.
         XCTAssertTrue(css.contains("#readerChromeToggle { display: none; }"))
     }
 
-    func testOnlyAPageWithSomethingToHideGetsAToggle() {
-        // A control that reveals one control is a tap for nothing. Everything with two or
-        // more collapses, which is also what keeps a popover clearing exactly one button.
-        // Asserted against the markup, not the stylesheet: every page carries the selectors.
+    func testOnlyAPageWithSomethingToHideCanCollapse() {
+        // A control that reveals one control is a tap for nothing. A page with a single
+        // button emits no hiding rules at all, which is what stops the settings and offline
+        // pages from tucking away the only control they have.
         for html in [ReaderPage.html(article: article), StartPage.html(appName: "R")] {
             XCTAssertTrue(html.contains("id=\"readerChromeToggle\""))
-            XCTAssertTrue(html.contains("<div class=\"reader-chrome\" data-collapsible=\"true\">"))
+            XCTAssertTrue(html.contains(ReaderChrome.chromeOpenRoot))
         }
         for html in [SettingsPage.html(appName: "R"),
                      OfflineFallback.html(appName: "R", host: "e.test", kind: .offline)] {
             XCTAssertFalse(html.contains("id=\"readerChromeToggle\""))
-            XCTAssertTrue(html.contains("<div class=\"reader-chrome\">"))
+            XCTAssertFalse(html.contains(ReaderChrome.chromeOpenRoot))
+            XCTAssertFalse(html.contains("visibility: hidden; opacity: 0;"))
         }
     }
 
