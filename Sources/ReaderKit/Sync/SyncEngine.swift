@@ -20,12 +20,12 @@ public struct SyncEngine: Sendable {
         public var peers: [String] = []
     }
 
-    private let folder: SyncFolder
+    private let folder: any DeviceFileStore
     private let store: KeyValueStore
     private let device: DeviceState.Device
     private let clock: @Sendable () -> Double
 
-    public init(folder: SyncFolder, store: KeyValueStore, device: DeviceState.Device,
+    public init(folder: any DeviceFileStore, store: KeyValueStore, device: DeviceState.Device,
                 clock: @escaping @Sendable () -> Double = { Timestamp.now() }) {
         self.folder = folder
         self.store = store

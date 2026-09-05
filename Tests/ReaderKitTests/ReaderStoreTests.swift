@@ -1,14 +1,7 @@
 import XCTest
 @testable import ReaderKit
 
-/// In-memory `KeyValueStore` standing in for `UserDefaults`.
-final class MemoryStore: KeyValueStore {
-    var values: [String: String] = [:]
-    func string(forKey key: String) -> String? { values[key] }
-    func set(_ value: String?, forKey key: String) {
-        if let value { values[key] = value } else { values.removeValue(forKey: key) }
-    }
-}
+// `MemoryStore` is `ReaderKit`'s own now — the Android facade needs one too.
 
 final class ReaderStoreTests: XCTestCase {
     func testZoomDefaultsToOneWhenUnsetOrGarbled() {

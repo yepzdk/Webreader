@@ -26,8 +26,9 @@ public enum SyncError: Error, Equatable, Sendable {
 /// writers on one path and so never produces a conflicted copy.
 ///
 /// File I/O with an injected directory, like `ArticleCache` — tests point it at a temp
-/// folder.
-public struct SyncFolder: Sendable {
+/// folder. It is the `DeviceFileStore` every host with a real filesystem uses; the protocol
+/// exists for Android, which has a document tree instead of a path.
+public struct SyncFolder: DeviceFileStore, Sendable {
     /// The subfolder created inside whatever the user picked, so pointing WebReader at a
     /// whole Nextcloud folder doesn't scatter files across it.
     public static let folderName = "WebReader"

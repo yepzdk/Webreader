@@ -27,6 +27,37 @@ public final class DefaultsStore: KeyValueStore, @unchecked Sendable {
     public func set(_ value: String?, forKey key: String) { defaults.set(value, forKey: key) }
 }
 
+/// `KeyValueStore` in memory.
+///
+/// Not a test double any more, though the tests are still its heaviest user: the Android
+/// facade seeds one from the state Kotlin passes in, runs whatever was asked for, and hands
+/// the changed keys back. Nothing on that path has a `UserDefaults` or a file to write, and
+/// a store that keeps its own copy is what makes the call a pure function.
+///
+/// Locked because sync writes it from its own queue while the UI reads it, which is the
+/// whole reason `KeyValueStore` is `Sendable`. Unchecked, like `FileStore`: the lock is what
+/// makes it safe, and the compiler cannot see that from a mutable stored property.
+public final class MemoryStore: KeyValueStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: String]
+
+    public init(_ values: [String: String] = [:]) {
+        storage = values
+    }
+
+    /// A snapshot, for a caller that needs every key at once — the Android facade returning
+    /// what a call changed, or a test asserting that nothing did.
+    public var values: [String: String] { lock.withLock { storage } }
+
+    public func string(forKey key: String) -> String? { lock.withLock { storage[key] } }
+
+    public func set(_ value: String?, forKey key: String) {
+        lock.withLock {
+            if let value { storage[key] = value } else { storage.removeValue(forKey: key) }
+        }
+    }
+}
+
 /// Reads and writes the reader's persisted state: appearance settings, the recents list,
 /// and page zoom. (De)serialization lives in `ReaderSettings`/`ReaderHistory`; this layer
 /// only owns the keys and the zoom bounds. Pure — the store is injected.
