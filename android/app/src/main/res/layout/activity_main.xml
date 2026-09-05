@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The whole app: one web view, with the load-progress line over its top edge. The order of
+     the two children is the z-order, and the line has to stay on top — it is the only thing
+     on screen that says a load is still moving. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Indeterminate on purpose. A determinate bar would need the fraction curve
+         `ReaderKit.LoadProgress` owns, and that is not reachable through the native facade;
+         showing a made-up percentage would be worse than showing none. -->
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:trackCornerRadius="0dp"
+        app:trackThickness="2.5dp" />
+
+</FrameLayout>

@@ -15,11 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   opens in the same reader page as the Mac, with the same appearance settings, the same
   recents, and sync to a folder you pick. Built from the same reader code as the Mac app,
   not a second copy of it.
+- **WebReader on Android** (#9). Open a link from any app or share one to WebReader and it
+  lands in the same reader page as everywhere else, with the same appearance settings and
+  recents, synced through a folder you pick. The reader logic is the same compiled code as
+  the Mac's — ReaderKit runs natively on Android — so the two cannot drift apart.
 
 ### Changed
-- The reader's WebKit half moves into a shared `ReaderWebKit` target (#6), so the coming
-  iPhone and iPad app runs the same page state, extraction and message handling as the Mac
-  rather than a second copy of it. No change to how the Mac app behaves.
+- The reader itself moves into `ReaderSession` (#6, #9): what the app decides — which page is
+  on screen, when an article is extracted, what each control does — is now one implementation
+  that every platform drives, and each host only carries the code that talks to its own web
+  view. No change to how the Mac app behaves.
+- **A shared link can carry a headline** (#9). Sharing "Worth reading: https://…" now opens
+  the link instead of refusing it. Pasting prose into the URL field is still refused: a paste
+  of a sentence is more likely a mistake than an invitation to guess.
 - **Recents live on the start page** (#32). The reader's recents popover duplicated the
   inline list and the hidden-text panel had no article to group against, so both leave the
   reader; hidden phrases move to the settings page, beside blocked outlets.

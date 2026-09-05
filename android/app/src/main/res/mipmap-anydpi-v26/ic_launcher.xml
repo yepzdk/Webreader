@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- `minSdk 28` is above the adaptive-icon floor, so there are no raster fallbacks to keep in
+     step: this one file is the launcher icon at every density. `monochrome` is what themed
+     icons (API 33+) mask, and the glyph is already a single-colour stroke drawing. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

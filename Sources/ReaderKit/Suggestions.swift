@@ -475,8 +475,11 @@ private final class FeedParser: NSObject, XMLParserDelegate {
     func parse(_ data: Data) -> Bool {
         let parser = XMLParser(data: data)
         parser.delegate = self
-        // A truncated or trailing-garbage feed still yields the items parsed so far.
-        parser.parse()
+        // A truncated or trailing-garbage feed still yields the items parsed so far, so the
+        // Bool is discarded on purpose — `isFeed` is the answer. Discarded explicitly because
+        // corelibs-Foundation does not mark `parse()` `@discardableResult` the way Darwin
+        // does, and the Android cross-build is the only place that warns.
+        _ = parser.parse()
         return isFeed
     }
 

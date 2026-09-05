@@ -58,3 +58,50 @@ jobs:
         run: |
           bin_path="$(swift build --show-bin-path)"
           test -x "$bin_path/webreader"
+
+  # The engine half of the Android app. It runs in the Swift container because the Swift SDK
+  # for Android only works with a matching open-source toolchain — Xcode's cannot
+  # cross-compile at all, and the container's *is* the open-source one.
+  #
+  # The APK itself is not built here. Assembling it needs the Android SDK and a JDK on top of
+  # everything below, and what actually breaks is portability: a Foundation API that does not
+  # exist on Android, or a facade signature that drifts. That is exactly what this catches.
+  android:
+    runs-on: ubuntu-latest
+    container: swift:6.3-noble
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install unzip and curl
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get -q update
+          apt-get -q install -y curl unzip
+      # Both downloads are large and version-pinned, so they are worth caching: ~1 GB of NDK
+      # and ~1 GB of Swift SDK that change only when the pins below do.
+      - name: Cache the Android NDK and the Swift SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm/swift-sdks
+            /opt/android-ndk
+          key: android-sdk-swift-6.3.3-ndk-r27d
+      - name: Install the Swift SDK for Android
+        run: |
+          set -eu
+          if ! swift sdk list | grep -q swift-6.3.3-RELEASE_android; then
+            swift sdk install \
+              https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz \
+              --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
+          fi
+          if [ ! -d /opt/android-ndk/android-ndk-r27d ]; then
+            mkdir -p /opt/android-ndk
+            curl -fsSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+            unzip -q /tmp/ndk.zip -d /opt/android-ndk
+          fi
+          bundle=~/.swiftpm/swift-sdks/swift-6.3.3-RELEASE_android.artifactbundle/swift-android
+          ANDROID_NDK_HOME=/opt/android-ndk/android-ndk-r27d "$bundle/scripts/setup-android-sdk.sh"
+      - name: Cross-build ReaderKit and the JNI facade
+        run: |
+          ABIS="aarch64-unknown-linux-android28" Scripts/build-android.sh
+          test -f android/app/src/main/jniLibs/arm64-v8a/libReaderKitAndroid.so

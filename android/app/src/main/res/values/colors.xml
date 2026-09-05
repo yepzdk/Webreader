@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launcher tile. Ink on paper is the app's whole subject, so the tile is the ink and
+         the glyph is the paper. -->
+    <color name="ic_launcher_background">#1B1B1F</color>
+</resources>

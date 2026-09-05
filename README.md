@@ -4,7 +4,7 @@
 [![CI](https://github.com/yepzdk/webreader/actions/workflows/ci.yml/badge.svg)](https://github.com/yepzdk/webreader/actions/workflows/ci.yml)
 [![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-yepzdk-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/yepzdk)
 
-A small reading app for macOS, Linux, iPhone and iPad. Send it a link — from a browser picker like [Choosy](https://www.choosy.app/) on macOS or the browser chooser on Linux, from the share sheet on iOS, from the shell with `open -a WebReader <url>` or `webreader <url>`, or from the clipboard — and it renders the article as a clean, distraction-free page: title, byline, body. No ads, no site chrome.
+A small reading app for macOS, Linux, iPhone, iPad and Android. Send it a link — from a browser picker like [Choosy](https://www.choosy.app/) on macOS or the browser chooser on Linux, from the share sheet on iOS and Android, from the shell with `open -a WebReader <url>` or `webreader <url>`, or from the clipboard — and it renders the article as a clean, distraction-free page: title, byline, body. No ads, no site chrome.
 
 Reader extraction is [Mozilla Readability](https://github.com/mozilla/readability), the library behind Firefox's reader view. It runs on the rendered page inside the app's own session, so articles behind a login you're signed in to extract correctly.
 
@@ -31,6 +31,8 @@ Scripts/build-app.sh --install     # builds build/WebReader.app and copies it to
 A self-built bundle is ad-hoc signed, so it runs on the Mac that built it. Set `SIGN_IDENTITY="Developer ID Application: …"` to sign with the hardened runtime instead.
 
 On iPhone and iPad there is no release yet: build and run it from `WebReader.xcodeproj` (Xcode 16 or newer, iOS 16 or later). Share a link to WebReader from Safari's share sheet, or open `webreader://open?url=…` from Shortcuts. Settings and recents follow the Mac's if you point both at the same sync folder.
+
+On Android there is no release yet either: run `Scripts/build-android.sh` to cross-compile the reader and its Swift runtime, then `cd android && ./gradlew :app:assembleDebug`. The app registers for `http`/`https` and for the share sheet. See [`android/README.md`](android/README.md).
 
 On Linux it is developed against Arch with Hyprland — an [Omarchy](https://omarchy.org/) desktop — and needs `gtk4` and `webkitgtk-6.0`, both in the official `extra` repository:
 
@@ -128,7 +130,7 @@ swift test             # ReaderKit unit tests
 Scripts/build-app.sh   # assemble build/WebReader.app (macOS)
 ```
 
-The package has five SwiftPM targets: **ReaderKit** — Foundation-only reader logic (article model, appearance settings, recents, the generated reader/start/offline pages, URL cleaning) — **ReaderWebKit**, the WKWebView orchestration shared by the Apple hosts (page state, extraction, the script messages, sync cycles), **WebReader**, the AppKit shell around it, **CWebKitGTK**, a system-library shim over GTK4 and WebKitGTK 6.0, and **WebReaderGTK**, the Linux host, which produces the `webreader` binary. `Package.swift` guards the AppKit host and ReaderWebKit behind `#if os(macOS)`, so on Linux `swift build` and `swift test` cover ReaderKit and the GTK host and nothing reaches for AppKit or WebKit. The iOS app and its share extension (`Sources/WebReaderiOS`, `Sources/WebReaderShare`) are built by `WebReader.xcodeproj`, which consumes the same package. `Scripts/build-app.sh` and `Scripts/release.sh` stay macOS-only — they codesign and notarize, which has no Linux counterpart. See `CLAUDE.md` for the architecture notes.
+The package has five SwiftPM targets on a Mac: **ReaderKit** — Foundation-only reader logic, including `ReaderSession`, which is what the app actually decides (page state, extraction, the seventeen script messages) expressed as commands a host runs — **ReaderWebKit**, the WKWebView adapter shared by the Apple hosts, **WebReader**, the AppKit shell around it, **CWebKitGTK**, a system-library shim over GTK4 and WebKitGTK 6.0, and **WebReaderGTK**, the Linux host, which produces the `webreader` binary. `Package.swift` guards the AppKit host and ReaderWebKit behind `#if os(macOS)`, so on Linux `swift build` and `swift test` cover ReaderKit and the GTK host and nothing reaches for AppKit or WebKit. `WEBREADER_ANDROID=1` selects a third set — **ReaderKitAndroid** and **CReaderKitJNI** — that cross-compiles the same ReaderKit into a `.so` for the Kotlin host under `android/`. The iOS app and its share extension (`Sources/WebReaderiOS`, `Sources/WebReaderShare`) are built by `WebReader.xcodeproj`, which consumes the same package. `Scripts/build-app.sh` and `Scripts/release.sh` stay macOS-only — they codesign and notarize, which has no Linux counterpart. See `CLAUDE.md` for the architecture notes.
 
 ## Support
 
