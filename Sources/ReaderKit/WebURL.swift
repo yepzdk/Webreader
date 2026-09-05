@@ -43,4 +43,29 @@ public enum WebURL {
         guard let url = URL(string: "https://" + trimmed), url.host != nil else { return nil }
         return url
     }
+
+    /// Parses what another app *shared* into an openable web URL.
+    ///
+    /// Deliberately more forgiving than `clipboardURL`, and deliberately a separate rule.
+    /// Pasting is ambiguous — someone who pasted prose into a URL field probably mis-pasted,
+    /// so guessing at a link inside it would be wrong, which is why `clipboardURL` refuses
+    /// anything with a space in it. Sharing is not ambiguous: an app that puts "Some headline
+    /// https://example.com/x" in an ACTION_SEND extra is handing over that link, and on
+    /// Android that shape is the common case rather than the exception.
+    ///
+    /// An explicit scheme is required when the text is more than the link alone. A bare host
+    /// found in the middle of a sentence is a word that happens to contain a dot far more
+    /// often than it is an address.
+    public static func sharedURL(from raw: String?) -> URL? {
+        if let url = clipboardURL(from: raw) { return url }
+        guard let raw else { return nil }
+        for token in raw.split(whereSeparator: { $0.isWhitespace }) {
+            let lowered = token.lowercased()
+            guard lowered.hasPrefix("http://") || lowered.hasPrefix("https://") else { continue }
+            // Trailing punctuation is what a sentence leaves on a link it ends with.
+            let trimmed = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}\"'"))
+            if let url = clipboardURL(from: trimmed) { return url }
+        }
+        return nil
+    }
 }
