@@ -220,7 +220,10 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// automatic path — never an error page.
     func enterReader(from url: URL, manual: Bool) {
         let hidden = ReaderStore.hiddenPhrases(store: store)
-        webView.evaluateJavaScript(Reader.extractionScript(hiding: hidden)) { [weak self] result, _ in
+        // WebKit delivers this on the main thread, but its signature does not say so, and the
+        // branches below push state into the page. Spelled out rather than left to Swift 5's
+        // leniency, which downgrades it to a warning that Swift 6 will not.
+        webView.evaluateJavaScript(Reader.extractionScript(hiding: hidden)) { @MainActor [weak self] result, _ in
             guard let self else { return }
             // Back/forward landed on one of our own reader documents: it IS the reader, so
             // just say so. Nothing to extract, record, or cache.
