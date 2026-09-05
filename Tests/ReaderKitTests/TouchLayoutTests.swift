@@ -252,24 +252,43 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains("visibility: visible; opacity: 1; pointer-events: auto;"))
     }
 
-    func testHidingAddressesButtonsByIdFromTheRootAndNotThroughTheTree() {
-        // The mechanism this replaced ran through
-        // `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button` — four
-        // links of structure across an ancestor that switched `display` at the media
-        // boundary, which is what left buttons visible after a collapse until the next
-        // resize. Root attribute to id is two links and no intermediate element.
+    func testEachButtonCarriesItsOwnOpenStateRatherThanInheritingIt() {
+        // Two earlier versions derived every button's visibility from one attribute on an
+        // ancestor — `.reader-chrome`, then `<html>`. Both left buttons painted after a
+        // collapse until an unrelated resize forced the recalculation. The rule now matches
+        // the element's own attribute, which cannot be missed for some of the list.
         let css = ReaderChrome.chromeCSS(collapsible: true)
-        for id in ReaderChrome.stackButtonIDs {
-            XCTAssertTrue(css.contains("#\(id)"), "\(id) is not addressed by id")
-            XCTAssertTrue(css.contains("\(ReaderChrome.chromeOpenRoot) #\(id)"),
-                          "\(id) has no reveal rule under the root state")
-        }
-        // Nothing reaches a button through the cluster elements any more…
+        // Both rules, spelled out in full: every id present, in the order the stylesheet
+        // emits them. A button dropped from either list is the whole bug.
+        let sep = ",\n          "
+        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
+            .map { "#\($0)" }.joined(separator: sep)))
+        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
+            .map { "#\($0)[\(ReaderChrome.chromeOpenAttr)]" }.joined(separator: sep)))
+        // Nothing reaches a button through an ancestor's state any more.
+        XCTAssertFalse(css.contains(":root[data-chrome"))
+        XCTAssertFalse(css.contains("data-collapsible"))
         XCTAssertFalse(css.contains(".reader-nav > button"))
         XCTAssertFalse(css.contains(".reader-control > button"))
         // …and no ancestor of a chrome button changes `display` between the two layouts.
         // The declaration, not the word: the stylesheet's own comment says why it is gone.
         XCTAssertFalse(css.contains("display: contents;"))
+    }
+
+    func testTheShowHideFunctionWritesToEveryButtonItOwns() {
+        // The defect this pins is not a wrong rule, it is a function that never touched the
+        // things it was named for: it set one attribute and trusted the engine to resolve
+        // seven descendants. The script must name each button and write to each one.
+        let js = ReaderPage.html(article: article)
+        for id in ReaderChrome.stackButtonIDs {
+            XCTAssertTrue(js.contains(id), "\(id) is not named in the page")
+        }
+        XCTAssertTrue(js.contains("chromeButtons.forEach"))
+        XCTAssertTrue(js.contains("b.setAttribute('\(ReaderChrome.chromeOpenAttr)', 'true')"))
+        XCTAssertTrue(js.contains("b.removeAttribute('\(ReaderChrome.chromeOpenAttr)')"))
+        // The state the rest of the script reads is the one it just wrote, not a second
+        // copy on the root that could disagree with it.
+        XCTAssertFalse(js.contains("documentElement.setAttribute('data-chrome'"))
     }
 
     func testEveryButtonInTheColumnIsTheSameSquare() {
@@ -319,7 +338,7 @@ final class TouchLayoutTests: XCTestCase {
         let css = ReaderChrome.chromeCSS(collapsible: true)
         XCTAssertTrue(ReaderChrome.stackButtonIDs.contains("readerHomeBtn"))
         XCTAssertTrue(css.contains("#readerHomeBtn"))
-        XCTAssertTrue(css.contains("\(ReaderChrome.chromeOpenRoot) #readerHomeBtn"))
+        XCTAssertTrue(css.contains("#readerHomeBtn[\(ReaderChrome.chromeOpenAttr)]"))
     }
 
     func testTheStackReversesSoHomeLandsNearestTheThumb() {
@@ -358,12 +377,12 @@ final class TouchLayoutTests: XCTestCase {
         // pages from tucking away the only control they have.
         for html in [ReaderPage.html(article: article), StartPage.html(appName: "R")] {
             XCTAssertTrue(html.contains("id=\"readerChromeToggle\""))
-            XCTAssertTrue(html.contains(ReaderChrome.chromeOpenRoot))
+            XCTAssertTrue(html.contains("[\(ReaderChrome.chromeOpenAttr)]"))
         }
         for html in [SettingsPage.html(appName: "R"),
                      OfflineFallback.html(appName: "R", host: "e.test", kind: .offline)] {
             XCTAssertFalse(html.contains("id=\"readerChromeToggle\""))
-            XCTAssertFalse(html.contains(ReaderChrome.chromeOpenRoot))
+            XCTAssertFalse(html.contains("[\(ReaderChrome.chromeOpenAttr)]"))
             XCTAssertFalse(html.contains("visibility: hidden; opacity: 0;"))
         }
     }

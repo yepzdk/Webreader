@@ -624,19 +624,21 @@ enum ReaderChrome {
     /// The same list plus the toggle: everything that takes the column's square sizing.
     static let chromeButtonIDs = stackButtonIDs + ["readerChromeToggle"]
 
-    /// The selector for "the chrome column is open": one attribute on `<html>`.
+    /// The attribute the script puts on a chrome button that is currently revealed.
     ///
-    /// `:root` because it is the shortest and most stable thing a rule can hang off — no
-    /// intermediate element to change `display` under it — and because `data-theme`,
-    /// `data-quotes` and `data-thumbs` already live there, so page-wide state has one home.
-    static let chromeOpenRoot = ":root[data-chrome=\"open\"]"
+    /// On the button, not on an ancestor. Two earlier versions of this hung the state on
+    /// `.reader-chrome` and then on `:root`, and both left buttons painted after a collapse
+    /// until an unrelated resize forced the engine to re-resolve them. An attribute written
+    /// to the element itself cannot miss it, and it is the state you see when you inspect
+    /// the button you are asking about.
+    static let chromeOpenAttr = "data-chrome-open"
 
-    /// `ids` as a CSS selector list, optionally each under `prefix`.
+    /// `ids` as a CSS selector list, each optionally carrying `suffix`.
     ///
     /// One id per line so a stylesheet stays readable at eight of them, and so a diff shows
     /// which button changed rather than one reflowed line.
-    private static func selector(_ ids: [String], under prefix: String = "") -> String {
-        ids.map { prefix.isEmpty ? "#\($0)" : "\(prefix) #\($0)" }
+    private static func selector(_ ids: [String], suffix: String = "") -> String {
+        ids.map { "#\($0)\(suffix)" }
             .joined(separator: ",\n          ")
     }
 
@@ -743,12 +745,18 @@ enum ReaderChrome {
     /// in the roomy one its two clusters take themselves out of flow to their own top
     /// corners, so it holds nothing and measures 0x0.
     ///
-    /// *Buttons are addressed by id, and the open state lives on `:root`.* Hiding used to
-    /// run through `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`
-    /// — four links, every one a chance to mis-invalidate, and nothing you can look up in
-    /// an inspector without walking the tree. It is now root-attribute to id: two links,
-    /// no intermediate element, and `:root[data-chrome]` is the same place `data-theme`,
-    /// `data-quotes` and `data-thumbs` already live.
+    /// *Each button carries its own open state.* Hiding used to run through
+    /// `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`, and then
+    /// through `:root[data-chrome] #id`. Both derive a per-button result from an attribute
+    /// on an ancestor, and both left buttons lit after a collapse until a resize forced the
+    /// engine to re-resolve them — reliably the first and last of the list. Reported twice
+    /// on a real window; never reproducible under a probe, because reading a computed style
+    /// flushes the very recalculation that was missing.
+    ///
+    /// So the script sets `data-chrome-open` on each button itself and the rule matches the
+    /// element's own attribute. Changing an attribute on an element always invalidates that
+    /// element: there is no ancestor in the chain to get this wrong, and the state is on the
+    /// node you inspect.
     ///
     /// Collapsed is the *default* rather than a state the script applies, so the first
     /// paint is right without waiting for script. `visibility: hidden` rather than opacity
@@ -759,15 +767,14 @@ enum ReaderChrome {
     /// the only control they have.
     static func chromeCSS(platform: Platform = .macOS, collapsible: Bool = false) -> String {
         let collapsing = !collapsible ? "" : """
-          /* Collapsed by default. Every id spelled out; see the note above on why this is
-             not a descendant chain. */
+          /* Collapsed by default, so this is what the first paint uses. */
           \(selector(stackButtonIDs)) {
             visibility: hidden; opacity: 0; pointer-events: none;
             transition: opacity 140ms ease-out;
           }
-          /* One attribute on <html> reveals them, and outranks the rule above by the
-             attribute alone — both sides are a single id otherwise. */
-          \(selector(stackButtonIDs, under: chromeOpenRoot)) {
+          /* Revealed one element at a time, by the script, on the element itself — and it
+             outranks the rule above by the attribute alone. */
+          \(selector(stackButtonIDs, suffix: "[\(chromeOpenAttr)]")) {
             visibility: visible; opacity: 1; pointer-events: auto;
           }
           /* The stack leaves the flow so the hidden column reserves no space and cannot
@@ -1325,21 +1332,34 @@ enum ReaderChrome {
           // The collapsing bottom-right chrome. The toggle is absent in the roomy layout
           // and on the pages whose chrome is a single button, so everything below checks.
           //
-          // The open state is one attribute on <html>, not on the chrome element: the
-          // stylesheet reaches the buttons as `:root[data-chrome="open"] #readerHomeBtn`,
-          // and a root attribute is the shortest, most stable thing a rule can hang off.
-          // It is also where `data-theme`, `data-quotes` and `data-thumbs` already live.
+          // Showing and hiding walks the buttons and writes the state on each one. Two
+          // earlier versions set a single attribute on an ancestor — `.reader-chrome`, then
+          // `<html>` — and let one CSS rule reach the seven descendants. Both left buttons
+          // painted after a collapse until an unrelated resize forced the recalculation,
+          // reliably the first and last of the list. Writing the attribute to each element
+          // cannot half-apply, and it costs seven attribute writes per toggle.
+          //
+          // The buttons are looked up once, from the ids the stylesheet uses, and a page
+          // that never rendered one simply drops out of the list.
           var chromeToggle = document.getElementById('readerChromeToggle');
+          var chromeButtons = \(HTML.jsString(stackButtonIDs.joined(separator: " ")))
+            .split(' ')
+            .map(function (id) { return document.getElementById(id); })
+            .filter(Boolean);
           function setChromeOpen(open) {
             if (!chromeToggle) { return; }
-            if (open) { document.documentElement.setAttribute('data-chrome', 'open'); }
-            else { document.documentElement.removeAttribute('data-chrome'); }
+            chromeButtons.forEach(function (b) {
+              if (open) { b.setAttribute('\(chromeOpenAttr)', 'true'); }
+              else { b.removeAttribute('\(chromeOpenAttr)'); }
+            });
             chromeToggle.setAttribute('aria-expanded', String(open));
             chromeToggle.setAttribute('aria-label',
               open ? 'Hide reader controls' : 'Show reader controls');
           }
+          // The toggle's own ARIA state is the record: it is set on the same line as the
+          // buttons, and it is what a screen reader is already being told.
           function chromeIsOpen() {
-            return document.documentElement.getAttribute('data-chrome') === 'open';
+            return !!chromeToggle && chromeToggle.getAttribute('aria-expanded') === 'true';
           }
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {

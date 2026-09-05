@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   word.
 
 ### Fixed
+- **Some buttons stayed on screen after collapsing the reader controls** (#36). Hiding set
+  one attribute on an ancestor and left a single CSS rule to reach all seven buttons; two of
+  them kept painting until an unrelated window resize forced the browser to catch up. The
+  script now writes the state to each button itself, so a collapse cannot half-apply.
 - **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
   Block on a suggested row were revealed on hover, which meant they were invisible and
   unusable on any touch screen. They are now visible by default and only hidden where a
