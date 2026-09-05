@@ -1,5 +1,6 @@
 import Cocoa
 import ReaderKit
+import ReaderWebKit
 import WebKit
 
 /// The plain screen shown in place of a site while it loads (#24). Solid page background, the
@@ -15,7 +16,7 @@ import WebKit
 /// full and fade it out before the real load even started.
 ///
 /// Stacking between the web view and the hairline instead keeps the progress line untouched.
-final class LoadingCover {
+final class LoadingCover: ReaderLoadingCover {
     private let view = NSView()
     private let label = ShimmerLabel()
     private var watchdog: Timer?

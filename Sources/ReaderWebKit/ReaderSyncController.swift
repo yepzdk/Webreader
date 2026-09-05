@@ -1,5 +1,28 @@
-import Cocoa
+import Foundation
 import ReaderKit
+
+/// The parts of sync that are a fact about the host rather than about syncing.
+///
+/// There are only four, and each one is a real difference: what this device is called, what
+/// to say when sync is off, how a folder is remembered across launches, and whether the
+/// folder has to be claimed before it can be read. An unsandboxed Mac claims nothing; a
+/// sandboxed iOS app gets a URL from the document picker that is inert until
+/// `startAccessingSecurityScopedResource` says otherwise, and whose bookmark must be made
+/// while that claim is held.
+public protocol ReaderSyncPlatform: Sendable {
+    /// Display only — it names this device in the other devices' summaries.
+    var deviceName: String { get }
+    /// One sentence for "sync is off", naming the device the way its owner would.
+    var offSummary: String { get }
+    /// Remembers a folder across launches, so a rename or a move doesn't silently stop sync.
+    func bookmark(for url: URL) -> Data?
+    /// The folder a bookmark now points at. `isStale` asks for a fresh bookmark to be made.
+    func resolveBookmark(_ data: Data) -> (url: URL, isStale: Bool)?
+    /// Claims the folder for as long as sync uses it. False means the claim was refused, and
+    /// nothing inside the folder will answer.
+    func beginAccess(to url: URL) -> Bool
+    func endAccess(to url: URL)
+}
 
 /// Runs sync cycles and tells the app what changed under it.
 ///
@@ -12,23 +35,27 @@ import ReaderKit
 /// never runs concurrently with itself: a trigger arriving mid-cycle sets `again` and runs
 /// once the current one lands.
 ///
-/// Everything here is used from the main thread, like the rest of the AppKit host: the one
-/// cycle that runs off it hands its outcome back with `DispatchQueue.main.async` and touches
-/// nothing else. Hence `@unchecked Sendable` rather than `@MainActor` — the host predates
-/// actor isolation and the annotation would have to spread across every call site in
-/// `AppDelegate` to buy nothing.
-final class SyncController: @unchecked Sendable {
+/// Everything here is used from the main thread, like the rest of the host: the one cycle
+/// that runs off it hands its outcome back with `DispatchQueue.main.async` and touches
+/// nothing else. Hence `@unchecked Sendable` rather than `@MainActor` — the hosts predate
+/// actor isolation and the annotation would have to spread across every call site to buy
+/// nothing.
+public final class ReaderSyncController: ReaderSyncBridge, @unchecked Sendable {
     private let store: KeyValueStore
+    private let platform: ReaderSyncPlatform
     /// Called on the main thread after a cycle changed local state.
     private let onChange: (SyncEngine.Result) -> Void
     /// Called whenever the status changes, so an open sheet can redraw.
-    var onStatusChange: (() -> Void)?
+    public var onStatusChange: (() -> Void)?
 
     /// Cycles run here — file I/O on a folder that may live on a slow or stalled mount
     /// must never block the UI. Serial, so cycles can't interleave.
     private let queue = DispatchQueue(label: "dk.yepz.webreader.sync", qos: .utility)
 
     private var root: URL?
+    /// The folder currently claimed from the platform, so the claim is released exactly once
+    /// and only when sync stops using it.
+    private var claimed: URL?
     private var device: DeviceState.Device
     /// One watcher per watched path: the device-file folder (files appearing, vanishing or
     /// being replaced) and each peer's file (a client rewriting one in place, which a
@@ -40,26 +67,30 @@ final class SyncController: @unchecked Sendable {
     private var peers: [String] = []
     private var lastError: String?
 
-    init(store: KeyValueStore, onChange: @escaping (SyncEngine.Result) -> Void) {
+    public init(store: KeyValueStore, platform: ReaderSyncPlatform,
+                onChange: @escaping (SyncEngine.Result) -> Void) {
         self.store = store
+        self.platform = platform
         self.onChange = onChange
         // The device id names the one file this installation writes, so it has to outlive
-        // a rename of the Mac; the name is display only.
+        // a rename of the machine; the name is display only.
         let id = store.string(forKey: ReaderStore.Key.syncDeviceID) ?? ""
         if id.isEmpty { store.set(UUID().uuidString, forKey: ReaderStore.Key.syncDeviceID) }
         device = DeviceState.Device(
             id: store.string(forKey: ReaderStore.Key.syncDeviceID) ?? UUID().uuidString,
-            name: Host.current().localizedName ?? "Mac")
+            name: platform.deviceName)
         root = resolveFolder()
     }
 
+    deinit { release() }
+
     // MARK: - What the UI shows
 
-    var isOn: Bool { root != nil }
+    public var isOn: Bool { root != nil }
 
     /// The chosen folder, `~`-abbreviated, or nil when sync is off. Display only — the
     /// bookmark is what sync actually resolves.
-    var folderDisplayPath: String? {
+    public var folderDisplayPath: String? {
         store.string(forKey: ReaderStore.Key.syncFolderPath)
             .map { ($0 as NSString).abbreviatingWithTildeInPath }
     }
@@ -67,9 +98,9 @@ final class SyncController: @unchecked Sendable {
     /// One line of state: the error if there is one, otherwise when it last synced and who
     /// else it can see. The Sync sheet and the settings page both show this string, so the
     /// two can't describe sync differently.
-    var summary: String {
+    public var summary: String {
         if let lastError { return lastError }
-        guard isOn else { return "Settings and recents stay on this Mac." }
+        guard isOn else { return platform.offSummary }
         guard let last = Double(store.string(forKey: ReaderStore.Key.syncLastSuccess) ?? "")
             .map(Date.init(timeIntervalSince1970:)) else { return "Waiting for the first sync…" }
         let formatter = RelativeDateTimeFormatter()
@@ -83,22 +114,26 @@ final class SyncController: @unchecked Sendable {
     }
 
     /// True while the last cycle's error is the thing `summary` is reporting.
-    var hasError: Bool { lastError != nil }
+    public var hasError: Bool { lastError != nil }
 
     /// Picks up where the last run left off: start watching and sync once.
-    func start() {
+    public func start() {
         guard root != nil else { return }
         startWatching()
         syncNow()
     }
 
-    /// Turns sync on for `url` (what the user picked in the open panel).
+    /// Turns sync on for `url` (what the user picked).
     ///
     /// The folder is remembered as a bookmark so a rename or a move doesn't silently stop
-    /// sync; the path is kept alongside for display only. This app is not sandboxed, so
-    /// the bookmark is a plain one — security-scoped bookmarks require the sandbox
-    /// entitlement, and that arrives with the iOS target (#6).
-    func choose(_ url: URL) {
+    /// sync; the path is kept alongside for display only. The claim is taken before the
+    /// bookmark is made, because a sandboxed host can make neither without it.
+    public func choose(_ url: URL) {
+        guard claim(url) else {
+            lastError = SyncError.folderUnreadable(url.path).message
+            onStatusChange?()
+            return
+        }
         record(url)
         root = url
         lastError = nil
@@ -109,7 +144,7 @@ final class SyncController: @unchecked Sendable {
 
     /// Turns sync off, and takes this device's file with it — a folder that keeps
     /// advertising a device that no longer syncs is worse than one that doesn't.
-    func turnOff() {
+    public func turnOff() {
         if let root {
             let folder = SyncFolder(root: root)
             try? FileManager.default.removeItem(
@@ -117,6 +152,7 @@ final class SyncController: @unchecked Sendable {
         }
         debounce?.cancel()
         stopWatching()
+        release()
         root = nil
         peers = []
         lastError = nil
@@ -131,24 +167,24 @@ final class SyncController: @unchecked Sendable {
     /// Coming forward is the catch-all trigger: it covers everything that changed while
     /// the watchers were down (the folder offline, the app launched after the other device
     /// wrote).
-    func applicationDidBecomeActive() {
+    public func applicationDidBecomeActive() {
         guard root != nil else { return }
         syncNow()
     }
 
     /// A local write (settings, recents, a clear) that the other devices should see.
     /// Debounced: stepping the font size four times is one publish.
-    func localStateChanged() {
+    public func localStateChanged() {
         guard root != nil else { return }
         scheduleSync(after: 2)
     }
 
-    func startPageShown() {
+    public func startPageShown() {
         guard root != nil else { return }
         syncNow()
     }
 
-    func syncNow() {
+    public func syncNow() {
         guard let root else { return }
         guard !running else { again = true; return }
         running = true
@@ -227,18 +263,22 @@ final class SyncController: @unchecked Sendable {
         let manager = FileManager.default
         let recorded = store.string(forKey: ReaderStore.Key.syncFolderPath)
         if let encoded = store.string(forKey: ReaderStore.Key.syncFolder),
-           let data = Data(base64Encoded: encoded) {
-            var stale = false
-            if let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil,
-                                  bookmarkDataIsStale: &stale),
-               manager.fileExists(atPath: url.path) {
-                if stale || url.path != recorded { record(url) }
-                return url
+           let data = Data(base64Encoded: encoded),
+           let resolved = platform.resolveBookmark(data) {
+            // The claim comes before the question: on a sandboxed host an unclaimed folder
+            // does not even answer `fileExists`.
+            if claim(resolved.url), manager.fileExists(atPath: resolved.url.path) {
+                if resolved.isStale || resolved.url.path != recorded { record(resolved.url) }
+                return resolved.url
             }
+            release()
         }
         guard let recorded else { return nil }
         let url = URL(fileURLWithPath: recorded, isDirectory: true)
-        guard manager.fileExists(atPath: recorded) else {
+        // A bare path carries no claim, so on a sandboxed host this branch is the honest
+        // "the folder we remembered is not reachable any more" — which is what it says.
+        guard claim(url), manager.fileExists(atPath: recorded) else {
+            release()
             lastError = SyncError.folderUnreadable(recorded).message
             return url
         }
@@ -247,10 +287,25 @@ final class SyncController: @unchecked Sendable {
     }
 
     private func record(_ url: URL) {
-        if let data = try? url.bookmarkData() {
+        if let data = platform.bookmark(for: url) {
             store.set(data.base64EncodedString(), forKey: ReaderStore.Key.syncFolder)
         }
         store.set(url.path, forKey: ReaderStore.Key.syncFolderPath)
+    }
+
+    /// Claims `url` from the platform, releasing any folder claimed before it. Idempotent for
+    /// the same folder: the claim is a balanced pair, and claiming twice would leak one.
+    private func claim(_ url: URL) -> Bool {
+        if claimed == url { return true }
+        release()
+        guard platform.beginAccess(to: url) else { return false }
+        claimed = url
+        return true
+    }
+
+    private func release() {
+        if let claimed { platform.endAccess(to: claimed) }
+        claimed = nil
     }
 
     // MARK: - Watching
