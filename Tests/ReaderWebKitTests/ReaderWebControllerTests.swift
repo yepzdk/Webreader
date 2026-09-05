@@ -52,8 +52,8 @@ final class ReaderWebControllerTests: XCTestCase {
     func testStartPageLoadsAsAnOwnPage() {
         controller.showStartPage()
         waitForGenerator("WebReader Start")
-        XCTAssertTrue(controller.pageState.isShowingStartPage)
-        XCTAssertTrue(controller.pageState.isOwnPage)
+        XCTAssertTrue(controller.session.pageState.isShowingStartPage)
+        XCTAssertTrue(controller.session.pageState.isOwnPage)
     }
 
     /// Clear history, clicked on the start page, reaches the store as a tombstone rather than
@@ -81,7 +81,7 @@ final class ReaderWebControllerTests: XCTestCase {
         waitForGenerator("WebReader Start")
         click("#startSettings")
         waitForGenerator("WebReader Settings")
-        XCTAssertTrue(controller.pageState.isShowingSettings)
+        XCTAssertTrue(controller.session.pageState.isShowingSettings)
     }
 
     /// A URL the app cannot open is refused twice over: the shell is asked to signal it (a
@@ -94,7 +94,7 @@ final class ReaderWebControllerTests: XCTestCase {
             + "document.querySelector('#open').requestSubmit();")
 
         waitFor("the shell to be asked to reject") { self.services.rejections == 1 }
-        XCTAssertTrue(controller.pageState.isShowingStartPage,
+        XCTAssertTrue(controller.session.pageState.isShowingStartPage,
                       "a refusal must leave the page it was typed on standing")
     }
 
@@ -106,7 +106,7 @@ final class ReaderWebControllerTests: XCTestCase {
         controller.webView.loadHTMLString(
             "<html><body>a site</body></html>", baseURL: URL(string: "https://example.com"))
         waitFor("the foreign page to finish") {
-            self.controller.pageState.page == .none && !self.controller.webView.isLoading
+            self.controller.session.pageState.page == .none && !self.controller.webView.isLoading
         }
         var history = ReaderHistory()
         history.record(title: "An article", url: "https://example.com/a", image: nil)
@@ -145,7 +145,7 @@ final class ReaderWebControllerTests: XCTestCase {
         waitFor("the \(generator) page", file: file, line: line) {
             var found = false
             let done = self.expectation(description: "generator")
-            self.controller.webView.evaluateJavaScript(ReaderWebController.generatorScript) { result, _ in
+            self.controller.webView.evaluateJavaScript(ReaderSession.generatorScript) { result, _ in
                 found = (result as? String) == generator
                 done.fulfill()
             }
