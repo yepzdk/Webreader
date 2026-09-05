@@ -8,61 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Sync appearance settings and recents between devices through a folder you pick — inside
-  your Nextcloud folder, iCloud Drive, or anything else that syncs. Each device writes its
-  own file, so nothing collides and no device can wipe another's list. Set it up in
-  Settings (⌘,) or under Sync… in the WebReader menu; page zoom stays local. Mac only for
-  now — the Linux app has no folder picker yet.
+- Sync appearance settings and recents between devices through a folder you pick — your
+  Nextcloud folder, iCloud Drive, anything that already syncs. Set it up in Settings (⌘,);
+  page zoom stays local, and the Linux app has no folder picker yet.
 
 ### Changed
-- **Recents live on the start page** (#32). The start page drops its recents and hidden-text
-  buttons: the recents popover duplicated the inline list in a worse form, and the
-  hidden-text panel had no article to group phrases against. Clearing history moves under
-  the inline list, and hidden phrases are managed on the settings page beside blocked
-  outlets.
+- **Recents live on the start page** (#32). The reader's recents popover duplicated the
+  inline list and the hidden-text panel had no article to group against, so both leave the
+  reader; hidden phrases move to the settings page, beside blocked outlets.
 - **Five recent, five suggested** (#33). The reader's recents popover lists five recent
   articles instead of the whole history, followed by five suggestions — both with
   thumbnails — so you can pick up something new without going home first.
-- **Article images move to settings.** The Aa popover's **Images / No images** switch is
-  gone: sitting among the type and theme controls it read as governing the article's own
-  images, which it never did. The settings page now has an **Article images** section with
-  one switch per surface — the start page's lists and the reader's dropdown — and a list
-  with its switch off carries no images, reserves no space for them and fetches nothing.
-  Anyone who had turned the old switch off gets both new ones off, and Reset Reader
-  Appearance now leaves both alone.
+- **Article images move to settings.** The Aa popover's Images switch read as governing the
+  article's own images, which it never did; it becomes an **Article images** section with one
+  switch per surface. Anyone who had the old switch off gets both new ones off.
 - Recents now record when an article was read, and clearing history leaves a timestamp, so
   two devices merge in the right order and a clear isn't undone by a device that was off.
   Existing lists are read as before, on both platforms.
-- **The pages work on a touch screen** (#36). Controls reach a 44px target where a finger
-  is doing the pointing, popovers stay on screen and clear the safe areas, and the layout
-  stops spending desktop gutters and 18vh of headroom on a phone. Groundwork for the mobile
-  apps; a roomy desktop window renders exactly as before.
-- **On a small viewport the reader's controls move to the bottom-right and hide behind one
-  button** (#36). Six always-visible buttons over an article compete with the article, and
-  the top edge is the hardest place on a phone to reach one-handed. Tapping the button opens
-  a vertical column with Home nearest your thumb; tapping anywhere else, or Escape, closes it
-  again. Opening recents, hidden text or Aa collapses the column so only the panel is on
-  screen. Every button in the column is the same square, so the start page's Settings button
-  shows an icon there instead of its word. Triggered by the size of the window, not by touch
-  — so a narrow desktop window gets it too, which is where you can see it before the mobile
-  apps exist. A roomy window keeps the controls in both top corners, and Settings keeps its
-  word.
+- **The pages work on a touch screen** (#36). Controls reach a 44px target, popovers stay on
+  screen and clear the safe areas, and the layout stops spending desktop gutters and 18vh of
+  headroom on a phone. A roomy desktop window renders exactly as before.
+- **On a small viewport the reader's controls collapse into the bottom-right** (#36). Six
+  buttons over an article compete with it, and the top edge is hard to reach one-handed; one
+  button now opens them as a column. Window size triggers it, so narrow desktops get it too.
 
 ### Fixed
-- **Buttons stayed on screen after collapsing the reader controls** (#36). Collapsing hid
-  the buttons from view but left their boxes in place, so an invisible column kept standing
-  above the toggle and parts of it went on being drawn until an unrelated window resize.
-  Collapsing now removes them outright. The 140ms fade goes with it.
-- **Suggested-article controls were unreachable without a mouse** (#36). More, Less and
-  Block on a suggested row were revealed on hover, which meant they were invisible and
-  unusable on any touch screen. They are now visible by default and only hidden where a
-  pointer can actually hover.
-- **Article text ran through the top buttons while scrolling.** Each button painted its own
-  background, but the gaps between them let the article through, leaving a line of text
-  crossing the icons with neither readable. A gradient now sits behind them, fading into the
-  page so it stays invisible until something scrolls under it, and following the theme. On
-  a small viewport the controls have left the top edge entirely, so the problem goes with
-  them.
+- **Buttons stayed on screen after collapsing the reader controls** (#36). Collapsing hid them
+  but left their boxes standing, so parts of the column kept being drawn until the next window
+  resize. The 140ms fade goes with the fix.
+- **Suggested-article controls were unreachable without a mouse** (#36). More, Less and Block
+  on a suggested row were revealed on hover, so they were invisible and unusable on any touch
+  screen; they are visible by default now.
+- **Article text ran through the top buttons while scrolling.** The gaps between the buttons
+  let the article through, leaving a line of text crossing the icons with neither readable. A
+  gradient that follows the theme now sits behind them.
 
 ## [0.11.0] - 2026-08-31
 
