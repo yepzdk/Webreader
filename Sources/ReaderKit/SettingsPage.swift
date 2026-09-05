@@ -172,12 +172,13 @@ public enum SettingsPage {
           }
           /* Last, so it wins at every width. On a compact viewport the chrome is a floating
              button in the bottom-right corner, so the headroom goes back to what the content
-             wants and the foot clears the button, which ends 58px up. Keyed on the same
-             condition the chrome is, because it is the same fact about the layout. */
+             wants — plus whatever a notch or a Dynamic Island takes, since the page is drawn
+             edge to edge — and the foot clears the button, which ends 58px up. Keyed on the
+             same condition the chrome is, because it is the same fact about the layout. */
           @media \(ReaderChrome.compactViewport) {
             main {
-              padding-top: 32px;
-              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+              padding-top: \(ReaderChrome.inset(32, "top"));
+              padding-bottom: \(ReaderChrome.inset(78, "bottom"));
             }
           }
           h1 {

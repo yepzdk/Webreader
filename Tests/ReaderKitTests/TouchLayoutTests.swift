@@ -225,21 +225,36 @@ final class TouchLayoutTests: XCTestCase {
         }
     }
 
-    func testTouchPagesClearTheBottomChromeInsteadOfTheTop() {
+    func testTouchPagesClearTheBottomChromeAndWhateverTheTopEdgeTakes() {
         // The chrome is a floating column in the bottom-right corner on a coarse pointer, so
         // the headroom goes back to what the content wants and the *foot* is what has to
         // clear it: the toggle ends 58px up, and 78px leaves the last line readable rather
         // than parked under a button.
+        //
+        // The head still has the hardware to clear. The page is drawn edge to edge
+        // (`viewport-fit=cover`), so a flat `padding-top` puts the first line wherever the
+        // notch happens to be — which is exactly where the start page's title sat on an
+        // iPhone until these were insets rather than numbers.
         for html in [StartPage.html(appName: "R"), SettingsPage.html(appName: "R")] {
-            XCTAssertTrue(html.contains("padding-top: 32px;"))
+            XCTAssertTrue(html.contains(
+                "padding-top: calc(32px + env(safe-area-inset-top, 0px));"))
             XCTAssertTrue(html.contains(
                 "padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));"))
         }
-        // The reader's 96px foot already cleared it, so it needs no coarse override at all.
+        // The reader keeps its own 96px foot, and its head answers to whichever chrome is up
+        // there: 48px of article headroom when the chrome has left for the bottom-right
+        // corner, and enough to clear the cluster when a tablet keeps it at the top with
+        // 44px buttons. An iPad drew the first line inside the backdrop's fade until the
+        // second of those existed.
         let reader = ReaderPage.html(article: article)
         XCTAssertTrue(reader.contains(
+            "padding-top: calc(48px + env(safe-area-inset-top, 0px));"))
+        XCTAssertTrue(reader.contains(
+            "padding-top: calc(\(ReaderChrome.touchTopHeadroom)px + env(safe-area-inset-top, 0px));"))
+        XCTAssertGreaterThan(ReaderChrome.touchTopHeadroom, ReaderChrome.touchTarget + 14,
+                             "the article would start inside the chrome it is meant to clear")
+        XCTAssertTrue(reader.contains(
             "padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));"))
-        XCTAssertFalse(reader.contains("padding-top: calc(68px"))
     }
 
     func testANarrowPointerWindowStillClearsItsTopChrome() {
