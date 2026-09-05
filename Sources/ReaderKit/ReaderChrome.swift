@@ -745,40 +745,44 @@ enum ReaderChrome {
     /// in the roomy one its two clusters take themselves out of flow to their own top
     /// corners, so it holds nothing and measures 0x0.
     ///
-    /// *Each button carries its own open state.* Hiding used to run through
-    /// `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`, and then
-    /// through `:root[data-chrome] #id`. Both derive a per-button result from an attribute
-    /// on an ancestor, and both left buttons lit after a collapse until a resize forced the
-    /// engine to re-resolve them — reliably the first and last of the list. Reported twice
-    /// on a real window; never reproducible under a probe, because reading a computed style
-    /// flushes the very recalculation that was missing.
+    /// *Collapsing removes the buttons' boxes, and each button carries its own open state.*
     ///
-    /// So the script sets `data-chrome-open` on each button itself and the rule matches the
-    /// element's own attribute. Changing an attribute on an element always invalidates that
-    /// element: there is no ancestor in the chain to get this wrong, and the state is on the
-    /// node you inspect.
+    /// Three attempts moved the state closer to the button — ancestor class, then `:root`
+    /// attribute, then an attribute on the button itself — and none of them fixed the
+    /// report, because the state was never the problem. The property was: `visibility:
+    /// hidden` stops a button being painted but leaves its box, so the collapsed column
+    /// still measured 44x314 and stood above the toggle in every state. `display: none`
+    /// removes the box, which is what "collapsed" was always supposed to mean, and takes
+    /// the tab order with it exactly as `visibility` did.
+    ///
+    /// The per-button attribute is kept: it is the state you can read on the node you are
+    /// asking about, rather than one inherited from an ancestor three levels up.
+    ///
+    /// The cost is the 140ms fade, which `display` cannot animate. Accepted rather than
+    /// worked around: it was 140ms on a control that appears under your thumb, and the
+    /// alternatives all reintroduce an ancestor whose `display` switches.
     ///
     /// Collapsed is the *default* rather than a state the script applies, so the first
-    /// paint is right without waiting for script. `visibility: hidden` rather than opacity
-    /// alone, so a hidden button leaves the tab order too.
+    /// paint is right without waiting for script.
     ///
     /// `collapsible` is false for a page whose chrome is a single button; it then emits no
     /// hiding at all, which is what stops the settings and offline pages from tucking away
     /// the only control they have.
     static func chromeCSS(platform: Platform = .macOS, collapsible: Bool = false) -> String {
         let collapsing = !collapsible ? "" : """
-          /* Collapsed by default, so this is what the first paint uses. */
-          \(selector(stackButtonIDs)) {
-            visibility: hidden; opacity: 0; pointer-events: none;
-            transition: opacity 140ms ease-out;
+          /* Collapsed removes the box, not just the paint. `visibility: hidden` was the
+             wrong property: it stops a button being drawn but leaves its 44px box, and six
+             of those plus their gaps left a 314px invisible column standing above the
+             toggle in every state. Measured, not assumed. */
+          \(selector(stackButtonIDs, suffix: ":not([\(chromeOpenAttr)])")) {
+            display: none;
           }
-          /* Revealed one element at a time, by the script, on the element itself — and it
-             outranks the rule above by the attribute alone. */
-          \(selector(stackButtonIDs, suffix: "[\(chromeOpenAttr)]")) {
-            visibility: visible; opacity: 1; pointer-events: auto;
-          }
-          /* The stack leaves the flow so the hidden column reserves no space and cannot
-             push the toggle off the corner; it hangs directly above it. */
+          /* Written as `:not(...)` rather than a hidden rule plus a reveal rule, because
+             these buttons do not share one `display`: some compute `flex` and some
+             `inline-flex`. Restating a single value on reveal would quietly change half of
+             them. This way a revealed button simply keeps the display it already had. */
+          /* The stack leaves the flow, so nothing it holds can push the toggle off the
+             corner; it hangs directly above it and is empty when collapsed. */
           .reader-chrome-stack {
             position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
           }
@@ -812,11 +816,6 @@ enum ReaderChrome {
           #readerChromeToggle .chrome-toggle-close,
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-open { display: none; }
           #readerChromeToggle[aria-expanded="true"] .chrome-toggle-close { display: block; }
-        }
-        /* The reveal only animates in the compact layout, so killing the transition
-           unconditionally is enough — there is none anywhere else to kill. */
-        @media (prefers-reduced-motion: reduce) {
-          \(selector(stackButtonIDs)) { transition: none; }
         }
         /* The toggle's box comes from the same shared declaration as every other chrome
            button, so it cannot drift from the controls it reveals. */

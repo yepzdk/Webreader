@@ -246,25 +246,47 @@ final class TouchLayoutTests: XCTestCase {
         let css = ReaderChrome.chromeCSS(collapsible: true)
         XCTAssertTrue(css.contains("bottom: calc(14px + env(safe-area-inset-bottom, 0px));"))
         XCTAssertTrue(css.contains("right: calc(14px + env(safe-area-inset-right, 0px));"))
-        // Collapsed is the default, so the first paint is right without waiting for script,
-        // and it uses `visibility` so a hidden button leaves the tab order too.
-        XCTAssertTrue(css.contains("visibility: hidden; opacity: 0; pointer-events: none;"))
-        XCTAssertTrue(css.contains("visibility: visible; opacity: 1; pointer-events: auto;"))
+        // Collapsed is the default, so the first paint is right without waiting for script.
+        XCTAssertTrue(css.contains("display: none;"))
+    }
+
+    func testCollapsingRemovesTheBoxAndNotJustThePaint() {
+        // The defect three commits failed to fix. `visibility: hidden` stops a button being
+        // drawn but keeps its 44px box: collapsed, the column still measured 44x314 and
+        // stood above the toggle in every state. Nothing about *where* the state lived could
+        // fix that, because the property was wrong, not the selector.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        // Declarations, not the words: the stylesheet's own comment explains why the
+        // property changed, and an earlier version of this test matched that comment.
+        XCTAssertFalse(css.contains("visibility: hidden;"))
+        XCTAssertFalse(css.contains("visibility: visible;"))
+        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
+            .map { "#\($0):not([\(ReaderChrome.chromeOpenAttr)])" }
+            .joined(separator: ",\n          ")))
+        XCTAssertTrue(css.contains("display: none;"))
+    }
+
+    func testTheRevealRuleDoesNotRestateADisplayTheButtonsDoNotShare() {
+        // These buttons do not compute one `display`: some are `flex`, some `inline-flex`.
+        // Written as a hidden rule plus a reveal rule, the reveal would have to name a
+        // single value and would quietly change half of them. `:not(...)` means a revealed
+        // button keeps whatever display it already had, so there is nothing to restate.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        for id in ReaderChrome.stackButtonIDs {
+            XCTAssertFalse(css.contains("#\(id)[\(ReaderChrome.chromeOpenAttr)] {"),
+                           "\(id) has a reveal rule that restates its display")
+        }
     }
 
     func testEachButtonCarriesItsOwnOpenStateRatherThanInheritingIt() {
-        // Two earlier versions derived every button's visibility from one attribute on an
-        // ancestor — `.reader-chrome`, then `<html>`. Both left buttons painted after a
-        // collapse until an unrelated resize forced the recalculation. The rule now matches
-        // the element's own attribute, which cannot be missed for some of the list.
+        // Two earlier versions derived every button's state from one attribute on an
+        // ancestor — `.reader-chrome`, then `<html>`. Keeping the attribute on the button
+        // is what makes the state readable on the node you are actually asking about.
         let css = ReaderChrome.chromeCSS(collapsible: true)
-        // Both rules, spelled out in full: every id present, in the order the stylesheet
-        // emits them. A button dropped from either list is the whole bug.
-        let sep = ",\n          "
-        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
-            .map { "#\($0)" }.joined(separator: sep)))
-        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
-            .map { "#\($0)[\(ReaderChrome.chromeOpenAttr)]" }.joined(separator: sep)))
+        for id in ReaderChrome.stackButtonIDs {
+            XCTAssertTrue(css.contains("#\(id):not([\(ReaderChrome.chromeOpenAttr)])"),
+                          "\(id) is not collapsed by its own attribute")
+        }
         // Nothing reaches a button through an ancestor's state any more.
         XCTAssertFalse(css.contains(":root[data-chrome"))
         XCTAssertFalse(css.contains("data-collapsible"))
@@ -338,7 +360,7 @@ final class TouchLayoutTests: XCTestCase {
         let css = ReaderChrome.chromeCSS(collapsible: true)
         XCTAssertTrue(ReaderChrome.stackButtonIDs.contains("readerHomeBtn"))
         XCTAssertTrue(css.contains("#readerHomeBtn"))
-        XCTAssertTrue(css.contains("#readerHomeBtn[\(ReaderChrome.chromeOpenAttr)]"))
+        XCTAssertTrue(css.contains("#readerHomeBtn:not([\(ReaderChrome.chromeOpenAttr)])"))
     }
 
     func testTheStackReversesSoHomeLandsNearestTheThumb() {
