@@ -26,6 +26,83 @@ enum ReaderChrome {
             .joined(separator: "\n")
     }
 
+    /// One chrome offset from a window edge, grown by the device's safe-area inset there.
+    ///
+    /// Every `position: fixed` piece of chrome goes through this so a notch, a rounded
+    /// corner or a home indicator cannot land on top of a control. On a desktop every
+    /// inset is 0 and this is the fixed offset it has always been.
+    ///
+    /// The two-argument `env()` is deliberate. With no fallback the declaration is invalid
+    /// in an engine that does not implement `env()`, and an invalid declaration is dropped
+    /// — so the chrome would lose its offset altogether rather than fall back to it.
+    private static func inset(_ px: Int, _ edge: String) -> String {
+        "calc(\(px)px + env(safe-area-inset-\(edge), 0px))"
+    }
+
+    /// The touch-target floor, in px. 44 is Apple's HIG figure and clears the 24px WCAG
+    /// 2.5.8 minimum the chrome already aimed at with padding; Material's 48dp is met by
+    /// the padding the coarse blocks add around it.
+    ///
+    /// Applied only under `@media (pointer: coarse)`, never unconditionally: the desktop
+    /// chrome is dense on purpose, and a mouse hits a 28px button without trying.
+    ///
+    /// Not private: every page states the same floor for its own controls, and a second
+    /// copy of the number is how a floor drifts one control at a time.
+    static let touchTarget = 44
+
+    /// The `<meta name="viewport">` every generated page carries.
+    ///
+    /// `viewport-fit=cover` is not decoration: iOS resolves every `safe-area-inset-*` to
+    /// 0px until a document opts in with it, so without this the insets the chrome, the
+    /// toast and the popovers offset by are inert on the one platform they were added for.
+    /// Opting in also lets the page paint under the notch and the home indicator, which is
+    /// what those insets then hold the controls clear of.
+    ///
+    /// `initial-scale=1` with no `maximum-scale`: pinch-zoom stays available, because a
+    /// reading app nobody can zoom is a reading app somebody cannot read.
+    static let viewportMeta = "<meta name=\"viewport\" "
+        + "content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
+
+    /// The single JS object name an Android host injects with
+    /// `WebViewCompat.addWebMessageListener`. Named here so the host and the page cannot
+    /// disagree about it, the way the message names themselves are agreed by being
+    /// spelled once in `ReaderChrome` and once in each host's registration list.
+    static let androidBridge = "readerHost"
+
+    /// `window.readerPost(name, body)` — the one route a generated page has to its host,
+    /// emitted in `<head>` so it is defined before any inline handler or later script can
+    /// call it.
+    ///
+    /// It exists so the transport is one platform-selected line instead of a
+    /// `window.webkit.messageHandlers` reference at every post site. `WKWebView` and
+    /// WebKitGTK both expose that object under the same name, which is why the two current
+    /// hosts never needed a seam; Android's WebView exposes no such thing. Its
+    /// `addWebMessageListener` bridge injects one named object whose `postMessage` takes a
+    /// single string, so there the name has to travel *with* the body as JSON and the host
+    /// demultiplexes on the far side.
+    ///
+    /// Swallowing the error is carried over unchanged from the call sites this replaces: a
+    /// page can outlive its host — restored from the back-forward cache, or simply opened
+    /// in a browser while working on the CSS — and it must stay readable rather than
+    /// throwing on every click.
+    static func transportScript(platform: Platform) -> String {
+        let send: String
+        switch platform {
+        case .macOS, .linux, .iOS:
+            send = "window.webkit.messageHandlers[name].postMessage(body);"
+        case .android:
+            send = "window.\(androidBridge).postMessage("
+                + "JSON.stringify({ name: name, body: body }));"
+        }
+        return """
+        <script>
+        window.readerPost = function (name, body) {
+          try { \(send) } catch (err) {}
+        };
+        </script>
+        """
+    }
+
     /// The `data-theme`, `data-quotes` and `data-thumbs` attributes for `<html>`. Each is
     /// absent at its default (`auto` follows the system; bordered quotes are the
     /// stylesheet's baseline; thumbnails are on), so the stock page is attribute-free.
@@ -112,12 +189,25 @@ enum ReaderChrome {
     /// The shared chrome button box: the same padding, colours, hairline and radius for the
     /// top-right cluster and the top-left nav slot. One declaration and two selector lists,
     /// so a button on one side of the window can't drift from a button on the other.
+    ///
+    /// The comfortable floor lives here for the same reason the box does: every chrome
+    /// button on either side of the window grows together or none of them does. It applies
+    /// on any touch host and in any compact viewport — see `comfortableChrome` for why the
+    /// two are a union rather than one or the other. `inline-flex` is what makes
+    /// `min-height` centre the label: the text buttons have no flex of their own, only the
+    /// icon ones do.
     private static func buttonBox(_ selectors: String) -> String {
         """
         \(selectors) {
           padding: 4px 10px; font-family: inherit; font-size: 14px;
           color: var(--muted); background: var(--bg);
           border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+        }
+        @media \(comfortableChrome) {
+          \(selectors) {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 4px 14px;
+          }
         }
         """
     }
@@ -134,14 +224,18 @@ enum ReaderChrome {
     static func navCSS(platform: Platform = .macOS) -> String {
         """
         .reader-nav {
-          position: fixed; top: 14px; left: 14px; z-index: 10;
+          position: fixed; top: \(inset(14, "top")); left: \(inset(14, "left")); z-index: 10;
           display: flex; gap: 6px;
           font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
         }
         \(buttonBox("#readerHomeBtn, #startSettings"))
         #readerHomeBtn:hover, #startSettings:hover { color: var(--fg); }
-        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor. */
-        #readerHomeBtn { display: flex; align-items: center; padding: 5px 9px; }
+        /* The home icon matches the cluster's icon buttons; the SVG inherits currentColor.
+           `justify-content` matters only once the coarse floor gives the box more width
+           than the icon needs — without it the icon sits left of centre on touch. */
+        #readerHomeBtn {
+          display: flex; align-items: center; justify-content: center; padding: 5px 9px;
+        }
         #readerHomeBtn svg { display: block; }
         """
     }
@@ -154,7 +248,7 @@ enum ReaderChrome {
         let serif = platform.serifStack
         return """
         .reader-controls {
-          position: fixed; top: 14px; right: 14px; z-index: 10;
+          position: fixed; top: \(inset(14, "top")); right: \(inset(14, "right")); z-index: 10;
           display: flex; gap: 6px;
           font-family: \(sans); font-size: 12px; line-height: 1.3;
         }
@@ -164,9 +258,11 @@ enum ReaderChrome {
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
-        /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor. */
+        /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor.
+           `justify-content` centres the icon once the coarse floor makes the box wider
+           than the glyph needs; on a pointer the box is content-sized and it does nothing. */
         #readerRecentsBtn, #readerHiddenBtn, #readerMoreBtn, #readerLessBtn {
-          display: flex; align-items: center; padding: 5px 9px;
+          display: flex; align-items: center; justify-content: center; padding: 5px 9px;
         }
         #readerRecentsBtn svg, #readerHiddenBtn svg,
         #readerMoreBtn svg, #readerLessBtn svg { display: block; }
@@ -192,6 +288,10 @@ enum ReaderChrome {
         .badge[hidden] { display: none; }
         #readerPanel, #readerRecents, #readerHidden {
           position: absolute; top: calc(100% + 8px); right: 0; width: 240px;
+          /* Every panel hangs leftward from a right-anchored button, so each needs the same
+             guard against running off the opposite edge — not just the two list panels that
+             historically had it. */
+          max-width: calc(100vw - 28px);
           padding: 12px; background: var(--bg);
           border: 1px solid var(--border); border-radius: 8px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
@@ -331,6 +431,67 @@ enum ReaderChrome {
         .swatch-sepia { background: #f4ecd8; }
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
+        /* Two blocks at the end, so source order settles every override without a
+           specificity fight. They answer different questions, which is why they are two.
+
+           First: where a panel goes. That follows the chrome, so it is keyed on viewport
+           size. Every panel is `right: 0` inside its own `.reader-control`, and the recents
+           button is the third of five — so its right edge is ~273px in from the left on a
+           390px phone, and any panel wider than that starts off-screen. Measured at -47px
+           before this existed: the `max-width` guard never fired, because the panel was
+           narrower than the viewport and still outside it. Widening a right-anchored panel
+           cannot fix that; only re-anchoring can. `position: fixed` escapes the
+           `.reader-control` containing block without changing DOM ancestry, so
+           `controlsScript`'s outside-click dismissal keys off the same `.reader-controls`
+           it always did. */
+        @media \(compactViewport) {
+          #readerPanel, #readerRecents, #readerHidden {
+            position: fixed;
+            /* Anchored to the bottom now, not the top: the chrome that opens these sits in
+               the bottom-right corner, and a panel that appeared at the far end of the
+               screen from the button you just pressed would be a different gesture
+               entirely. It grows upward from just above the toggle — which is all that is
+               left on screen, because opening a panel collapses the stack. */
+            top: auto;
+            bottom: calc(\(chromeEdge + touchTarget + chromeGap)px
+                         + env(safe-area-inset-bottom, 0px));
+            left: max(\(chromeEdge)px, env(safe-area-inset-left, 0px));
+            right: max(\(chromeEdge)px, env(safe-area-inset-right, 0px));
+            width: auto;
+            /* Full width on a portrait phone, but a landscape one is 844px wide and a
+               816px band of 13px rows is not a list anyone wants to read. Capped, and
+               pushed back to the right so it still reads as hanging from the cluster that
+               opened it. */
+            max-width: 30rem; margin-left: auto;
+            max-height: calc(100vh - \(chromeEdge * 2 + touchTarget + chromeGap)px
+                             - env(safe-area-inset-top, 0px)
+                             - env(safe-area-inset-bottom, 0px));
+            overflow-y: auto;
+          }
+        }
+        /* Second: how big the rating pair is. It is chrome — it stands in the column beside
+           the other buttons — but it sits outside `buttonBox`, carrying its own box so the
+           pressed accent state can override it. So it needs the same union `buttonBox` uses,
+           or a narrow mouse window gets five 44px buttons and two 27px ones. */
+        @media \(comfortableChrome) {
+          #readerMoreBtn, #readerLessBtn {
+            min-height: \(touchTarget)px; min-width: \(touchTarget)px; padding: 5px 12px;
+          }
+        }
+        /* Third: how big the controls *inside* a panel are. That asks what is pointing at
+           them, so it stays on the pointer alone. A mouse hits a 32px row without trying,
+           and growing every row on a narrow desktop window would make the panel feel
+           clumsy — the chrome grows there because a floating column over content wants air
+           around it, which a list you read does not. */
+        @media (pointer: coarse) {
+          .recent { min-height: \(touchTarget)px; padding: 10px 10px; font-size: 13px; }
+          .recent-empty, .phrase-empty { padding: 10px; }
+          .seg button { min-height: \(touchTarget)px; padding: 0 4px; }
+          .swatch { width: 34px; height: 34px; }
+          .themes { padding: 2px 0; }
+          /* The X on a hidden-phrase row: a 20px icon box inside a list built for reading. */
+          .phrase-remove { min-height: \(touchTarget)px; min-width: \(touchTarget)px; }
+        }
         """
     }
 
@@ -342,7 +503,8 @@ enum ReaderChrome {
     static func toastCSS(platform: Platform = .macOS) -> String {
         """
         #readerToast {
-          position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(6px);
+          position: fixed; left: 50%; bottom: \(inset(20, "bottom"));
+          transform: translateX(-50%) translateY(6px);
           z-index: 20; max-width: calc(100vw - 32px);
           padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
           background: var(--bg); color: var(--fg);
@@ -392,7 +554,8 @@ enum ReaderChrome {
     static func progressCSS() -> String {
         """
         #readerProgress {
-          position: fixed; top: 0; left: 0; width: 100%; height: \(LoadProgress.lineThickness)px; z-index: 9;
+          position: fixed; top: env(safe-area-inset-top, 0px); left: 0; width: 100%;
+          height: \(LoadProgress.lineThickness)px; z-index: 9;
           /* Foreground, not accent: the native page-load line is accent-colored, and a
              blue hairline sitting still at 30% reads as a stuck load. */
           background: var(--fg);
@@ -409,6 +572,300 @@ enum ReaderChrome {
     /// `aria-hidden` because a scroll fraction is decorative; the article text is the content.
     static func progressBar() -> String {
         "<div id=\"readerProgress\" hidden aria-hidden=\"true\"></div>"
+    }
+
+    /// The gradient behind the fixed chrome, and the element it paints on.
+    ///
+    /// The article scrolls *under* the chrome, and a button's own `--bg` only covers the
+    /// button — the gaps between them, and the space between the two corners, let text
+    /// through. The result is a line of article running between the icons, with neither the
+    /// text nor the icons readable.
+    ///
+    /// A gradient rather than a bar: it fades to nothing instead of drawing a toolbar edge
+    /// across a page whose whole point is not having one. And it costs no script and no
+    /// state, because it is invisible until something is behind it — `--bg` over `--bg` is
+    /// no change, so at the top of the document there is nothing to see, and the fade only
+    /// reads once text has scrolled up into it.
+    ///
+    /// `z-index: 7` puts it under everything that has to stay legible over it — the hide
+    /// affordance (8), the progress line (9) and the chrome itself (10) — and over the
+    /// article, which is in normal flow. `pointer-events: none` so a band across the top of
+    /// the page doesn't swallow taps meant for the text under it.
+    ///
+    /// The height is the chrome's own geometry plus room to fade, rather than a number that
+    /// happened to clear it: the cluster ends `chromeEdge + touchTarget` below the safe
+    /// area — 58px, since `comfortableChrome` includes `(pointer: coarse)` and a roomy
+    /// touch viewport therefore gets 44px buttons — and the solid stop sits exactly there.
+    /// Sized against the 41px pointer cluster instead, it ended 11px short and left article
+    /// text running between the icons on a tablet.
+    ///
+    /// It exists only for the roomy layout. On a compact viewport the chrome has moved to
+    /// the bottom-right corner (see `chromeCSS`), so a fade along the top edge would be a
+    /// gradient over nothing — the only thing left up there is the progress hairline, and a
+    /// 2.5px line needs no backing to stay legible.
+    static func backdropCSS() -> String {
+        """
+        #readerBackdrop {
+          position: fixed; top: 0; left: 0; right: 0; z-index: 7;
+          height: calc(\(chromeEdge + touchTarget + backdropFade)px
+                       + env(safe-area-inset-top, 0px));
+          pointer-events: none;
+          background: linear-gradient(to bottom, var(--bg) 0%,
+            var(--bg) calc(\(chromeEdge + touchTarget)px + env(safe-area-inset-top, 0px)),
+            transparent 100%);
+        }
+        @media \(compactViewport) {
+          #readerBackdrop { display: none; }
+        }
+        """
+    }
+
+    /// `aria-hidden` because it is a legibility device with no content of its own.
+    static func backdrop() -> String {
+        "<div id=\"readerBackdrop\" aria-hidden=\"true\"></div>"
+    }
+
+    /// The gap between stacked chrome buttons, and the chrome's inset from the window edge.
+    /// Shared with `inset(_:_:)` so the bottom-right column and the popovers that open above
+    /// it agree on where the stack ends without either measuring the other.
+    private static let chromeGap = 10
+    private static let chromeEdge = 14
+
+    /// How far the backdrop keeps fading after the chrome it backs has ended. Enough that
+    /// the band reads as a fade rather than a toolbar edge, and no more.
+    private static let backdropFade = 24
+
+    /// The buttons that live in the collapsing stack, by id — everything the column holds
+    /// except the toggle, which is the one control that never hides.
+    ///
+    /// Spelled out rather than reached through the tree. Hiding used to run through
+    /// `.reader-chrome[data-collapsible]:not([data-open]) .reader-nav > button`, which is
+    /// four links of structure to say "these seven buttons" — and every link is a chance
+    /// for the engine to mis-invalidate, which is exactly what it did. A list of ids says
+    /// the same thing in a form that cannot drift from the markup without failing loudly,
+    /// and that you can look up directly in an inspector.
+    static let stackButtonIDs = ["readerHomeBtn", "startSettings", "readerAa",
+                                 "readerRecentsBtn", "readerHiddenBtn",
+                                 "readerMoreBtn", "readerLessBtn"]
+
+    /// The same list plus the toggle: everything that takes the column's square sizing.
+    static let chromeButtonIDs = stackButtonIDs + ["readerChromeToggle"]
+
+    /// The attribute the script puts on a chrome button that is currently revealed.
+    ///
+    /// On the button, not on an ancestor. Two earlier versions of this hung the state on
+    /// `.reader-chrome` and then on `:root`, and both left buttons painted after a collapse
+    /// until an unrelated resize forced the engine to re-resolve them. An attribute written
+    /// to the element itself cannot miss it, and it is the state you see when you inspect
+    /// the button you are asking about.
+    static let chromeOpenAttr = "data-chrome-open"
+
+    /// `ids` as a CSS selector list, each optionally carrying `suffix`.
+    ///
+    /// One id per line so a stylesheet stays readable at eight of them, and so a diff shows
+    /// which button changed rather than one reflowed line.
+    private static func selector(_ ids: [String], suffix: String = "") -> String {
+        ids.map { "#\($0)\(suffix)" }
+            .joined(separator: ",\n          ")
+    }
+
+    /// The viewport at which the chrome collapses into one bottom-right column.
+    ///
+    /// Size, not input device. Hiding the controls answers "is there room for them beside
+    /// the article?", and on a small viewport there is not — six buttons parked over prose
+    /// compete with the prose whether a finger or a cursor put them there. A narrow desktop
+    /// window has exactly the problem a phone does.
+    ///
+    /// Width *or* height: a phone in landscape is 844px wide and 390px tall, so a width
+    /// test alone would leave it with the top cluster eating a fifth of the screen. 48rem
+    /// is where the window stops being much wider than the reading column itself (the
+    /// widest `--reader-width` is 48rem); 30rem is where there is no vertical room to spare.
+    ///
+    /// Written as a comma list rather than a Level 4 `or`, which WebKitGTK cannot be relied
+    /// on for — which is also why nothing combines this with `and`.
+    static let compactViewport = "(max-width: 48rem), (max-height: 30rem)"
+
+    /// Where the chrome's buttons take the comfortable 44px sizing: any touch host, and any
+    /// compact viewport whatever is pointing at it.
+    ///
+    /// The union is deliberate. A tablet is roomy but touched, so it needs the target
+    /// without collapsing; a narrow desktop window is moused but cramped, and a floating
+    /// column over content wants air around it there too. Only the roomy pointer layout —
+    /// the two top corners — keeps its original density.
+    static let comfortableChrome = "(pointer: coarse), " + compactViewport
+
+    /// Wraps the nav slot and the control cluster in one element, plus — where a page has
+    /// more than one control — the button that reveals them.
+    ///
+    /// In the roomy layout the wrapper holds nothing: its two children are `position:
+    /// fixed` to the opposite top corners they have always had, so the layer measures 0x0.
+    /// The whole point is the compact layout, where they come back into flow and become one
+    /// bottom-right column (see `chromeCSS`) — which a wrapper is the only way to express,
+    /// since CSS cannot reparent two elements into a shared flex line.
+    ///
+    /// DOM order is stack-then-toggle. `.reader-chrome` runs as a plain column so the
+    /// toggle lands at the foot, and the stack inside it reverses so the nav slot — first
+    /// in the markup — ends up nearest the thumb. Bottom-up the column reads: toggle, Home,
+    /// Aa, hidden text, recents, less, more. Home is nearest because going back is the one
+    /// action you take without reading anything first, and the cluster keeps its document
+    /// order so its right-to-left arrangement on a pointer becomes bottom-to-top here.
+    ///
+    /// `collapsible` is false only for a page whose chrome is a single button (settings,
+    /// offline): a control that reveals one control is a tap for nothing, and with one
+    /// button there is no popover for it to stand behind. Those pages still get the
+    /// bottom-right position, which is the half of this that is about reach.
+    ///
+    /// Everything with two or more controls collapses, and that is what keeps the geometry
+    /// uniform: a popover has to clear exactly one 44px button, because the toggle is all
+    /// that is ever left beside it. The start page's two buttons would otherwise have stood
+    /// behind its own appearance panel.
+    static func chrome(nav: String, controls: String = "",
+                       collapsible: Bool = false) -> String {
+        let toggle = !collapsible ? "" : """
+        <button id="readerChromeToggle" type="button" aria-label="Show reader controls"
+                  title="Reader controls" aria-expanded="false" aria-controls="readerChromeStack">
+            <!-- ellipsis-vertical, Lucide-style line icon; swapped for the X when open -->
+            <svg class="chrome-toggle-open" width="15" height="15" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/>
+              <circle cx="12" cy="19" r="1"/>
+            </svg>
+            <svg class="chrome-toggle-close" width="15" height="15" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        """
+        return """
+        <div class="reader-chrome">
+          <div class="reader-chrome-stack" id="readerChromeStack">
+            \(indent(nav, by: 4))
+            \(indent(controls, by: 4))
+          </div>
+          \(toggle)
+        </div>
+        """
+    }
+
+    /// The chrome's compact layout: one collapsing column in the bottom-right.
+    ///
+    /// Two complaints, from reading on an actual phone. The cluster sat along the top edge,
+    /// which is the hardest place there to reach one-handed; and six always-visible buttons
+    /// over prose compete with the prose. So on a small viewport the chrome moves into the
+    /// bottom-right corner and, where there is more than one control, hides behind a single
+    /// button until asked for.
+    ///
+    /// Keyed on `compactViewport` — size, not input device. The distraction is a question of
+    /// whether there is room for the controls beside the article, which a narrow desktop
+    /// window answers the same way a phone does. Only the button *sizing* asks what is
+    /// pointing at them (`comfortableChrome`).
+    ///
+    /// **Two rules about how this is written, both paid for.**
+    ///
+    /// *No `display` switch on any ancestor of a chrome button.* The wrapper used to be
+    /// `display: contents` and become `display: flex` at the media boundary. That is a
+    /// display change on an ancestor of every button in the column, and the layout stopped
+    /// resolving reliably across it: buttons stayed visible after a collapse and corrected
+    /// themselves on the next resize. The wrapper is now a fixed layer in both layouts —
+    /// in the roomy one its two clusters take themselves out of flow to their own top
+    /// corners, so it holds nothing and measures 0x0.
+    ///
+    /// *Collapsing removes the buttons' boxes, and each button carries its own open state.*
+    ///
+    /// Three attempts moved the state closer to the button — ancestor class, then `:root`
+    /// attribute, then an attribute on the button itself — and none of them fixed the
+    /// report, because the state was never the problem. The property was: `visibility:
+    /// hidden` stops a button being painted but leaves its box, so the collapsed column
+    /// still measured 44x314 and stood above the toggle in every state. `display: none`
+    /// removes the box, which is what "collapsed" was always supposed to mean, and takes
+    /// the tab order with it exactly as `visibility` did.
+    ///
+    /// The per-button attribute is kept: it is the state you can read on the node you are
+    /// asking about, rather than one inherited from an ancestor three levels up.
+    ///
+    /// The cost is the 140ms fade, which `display` cannot animate. Accepted rather than
+    /// worked around: it was 140ms on a control that appears under your thumb, and the
+    /// alternatives all reintroduce an ancestor whose `display` switches.
+    ///
+    /// Collapsed is the *default* rather than a state the script applies, so the first
+    /// paint is right without waiting for script.
+    ///
+    /// `collapsible` is false for a page whose chrome is a single button; it then emits no
+    /// hiding at all, which is what stops the settings and offline pages from tucking away
+    /// the only control they have.
+    static func chromeCSS(platform: Platform = .macOS, collapsible: Bool = false) -> String {
+        let collapsing = !collapsible ? "" : """
+          /* Collapsed removes the box, not just the paint. `visibility: hidden` was the
+             wrong property: it stops a button being drawn but leaves its 44px box, and six
+             of those plus their gaps left a 314px invisible column standing above the
+             toggle in every state. Measured, not assumed. */
+          \(selector(stackButtonIDs, suffix: ":not([\(chromeOpenAttr)])")) {
+            display: none;
+          }
+          /* Written as `:not(...)` rather than a hidden rule plus a reveal rule, because
+             these buttons do not share one `display`: some compute `flex` and some
+             `inline-flex`. Restating a single value on reveal would quietly change half of
+             them. This way a revealed button simply keeps the display it already had. */
+          /* The stack leaves the flow, so nothing it holds can push the toggle off the
+             corner; it hangs directly above it and is empty when collapsed. */
+          .reader-chrome-stack {
+            position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
+          }
+        """
+        return """
+        /* A fixed layer in both layouts — never `display: contents`, see the note above.
+           Roomy: the clusters are `position: fixed` to their own corners, so this holds
+           nothing. Compact: they come back into flow and this is the column. */
+        .reader-chrome {
+          position: fixed; z-index: 10;
+          bottom: \(inset(chromeEdge, "bottom")); right: \(inset(chromeEdge, "right"));
+          display: flex; flex-direction: column; align-items: flex-end;
+          gap: \(chromeGap)px;
+          font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
+        }
+        /* `column` on the wrapper puts the toggle at the foot; `column-reverse` here sends
+           the nav slot — first in the markup — to the bottom of the stack, directly above
+           it. Bottom-up: toggle, Home, Aa, hidden text, recents, less, more. */
+        .reader-chrome-stack {
+          display: flex; flex-direction: column-reverse; align-items: flex-end;
+          gap: \(chromeGap)px;
+        }
+        @media \(compactViewport) {
+          /* The two clusters stop being fixed and become rows of the column. */
+          .reader-nav, .reader-controls {
+            position: static; top: auto; right: auto; left: auto;
+            flex-direction: column; align-items: flex-end; gap: \(chromeGap)px;
+          }
+        \(collapsing)
+          /* The toggle swaps its glyph rather than its box, so nothing shifts on open. */
+          #readerChromeToggle .chrome-toggle-close,
+          #readerChromeToggle[aria-expanded="true"] .chrome-toggle-open { display: none; }
+          #readerChromeToggle[aria-expanded="true"] .chrome-toggle-close { display: block; }
+        }
+        /* The toggle's box comes from the same shared declaration as every other chrome
+           button, so it cannot drift from the controls it reveals. */
+        \(buttonBox("#readerChromeToggle"))
+        /* It exists only for the compact layout; `display` is settled last, after the box. */
+        #readerChromeToggle { display: none; }
+        /* The roomy slot says the word and hides the icon; the column reverses it below. */
+        #startSettings .nav-icon { display: none; }
+        @media \(compactViewport) {
+          #readerChromeToggle {
+            display: inline-flex; align-items: center; justify-content: center;
+          }
+          #readerChromeToggle svg { display: block; }
+          /* Every button in the column is the same square, so the stack reads as one edge:
+             "Aa" is text and measured 47px against an icon button's 44px. Only here — on a
+             line, a wider "Aa" beside narrower icons is exactly right. */
+          \(selector(chromeButtonIDs)) {
+            width: \(touchTarget)px; padding: 0;
+          }
+          #startSettings .nav-label { display: none; }
+          #startSettings .nav-icon { display: block; }
+        }
+        """
     }
 
     /// Drives the reading-progress line from scroll position. A separate fragment from
@@ -561,13 +1018,13 @@ enum ReaderChrome {
     ///
     /// The click posts inline rather than through `controlsScript`, because the offline page
     /// carries no chrome script at all — one mechanism for one button beats a listener here
-    /// and an inline handler there. Every handler name is registered for the window's life,
-    /// so there is nothing for the bare `postMessage` to throw on.
+    /// and an inline handler there. `readerPost` is defined in `<head>`, so it is already
+    /// there by the time a click can happen.
     static func navHome() -> String {
         """
         <div class="reader-nav">
           <button id="readerHomeBtn" type="button" aria-label="Home" title="Start page"
-                  onclick="window.webkit.messageHandlers.readerHome.postMessage('')">
+                  onclick="readerPost('readerHome', '')">
             <!-- house, Lucide-style line icon -->
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -582,11 +1039,28 @@ enum ReaderChrome {
     /// The start page's nav occupant. The start page *is* home, so the slot carries the one
     /// piece of navigation it does have — and Settings sits where Home sits on every other
     /// page instead of hiding in the opposite corner.
+    ///
+    /// Carries both an icon and a word, and `chromeCSS` swaps them: the roomy top-left slot
+    /// has room to say "Settings", while the compact column is squares and a text button
+    /// would be the one wide row in it. Same trick the toggle uses for its own two glyphs,
+    /// for the same reason — CSS can hide a child, not rewrite one.
+    ///
+    /// `aria-label` is on the button either way, so the word disappearing costs a screen
+    /// reader nothing.
     static func navSettings() -> String {
         """
         <div class="reader-nav">
-          <button id="startSettings" type="button"
-                  onclick="window.webkit.messageHandlers.readerOpenSettings.postMessage('')">Settings</button>
+          <button id="startSettings" type="button" aria-label="Settings"
+                  onclick="readerPost('readerOpenSettings', '')">
+            <!-- settings-2 (sliders), Lucide-style line icon; shown only in the column -->
+            <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 aria-hidden="true">
+              <path d="M20 7h-9"/><path d="M14 17H5"/>
+              <circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>
+            </svg>
+            <span class="nav-label">Settings</span>
+          </button>
         </div>
         """
     }
@@ -833,7 +1307,7 @@ enum ReaderChrome {
             if (window.readerOnLayoutChange) { window.readerOnLayoutChange(); }
           }
           function save() {
-            try { window.webkit.messageHandlers.readerSettings.postMessage(s); } catch (e) {}
+            readerPost('readerSettings', s);
           }
           // How the host hands over settings merged in from another device: adopt and
           // redraw, but do NOT save — they are already the stored state, and writing them
@@ -881,6 +1355,49 @@ enum ReaderChrome {
             clear.textContent = 'Clear history';
             recents.appendChild(clear);
           };
+          // The collapsing bottom-right chrome. The toggle is absent in the roomy layout
+          // and on the pages whose chrome is a single button, so everything below checks.
+          //
+          // Showing and hiding walks the buttons and writes the state on each one. Two
+          // earlier versions set a single attribute on an ancestor — `.reader-chrome`, then
+          // `<html>` — and let one CSS rule reach the seven descendants. Both left buttons
+          // painted after a collapse until an unrelated resize forced the recalculation,
+          // reliably the first and last of the list. Writing the attribute to each element
+          // cannot half-apply, and it costs seven attribute writes per toggle.
+          //
+          // The buttons are looked up once, from the ids the stylesheet uses, and a page
+          // that never rendered one simply drops out of the list.
+          var chromeToggle = document.getElementById('readerChromeToggle');
+          var chromeButtons = \(HTML.jsString(stackButtonIDs.joined(separator: " ")))
+            .split(' ')
+            .map(function (id) { return document.getElementById(id); })
+            .filter(Boolean);
+          function setChromeOpen(open) {
+            if (!chromeToggle) { return; }
+            chromeButtons.forEach(function (b) {
+              if (open) { b.setAttribute('\(chromeOpenAttr)', 'true'); }
+              else { b.removeAttribute('\(chromeOpenAttr)'); }
+            });
+            chromeToggle.setAttribute('aria-expanded', String(open));
+            chromeToggle.setAttribute('aria-label',
+              open ? 'Hide reader controls' : 'Show reader controls');
+          }
+          // The toggle's own ARIA state is the record: it is set on the same line as the
+          // buttons, and it is what a screen reader is already being told.
+          function chromeIsOpen() {
+            return !!chromeToggle && chromeToggle.getAttribute('aria-expanded') === 'true';
+          }
+          // Focus a chrome button, or the toggle when that button has no box to take it.
+          // Opening a popover collapses the stack, so on a compact viewport every button
+          // that can open one is `display: none` by the time the panel is dismissed — and
+          // `focus()` on a display-less element is a no-op that leaves <body> focused, which
+          // is the fall-through the two call sites exist to prevent. Asked as "does it have
+          // boxes?" rather than by re-testing the breakpoint here: the collapse is a CSS
+          // fact, and the script would only be keeping a second copy of it.
+          function focusChrome(btn) {
+            if (btn.getClientRects().length) { btn.focus(); return; }
+            if (chromeToggle) { chromeToggle.focus(); }
+          }
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {
             popovers.forEach(function (p) {
@@ -888,9 +1405,19 @@ enum ReaderChrome {
               p.panel.hidden = !open;
               p.btn.setAttribute('aria-expanded', String(open));
             });
+            // A panel fills the screen above the toggle, so the column of buttons that
+            // opened it would only be in the way. One thing on screen at a time.
+            if (which) { setChromeOpen(false); }
             // Rows that were behind a closed panel have their thumbnails withheld until
             // here, so opening one is what asks the publishers for its images.
             if (which) { window.readerRevealThumbs(); }
+          }
+          if (chromeToggle) {
+            chromeToggle.addEventListener('click', function () {
+              // Pressing it while a panel is open means "give me the controls back": the
+              // document handler below has already closed the panel by this point.
+              setChromeOpen(!chromeIsOpen());
+            });
           }
           panel.addEventListener('click', function (e) {
             var b = e.target.closest('button');
@@ -967,8 +1494,7 @@ enum ReaderChrome {
                 // close handler would see a node outside .reader-controls and shut the panel.
                 e.stopPropagation();
                 window.readerSetHidden(HIDDEN.filter(function (p) { return p !== phrase; }));
-                try { window.webkit.messageHandlers.readerUnhide.postMessage(phrase); }
-                catch (err) {}
+                readerPost('readerUnhide', phrase);
               });
               row.appendChild(text);
               if (count) { row.appendChild(chip); }
@@ -1001,16 +1527,14 @@ enum ReaderChrome {
                 // The button the user just activated is gone, and the panel stays open to
                 // show the empty state — so focus has to go somewhere deliberate, or it
                 // falls to <body> and the next Tab restarts at the top of the document.
-                recentsBtn.focus();
-                try { window.webkit.messageHandlers.readerClear.postMessage(''); }
-                catch (err) {}
+                focusChrome(recentsBtn);
+                readerPost('readerClear', '');
                 return;
               }
               var row = e.target.closest('button[data-url]');
               if (!row) { return; }
               setOpen(null);
-              try { window.webkit.messageHandlers.readerOpen.postMessage(row.dataset.url); }
-              catch (err) {}
+              readerPost('readerOpen', row.dataset.url);
             });
           }
           // The panel's second group: what to read next, so finishing an article doesn't
@@ -1072,12 +1596,20 @@ enum ReaderChrome {
           }
           document.addEventListener('click', function (e) {
             if (!e.target.closest('.reader-controls')) { setOpen(null); }
+            // The stack dismisses on the same gesture, keyed one level out: the toggle sits
+            // beside `.reader-controls`, not inside it, and pressing it must not be read as
+            // a tap outside itself.
+            if (!e.target.closest('.reader-chrome')) { setChromeOpen(false); }
           });
           document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') { return; }
-            // Return focus to the button that opened the popover being dismissed.
+            // Return focus to the button that opened the popover being dismissed — or to
+            // the toggle, since dismissing is also what collapsed that button away.
             var open = popovers.filter(function (p) { return !p.panel.hidden; })[0];
-            if (open) { setOpen(null); open.btn.focus(); }
+            if (open) { setOpen(null); focusChrome(open.btn); return; }
+            // Nothing open but the stack: close it and hand focus back to the toggle, or
+            // Escape would leave focus on a button that has just become invisible.
+            if (chromeIsOpen()) { setChromeOpen(false); chromeToggle.focus(); }
           });
           // Like / dislike the article being read. Present only on the reader page; the
           // host owns the toggle, and calls back with the rating now in force so the two
@@ -1086,8 +1618,7 @@ enum ReaderChrome {
           var lessBtn = document.getElementById('readerLessBtn');
           if (moreBtn && lessBtn) {
             var rate = function (direction) {
-              try { window.webkit.messageHandlers.readerRate.postMessage(direction); }
-              catch (err) {}
+              readerPost('readerRate', direction);
             };
             moreBtn.addEventListener('click', function () { rate('more'); });
             lessBtn.addEventListener('click', function () { rate('less'); });

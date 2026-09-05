@@ -29,7 +29,11 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-webreader}"
 echo "Releasing WebReader $VERSION, signing as '$SIGN_IDENTITY'"
 
 # --- Build: universal, Developer ID, hardened runtime -------------------------------------
-ARCHS="--arch arm64 --arch x86_64" SIGN_IDENTITY="$SIGN_IDENTITY" Scripts/build-app.sh
+# CONFIG is pinned, not inherited: build-app.sh defaults to release but honours the
+# environment, and an exported CONFIG=debug would sail through lipo, codesign --verify and
+# notarytool to publish an `isInspectable` bundle.
+CONFIG=release ARCHS="--arch arm64 --arch x86_64" SIGN_IDENTITY="$SIGN_IDENTITY" \
+  Scripts/build-app.sh
 APP=build/WebReader.app
 ARCHES="$(lipo -archs "$APP/Contents/MacOS/WebReader")"
 case "$ARCHES" in *arm64*x86_64*|*x86_64*arm64*) ;; *) die "binary is not universal: $ARCHES" ;; esac

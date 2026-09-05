@@ -20,8 +20,10 @@ public enum StartPage {
     /// they are written already-escaped here and never passed through `HTML.escape`.
     private struct Copy {
         /// The clipboard-open chord, as a single `<kbd>` — the treatment this hint has
-        /// always used, because a chord is one key cap and not three.
-        let openChord: String
+        /// always used, because a chord is one key cap and not three. Nil on a host that
+        /// binds no chord, where the whole hint paragraph is dropped rather than printed
+        /// with an empty key cap.
+        let openChord: String?
         /// The empty-recents paragraph's inner HTML. Its line break and the continuation
         /// indent are part of the macOS page's bytes, which a regression test pins, so the
         /// wrap stays where it was instead of being reflowed here.
@@ -46,6 +48,24 @@ public enum StartPage {
                     No articles yet. Route links here from your browser chooser,
                           or open one from the command line with <code>webreader &lt;url&gt;</code>.
                     """
+            case .iOS:
+                // The share sheet is how a link actually arrives on iOS, and it is the one
+                // route a reader can be told to look for by name. No chord and no command
+                // line, so the paste field above is the only other way in and needs no
+                // hint of its own.
+                openChord = nil
+                emptyRecents = """
+                    No articles yet. Share a link to this app from Safari or anywhere
+                          else, or paste one above.
+                    """
+            case .android:
+                // "Share menu" rather than "share sheet": Android's own wording, and the
+                // chooser is what an intent filter puts this app into.
+                openChord = nil
+                emptyRecents = """
+                    No articles yet. Share a link to this app from your browser or
+                          anywhere else, or paste one above.
+                    """
             }
         }
     }
@@ -67,7 +87,20 @@ public enum StartPage {
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
+        // The shared touch floor, bound once so the rules below read as CSS.
+        let touchTarget = ReaderChrome.touchTarget
         let copy = Copy(platform)
+        // Only where a chord exists to name. On a touch host the field's own placeholder
+        // is the whole instruction, and a hint naming a key nobody can press is worse
+        // than none — the same rule the Linux copy above already follows.
+        let openHint = copy.openChord.map {
+            "\n            <p class=\"hint\">or press <kbd>\(HTML.escape($0))</kbd> "
+                + "to open a copied link</p>"
+        } ?? ""
+        // Autofocus is a desktop courtesy and a touch hostility: on a phone it throws the
+        // soft keyboard over the recents list before the page has been read, so the field
+        // is focused only where focusing it costs the reader no screen.
+        let autofocus = platform.hasKeyboardCommands ? " autofocus" : ""
         // Recents are listed inline here rather than tucked in the popover: this page has
         // the whole window and nothing competing for it, and picking up where you left off
         // is the most likely reason you're looking at it.
@@ -92,10 +125,11 @@ public enum StartPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader Start">
         <title>\(name)</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
@@ -109,7 +143,33 @@ public enum StartPage {
           }
           main {
             max-width: 34rem; margin: 0 auto;
-            padding: 18vh 24px 64px;
+            /* Mobile first. A phone has no room to spend 18vh above the title, and the side
+               padding has to clear a landscape notch as well as give the text room. Both
+               grow at 34rem, where the measure stops being the constraint.
+               The base top padding clears the chrome for the one case that still has it at
+               the top: a pointer in a window narrower than the breakpoint. */
+            padding-top: 56px;
+            padding-bottom: 48px;
+            padding-left: max(16px, env(safe-area-inset-left, 0px));
+            padding-right: max(16px, env(safe-area-inset-right, 0px));
+          }
+          @media (min-width: 34rem) {
+            main {
+              padding-top: 18vh; padding-bottom: 64px;
+              padding-left: max(24px, env(safe-area-inset-left, 0px));
+              padding-right: max(24px, env(safe-area-inset-right, 0px));
+            }
+          }
+          /* Last, so it wins at every width. On a compact viewport the chrome is a floating
+             column in the bottom-right corner: nothing sits at the top but the progress
+             hairline, so the headroom goes back to what the content wants — and the foot has
+             to clear the toggle, which ends 58px up. Keyed on the same condition the chrome
+             is, because it is the same fact about the layout. */
+          @media \(ReaderChrome.compactViewport) {
+            main {
+              padding-top: 32px;
+              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+            }
           }
           /* The front door — title and URL field — stays narrow and centred whatever the
              window does; only the lists below it spread out. */
@@ -144,6 +204,15 @@ public enum StartPage {
             border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
           }
           button[type="submit"]:hover { filter: brightness(1.08); }
+          /* Touch: both controls reach the 44px floor, and the field's text goes to 16px.
+             The size is not cosmetic — mobile Safari zooms the whole page in on focusing an
+             input under 16px, which throws the layout off and needs a pinch to undo. */
+          @media (pointer: coarse) {
+            #url { padding: 12px 12px; font-size: 16px; min-height: \(touchTarget)px; }
+            button[type="submit"] {
+              padding: 12px 18px; font-size: 16px; min-height: \(touchTarget)px;
+            }
+          }
           .hint { color: var(--muted); font-size: 12px; margin: 0; text-align: center; }
           .hint code {
             font-family: ui-monospace, Menlo, monospace; font-size: 11px;
@@ -183,13 +252,21 @@ public enum StartPage {
           .suggestion:hover { background: var(--surface); }
           .suggestion .recent { flex: 1; min-width: 0; }
           .suggestion .recent:hover { background: transparent; }
+          /* More/Less/Block on a suggested row. Visible by default and *hidden* only where
+             a pointer can hover — the inverse of how this was written, and the reason it
+             was written that way is the reason it had to change: on a touch screen there is
+             no hover, so `opacity: 0` made three working controls permanently invisible and
+             unreachable. `:focus-within` already covered the keyboard; nothing covered a
+             finger. Where hover does exist the behaviour is unchanged. */
           .row-actions {
             flex: none; display: flex; gap: 2px; padding-right: 4px;
-            opacity: 0; transition: opacity 120ms ease;
+            transition: opacity 120ms ease;
           }
-          /* Revealed on hover, but never hidden from the keyboard. */
-          .suggestion:hover .row-actions,
-          .row-actions:focus-within { opacity: 1; }
+          @media (hover: hover) {
+            .row-actions { opacity: 0; }
+            .suggestion:hover .row-actions,
+            .row-actions:focus-within { opacity: 1; }
+          }
           @media (prefers-reduced-motion: reduce) { .row-actions { transition: none; } }
           .row-action {
             display: flex; padding: 4px; border: 0; border-radius: 4px;
@@ -197,6 +274,16 @@ public enum StartPage {
           }
           .row-action:hover { color: var(--fg); background: var(--border); }
           .row-action svg { display: block; }
+          /* The 21px icon box is a fine pointer target and a poor finger one; on touch it
+             reaches the same floor as every other control, and the row grows to fit. The
+             floor, not padding around the icon: 11px each side computes to 35px, which is
+             neither the 44px this claims nor any other control's size. */
+          @media (pointer: coarse) {
+            .row-action {
+              min-height: \(touchTarget)px; min-width: \(touchTarget)px;
+              align-items: center; justify-content: center;
+            }
+          }
           .link {
             padding: 0; border: 0; background: none; cursor: pointer;
             font: inherit; color: var(--accent); text-decoration: underline;
@@ -212,24 +299,38 @@ public enum StartPage {
           .clear-history .link:hover, .clear-history .link:focus-visible {
             color: var(--fg); text-decoration: underline;
           }
+          /* Touch: 24px is the WCAG 2.5.8 floor this was built to and a poor finger target.
+             It stays visually quiet — same size type, same muted colour — and only the hit
+             area grows, which is the whole point of the distinction. */
+          @media (pointer: coarse) {
+            .clear-history .link {
+              display: inline-flex; align-items: center;
+              min-height: \(touchTarget)px; padding: 4px 2px;
+            }
+          }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform,
+                                                       collapsible: true), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.controls(), by: 2))
-          \(ReaderChrome.indent(ReaderChrome.navSettings(), by: 2))
+          \(ReaderChrome.backdrop())
+          \(ReaderChrome.indent(ReaderChrome.chrome(
+                nav: ReaderChrome.navSettings(),
+                controls: ReaderChrome.controls(),
+                collapsible: true), by: 2))
           <main>
             <div class="intro">
             <h1>\(name)</h1>
             <form id="open">
               <input id="url" type="text" inputmode="url" autocomplete="off"
-                     autocapitalize="off" spellcheck="false" autofocus
+                     autocapitalize="off" spellcheck="false"\(autofocus)
                      aria-label="Address to open" placeholder="Paste or type a URL">
               <button type="submit">Open</button>
-            </form>
-            <p class="hint">or press <kbd>\(copy.openChord)</kbd> to open a copied link</p>
+            </form>\(openHint)
             <p id="error" hidden role="alert">That doesn't look like a link this app can open.</p>
             </div>
             <div class="lists">
@@ -267,8 +368,7 @@ public enum StartPage {
               var value = field.value.trim();
               if (!value) { field.focus(); return; }
               error.hidden = true;
-              try { window.webkit.messageHandlers.readerOpenURL.postMessage(value); }
-              catch (err) {}
+              readerPost('readerOpenURL', value);
             });
             // Typing again clears a previous rejection.
             field.addEventListener('input', function () { error.hidden = true; });
@@ -278,9 +378,9 @@ public enum StartPage {
               field.focus();
               field.select();
             };
-            function post(name, body) {
-              try { window.webkit.messageHandlers[name].postMessage(body); } catch (err) {}
-            }
+            // `readerPost` is defined in <head>; this alias keeps the call sites below on
+            // the short name they have always used.
+            var post = window.readerPost;
             // The inline recents list and the suggestions share the popover's row markup,
             // so they need the same click handling — the popover's own listener is scoped
             // to the popover.

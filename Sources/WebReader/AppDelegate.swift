@@ -139,6 +139,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.pageZoom = ReaderStore.zoom(store: store)
+        // Debug builds only, so Safari's Develop menu can inspect the running app. Every
+        // page in this app is generated Swift string, which means a layout question about a
+        // real window ("is this rule applying?") otherwise has no answer short of rebuilding
+        // with a guess in it. `Scripts/build-app.sh` builds *release* by default, so this
+        // is off in the bundle you normally run: `CONFIG=debug Scripts/build-app.sh` is what
+        // produces an inspectable one. Said wrongly here for three commits, which is how a
+        // reported layout bug went that long without anyone being able to look at it.
+        #if DEBUG
+        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        #endif
         window.contentView!.addSubview(webView)
         loadingCover = LoadingCover(over: webView, in: window.contentView!)
         progressLine = ProgressLine(webView: webView, in: window.contentView!)

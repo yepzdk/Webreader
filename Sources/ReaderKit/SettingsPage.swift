@@ -37,6 +37,8 @@ public enum SettingsPage {
                             syncSummary: String = "") -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
+        // The shared touch floor, bound once so the rules below read as CSS.
+        let touchTarget = ReaderChrome.touchTarget
         let sourceRows = suggestions.sources.isEmpty
             ? "<p class=\"empty\">No sources. Suggestions stay empty until you add one.</p>"
             : suggestions.sources.map(row).joined(separator: "\n        ")
@@ -134,10 +136,11 @@ public enum SettingsPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
@@ -150,7 +153,33 @@ public enum SettingsPage {
             font: 15px/1.5 \(sans);
             -webkit-font-smoothing: antialiased;
           }
-          main { max-width: 34rem; margin: 0 auto; padding: 10vh 24px 64px; }
+          main {
+            max-width: 34rem; margin: 0 auto;
+            /* Mobile first. The base top padding clears the fixed nav button for the one
+               case that still has it at the top: a pointer in a window narrower than the
+               breakpoint. */
+            padding-top: 56px;
+            padding-bottom: 48px;
+            padding-left: max(16px, env(safe-area-inset-left, 0px));
+            padding-right: max(16px, env(safe-area-inset-right, 0px));
+          }
+          @media (min-width: 34rem) and (pointer: fine) {
+            main {
+              padding-top: 10vh; padding-bottom: 64px;
+              padding-left: max(24px, env(safe-area-inset-left, 0px));
+              padding-right: max(24px, env(safe-area-inset-right, 0px));
+            }
+          }
+          /* Last, so it wins at every width. On a compact viewport the chrome is a floating
+             button in the bottom-right corner, so the headroom goes back to what the content
+             wants and the foot clears the button, which ends 58px up. Keyed on the same
+             condition the chrome is, because it is the same fact about the layout. */
+          @media \(ReaderChrome.compactViewport) {
+            main {
+              padding-top: 32px;
+              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+            }
+          }
           h1 {
             font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
             margin: 0 0 4px;
@@ -247,10 +276,32 @@ public enum SettingsPage {
             font-size: 12px; padding: 1px 6px; white-space: nowrap;
             background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
           }
+          /* Touch: every control reaches the 44px floor, and the field's text goes to 16px
+             so mobile Safari does not zoom the page in on focus. The checkbox itself stays
+             small — the whole `.check` label is the target, which is why it takes the floor
+             and the box only needs `flex: none` to stop the row squashing it to 13px. The
+             label keeps the base `align-items: start`: the article-image label wraps at
+             phone widths, and centring a wrapped label leaves its box floating between the
+             lines — the case that rule was written for. */
+          @media (pointer: coarse) {
+            .source-remove {
+              min-height: \(touchTarget)px; min-width: \(touchTarget)px;
+              align-items: center; justify-content: center;
+            }
+            #source { padding: 12px; font-size: 16px; min-height: \(touchTarget)px; }
+            form button { padding: 12px 18px; font-size: 16px; min-height: \(touchTarget)px; }
+            .check { min-height: \(touchTarget)px; }
+            .check input { flex: none; width: 20px; height: 20px; margin-top: 0; }
+            .langs { gap: 0 18px; }
+            #syncOpen { min-height: \(touchTarget)px; padding: 10px 14px; font-size: 15px; }
+          }
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
         </style>
         </head>
         <body>
-          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
+          \(ReaderChrome.backdrop())
+          \(ReaderChrome.indent(ReaderChrome.chrome(nav: ReaderChrome.navHome()), by: 2))
           <main>
             <h1>Settings</h1>
             <p class="lede">\(syncSection.isEmpty ? "Sources feed the suggestions on the start page."
@@ -283,9 +334,9 @@ public enum SettingsPage {
           </main>
           <script>
           (function () {
-            function post(name, body) {
-              try { window.webkit.messageHandlers[name].postMessage(body); } catch (err) {}
-            }
+            // `readerPost` is defined in <head>; this alias keeps the call sites below on
+            // the short name they have always used.
+            var post = window.readerPost;
             var sources = document.getElementById('sources');
             var form = document.getElementById('add');
             var field = document.getElementById('source');
@@ -528,12 +579,16 @@ public enum SettingsPage {
             switch platform {
             case .macOS: return macOS
             case .linux: return linux
+            // No chords are bound on a touch host, and `shortcutSection` renders nothing
+            // there, so this is unreachable in practice. Empty rather than a trap: the
+            // honest answer to "which chords invoke this" is "none".
+            case .iOS, .android: return []
             }
         }
 
         func note(for platform: Platform) -> String? {
             switch platform {
-            case .macOS: return nil
+            case .macOS, .iOS, .android: return nil
             case .linux: return linuxNote
             }
         }
@@ -563,6 +618,10 @@ public enum SettingsPage {
     /// It comes after the sources, languages and blocked outlets because those are what
     /// someone opened Settings to change; a reference belongs below the things you act on.
     static func shortcutSection(platform: Platform) -> String {
+        // A host that binds no chords has no reference to print. Returning "" rather than
+        // an empty table for the same reason the Sync section is gated on `syncSummary`:
+        // a heading over nothing is a promise the page cannot keep.
+        guard platform.hasKeyboardCommands else { return "" }
         // The one sentence the section owes the reader, and on Linux it is the whole
         // reason the section exists: the GTK host has no menu bar to read the chords off.
         let help = platform == .linux

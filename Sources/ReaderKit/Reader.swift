@@ -407,10 +407,11 @@ public enum ReaderPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .reader))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader">
         <title>\(title)</title>
+        \(ReaderChrome.transportScript(platform: platform))
         <style>
           \(ReaderChrome.indent(ReaderChrome.themeCSS(settings, platform: platform,
                                                       palette: palette), by: 10))
@@ -424,7 +425,17 @@ public enum ReaderPage {
             line-height: var(--reader-leading);
             -webkit-font-smoothing: antialiased;
           }
-          main { max-width: var(--reader-width); margin: 0 auto; padding: 48px 24px 96px; }
+          main {
+            max-width: var(--reader-width); margin: 0 auto;
+            padding-top: 48px;
+            padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+            padding-left: max(24px, env(safe-area-inset-left, 0px));
+            padding-right: max(24px, env(safe-area-inset-right, 0px));
+          }
+          /* No coarse-pointer override of the top padding: the chrome has moved to the
+             bottom-right corner, so nothing but the progress hairline is up there and 48px
+             is simply the article's own headroom. The 96px foot is what clears the toggle,
+             which ends 58px up. */
           header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
           h1 { font-size: 1.65em; line-height: 1.25; letter-spacing: -0.01em; margin: 0; }
           .meta {
@@ -466,19 +477,25 @@ public enum ReaderPage {
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform,
+                                                       collapsible: true), by: 10))
         </style>
         </head>
         <body>
+          \(ReaderChrome.backdrop())
           \(ReaderChrome.progressBar())
-          \(ReaderChrome.indent(ReaderChrome.navHome(), by: 2))
-          \(ReaderChrome.indent(ReaderChrome.controls(
-                recents: history.recents(limit: ReaderChrome.popoverRecents,
-                                         excluding: currentURL),
-                canClear: !history.entries.isEmpty,
-                showsRating: true, rating: rating,
-                showsHidden: true), by: 2))
+          \(ReaderChrome.indent(ReaderChrome.chrome(
+                nav: ReaderChrome.navHome(),
+                controls: ReaderChrome.controls(
+                    recents: history.recents(limit: ReaderChrome.popoverRecents,
+                                             excluding: currentURL),
+                    canClear: !history.entries.isEmpty,
+                    showsRating: true, rating: rating,
+                    showsHidden: true),
+                collapsible: true), by: 2))
           <main>
             <header>
               <h1>\(title)</h1>

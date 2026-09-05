@@ -327,7 +327,7 @@ final class ReaderPageTests: XCTestCase {
     func testContainsAppearancePopoverAndBridge() {
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("id=\"readerAa\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerSettings.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerSettings'"))
         // Every adjustable value has a control.
         for value in ["serif", "sans", "narrow", "normal", "wide", "compact", "relaxed",
                       "auto", "light", "sepia", "dark", "black", "bordered", "italic"] {
@@ -362,12 +362,15 @@ final class ReaderPageTests: XCTestCase {
                                    hidden: HiddenPhrases(["</script><img src=x onerror=alert(1)>"]))
         XCTAssertTrue(html.contains("id=\"readerHiddenList\""))
         XCTAssertTrue(html.contains("window.readerSetHidden = function"))
-        XCTAssertTrue(html.contains("messageHandlers.readerUnhide.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerUnhide'"))
         // The phrase reaches the page only as a JS string literal — and one that can't end
-        // the <script> block early. The one legitimate </script> is the page's own.
+        // the <script> block early. Asserted as balance rather than a fixed count: the page
+        // legitimately carries two blocks now (the transport in <head> and its own at the
+        // end), and a phrase that broke out would add a closer without an opener.
         XCTAssertFalse(html.contains("</script><img"))
         XCTAssertTrue(html.contains("<\\/script><img src=x onerror=alert(1)>"))
-        XCTAssertEqual(html.components(separatedBy: "</script>").count - 1, 1)
+        XCTAssertEqual(html.components(separatedBy: "</script>").count,
+                       html.components(separatedBy: "<script>").count)
     }
 
     func testRecentsPanelListsTitlesAndEscapesThem() {
@@ -376,7 +379,7 @@ final class ReaderPageTests: XCTestCase {
         history.record(title: "Tips & <script>", url: "https://blog.example.com/tips?a=1")
         let html = ReaderPage.html(article: article, history: history)
         XCTAssertTrue(html.contains("id=\"readerRecentsBtn\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerOpen'"))
         // Newest first, titles escaped — they come from other sites' pages.
         XCTAssertTrue(html.contains("Tips &amp; &lt;script&gt;"))
         XCTAssertFalse(html.contains("<script>Tips"))
@@ -414,7 +417,7 @@ final class ReaderPageTests: XCTestCase {
         history.record(title: "Something", url: "https://example.com/s")
         let html = ReaderPage.html(article: article, history: history)
         XCTAssertTrue(html.contains("id=\"readerClear\""))
-        XCTAssertTrue(html.contains("messageHandlers.readerClear.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerClear'"))
     }
 
     // MARK: - Recents popover: five and five (#33)
@@ -466,7 +469,7 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertFalse(html.contains("readerTopicFeedback"))
         XCTAssertFalse(html.contains("readerBlockHost"))
         // Rows open through the panel's existing listener.
-        XCTAssertTrue(html.contains("messageHandlers.readerOpen.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerOpen'"))
     }
 
     func testTheStartPageKeepsItsOwnRicherSuggestionRows() {
@@ -533,9 +536,11 @@ final class ReaderPageTests: XCTestCase {
 
     func testProgressBarSitsBelowThePopovers() {
         // An open popover must not be crossed by the colored line: controls are z-index 10.
+        // Only the stacking matters here, so only the stacking is asserted — the offsets
+        // beside it are safe-area expressions and have their own test.
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("height: \(LoadProgress.lineThickness)px; z-index: 9;"))
-        XCTAssertTrue(html.contains("right: 14px; z-index: 10;"))
+        XCTAssertTrue(html.contains("z-index: 10;"))
     }
 
     // MARK: - Nav slot
@@ -546,7 +551,7 @@ final class ReaderPageTests: XCTestCase {
         let page = ReaderPage.html(article: article)
         XCTAssertTrue(page.contains("<div class=\"reader-nav\">"))
         XCTAssertTrue(page.contains("id=\"readerHomeBtn\""))
-        XCTAssertTrue(page.contains("messageHandlers.readerHome.postMessage"))
+        XCTAssertTrue(page.contains("readerPost('readerHome'"))
         // The slot's occupant here is Home, never the start page's Settings button.
         XCTAssertFalse(page.contains("id=\"startSettings\""))
     }
@@ -607,7 +612,163 @@ final class ReaderPageTests: XCTestCase {
         // appears. HiddenPhrasesTests owns its behaviour; this only guards the wiring.
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("#readerHideBtn {"))
-        XCTAssertTrue(html.contains("messageHandlers.readerHide.postMessage"))
+        XCTAssertTrue(html.contains("readerPost('readerHide'"))
+    }
+}
+
+// MARK: - The chrome backdrop
+
+/// The gradient behind the fixed chrome. Without it the article scrolls through the gaps
+/// between the buttons — each button's own `--bg` covers only itself — and neither the text
+/// nor the icons are readable. Reported from a real device, so these pin the parts that
+/// would let it come back.
+final class ChromeBackdropTests: XCTestCase {
+    private let article = Article(title: "T", byline: nil, siteName: nil,
+                                  content: "<p>x</p>", image: nil)
+
+    func testItSitsUnderEveryPieceOfChromeAndOverTheArticle() {
+        // The stacking order is the whole design: above the article (normal flow), below the
+        // hide affordance (8), the progress line (9) and the chrome itself (10). One wrong
+        // number and it either does nothing or hides the controls it exists to make legible.
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains("z-index: 7;"))
+        let reader = ReaderPage.html(article: article)
+        for (element, z) in [("#readerHideBtn", 8), ("#readerProgress", 9)] {
+            XCTAssertTrue(reader.contains("z-index: \(z);"), "\(element) moved")
+        }
+        XCTAssertTrue(reader.contains("z-index: 10;"))
+    }
+
+    func testItNeverSwallowsATapMeantForTheArticle() {
+        // It is a band across the top of every page; without this it would eat every tap
+        // and selection drag that started up there.
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains("pointer-events: none;"))
+    }
+
+    func testItFadesFromThePageBackgroundSoNoSeamShows() {
+        // The opaque stop has to *be* the page background, not a colour that resembles it,
+        // or a hard edge appears across the page. Reading `--bg` also means it follows every
+        // theme — and a host-supplied palette for `auto` — with no extra rule.
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains(
+            "background: linear-gradient(to bottom, var(--bg) 0%,"))
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains("transparent 100%);"))
+    }
+
+    func testTheSolidStopIsTheChromesOwnHeightRatherThanAGuess() {
+        // Sized at 65% of 72px — 47px — against the 41px pointer cluster, the fade started
+        // 11px above the bottom of the buttons on any roomy touch viewport, where the same
+        // buttons are 44px: article text ran between the icons at 1024x768 coarse. The stop
+        // is the chrome's own geometry now: the 14px inset plus the 44px floor.
+        let solid = 14 + ReaderChrome.touchTarget
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains(
+            "var(--bg) calc(\(solid)px + env(safe-area-inset-top, 0px)),"))
+        // And the element runs past that stop, or there is no room left to fade in.
+        XCTAssertTrue(css.contains("height: calc(\(solid + 24)px"))
+    }
+
+    func testItIsARoomyLayoutDeviceAndRetiresWhenCompact() {
+        // On a compact viewport the chrome has moved to the bottom-right, so a fade along
+        // the top edge would cover nothing. Retired rather than resized — and keyed on the
+        // same condition the chrome is, or the two could disagree about where the chrome is.
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains(
+            "@media \(ReaderChrome.compactViewport) {\n"
+            + "  #readerBackdrop { display: none; }"))
+    }
+
+    func testEveryScrollingPageCarriesItAndTheOfflinePageDoesNot() {
+        // Both halves or it silently never appears, like the hide affordance above.
+        for (name, html) in [
+            "reader": ReaderPage.html(article: article),
+            "start": StartPage.html(appName: "R"),
+            "settings": SettingsPage.html(appName: "R"),
+        ] {
+            XCTAssertTrue(html.contains("<div id=\"readerBackdrop\" aria-hidden=\"true\"></div>"), name)
+            XCTAssertTrue(html.contains("#readerBackdrop {"), name)
+        }
+        // The offline page is a centred card at exactly viewport height: nothing scrolls
+        // under its Home button, so it needs no backdrop — and its body is a flex container,
+        // which is a reason not to add stray children to it on a hunch.
+        let offline = OfflineFallback.html(appName: "R", host: "example.com", kind: .offline)
+        XCTAssertFalse(offline.contains("readerBackdrop"))
+    }
+}
+
+// MARK: - The page-to-host transport
+
+/// `readerPost` is the single route every generated page has to its host. These pin the
+/// two things that would silently gate the whole app shut: that each platform gets the
+/// transport its web view actually offers, and that every document defines it before
+/// anything can call it.
+final class TransportTests: XCTestCase {
+    private let article = Article(title: "T", byline: nil, siteName: nil,
+                                  content: "<p>x</p>", image: nil)
+
+    /// Every document a host can load, in the platform it is being rendered for.
+    private func pages(_ platform: Platform) -> [String: String] {
+        [
+            "reader": ReaderPage.html(article: article, platform: platform),
+            "start": StartPage.html(appName: "R", platform: platform),
+            "settings": SettingsPage.html(appName: "R", platform: platform),
+            "offline": OfflineFallback.html(appName: "R", host: "example.com",
+                                            kind: .offline, platform: platform),
+        ]
+    }
+
+    func testWebKitHostsGetTheMessageHandlersTransport() {
+        // WKWebView and WebKitGTK expose the same object, which is why one branch covers
+        // the two desktop hosts and iOS.
+        for platform in [Platform.macOS, .linux, .iOS] {
+            for (name, html) in pages(platform) {
+                XCTAssertTrue(
+                    html.contains("window.webkit.messageHandlers[name].postMessage(body);"),
+                    "\(name) on \(platform.rawValue)")
+                XCTAssertFalse(html.contains(ReaderChrome.androidBridge),
+                               "\(name) on \(platform.rawValue)")
+            }
+        }
+    }
+
+    func testAndroidGetsTheSingleBridgeObjectAndCarriesTheNameInTheBody() {
+        // Android's WebView has no `webkit` object at all. `addWebMessageListener` injects
+        // one named object whose postMessage takes a single string, so the handler name has
+        // to travel with the body and the host demultiplexes on the far side.
+        for (name, html) in pages(.android) {
+            XCTAssertTrue(html.contains("window.readerHost.postMessage("
+                                        + "JSON.stringify({ name: name, body: body }));"),
+                          name)
+            XCTAssertFalse(html.contains("window.webkit."), name)
+        }
+    }
+
+    func testEveryDocumentDefinesTheTransportBeforeItsFirstUse() {
+        // The nav button and the offline page's Try Again post from an inline `onclick`, so
+        // a transport defined at the end of <body> would be a race on a restored page.
+        for platform in Platform.allCases {
+            for (name, html) in pages(platform) {
+                guard let defined = html.range(of: "window.readerPost = function"),
+                      let head = html.range(of: "</head>") else {
+                    return XCTFail("\(name) on \(platform.rawValue) defines no transport")
+                }
+                XCTAssertLessThan(defined.lowerBound, head.lowerBound,
+                                  "\(name) on \(platform.rawValue) defines it after <head>")
+            }
+        }
+    }
+
+    func testTheGuardLivesInTheTransportRatherThanAtEveryCallSite() {
+        // A page can outlive its host — restored from the back-forward cache, or opened in
+        // a plain browser while working on the CSS — and must stay readable rather than
+        // throwing on every click. That guard used to be repeated at all thirteen post
+        // sites; it is now in one place, so no call site can forget it.
+        for platform in Platform.allCases {
+            let js = ReaderChrome.transportScript(platform: platform)
+            XCTAssertTrue(js.contains("catch (err) {}"), platform.rawValue)
+        }
+        // And the reader page — the busiest poster, with seven of the thirteen sites this
+        // replaced — names the host API exactly once: in the transport definition.
+        let reader = ReaderPage.html(article: article)
+        XCTAssertEqual(reader.components(separatedBy: "window.webkit.").count - 1, 1)
     }
 }
 
