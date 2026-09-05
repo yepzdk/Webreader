@@ -45,7 +45,23 @@ enum ReaderChrome {
     ///
     /// Applied only under `@media (pointer: coarse)`, never unconditionally: the desktop
     /// chrome is dense on purpose, and a mouse hits a 28px button without trying.
-    private static let touchTarget = 44
+    ///
+    /// Not private: every page states the same floor for its own controls, and a second
+    /// copy of the number is how a floor drifts one control at a time.
+    static let touchTarget = 44
+
+    /// The `<meta name="viewport">` every generated page carries.
+    ///
+    /// `viewport-fit=cover` is not decoration: iOS resolves every `safe-area-inset-*` to
+    /// 0px until a document opts in with it, so without this the insets the chrome, the
+    /// toast and the popovers offset by are inert on the one platform they were added for.
+    /// Opting in also lets the page paint under the notch and the home indicator, which is
+    /// what those insets then hold the controls clear of.
+    ///
+    /// `initial-scale=1` with no `maximum-scale`: pinch-zoom stays available, because a
+    /// reading app nobody can zoom is a reading app somebody cannot read.
+    static let viewportMeta = "<meta name=\"viewport\" "
+        + "content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
 
     /// The single JS object name an Android host injects with
     /// `WebViewCompat.addWebMessageListener`. Named here so the host and the page cannot
@@ -576,8 +592,12 @@ enum ReaderChrome {
     /// article, which is in normal flow. `pointer-events: none` so a band across the top of
     /// the page doesn't swallow taps meant for the text under it.
     ///
-    /// The height covers the chrome plus room to fade: on a pointer the cluster ends 41px
-    /// down, and the solid stop clears it.
+    /// The height is the chrome's own geometry plus room to fade, rather than a number that
+    /// happened to clear it: the cluster ends `chromeEdge + touchTarget` below the safe
+    /// area — 58px, since `comfortableChrome` includes `(pointer: coarse)` and a roomy
+    /// touch viewport therefore gets 44px buttons — and the solid stop sits exactly there.
+    /// Sized against the 41px pointer cluster instead, it ended 11px short and left article
+    /// text running between the icons on a tablet.
     ///
     /// It exists only for the roomy layout. On a compact viewport the chrome has moved to
     /// the bottom-right corner (see `chromeCSS`), so a fade along the top edge would be a
@@ -587,9 +607,12 @@ enum ReaderChrome {
         """
         #readerBackdrop {
           position: fixed; top: 0; left: 0; right: 0; z-index: 7;
-          height: calc(72px + env(safe-area-inset-top, 0px));
+          height: calc(\(chromeEdge + touchTarget + backdropFade)px
+                       + env(safe-area-inset-top, 0px));
           pointer-events: none;
-          background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);
+          background: linear-gradient(to bottom, var(--bg) 0%,
+            var(--bg) calc(\(chromeEdge + touchTarget)px + env(safe-area-inset-top, 0px)),
+            transparent 100%);
         }
         @media \(compactViewport) {
           #readerBackdrop { display: none; }
@@ -607,6 +630,10 @@ enum ReaderChrome {
     /// it agree on where the stack ends without either measuring the other.
     private static let chromeGap = 10
     private static let chromeEdge = 14
+
+    /// How far the backdrop keeps fading after the chrome it backs has ended. Enough that
+    /// the band reads as a fade rather than a toolbar edge, and no more.
+    private static let backdropFade = 24
 
     /// The buttons that live in the collapsing stack, by id — everything the column holds
     /// except the toggle, which is the one control that never hides.
@@ -665,7 +692,7 @@ enum ReaderChrome {
     /// without collapsing; a narrow desktop window is moused but cramped, and a floating
     /// column over content wants air around it there too. Only the roomy pointer layout —
     /// the two top corners — keeps its original density.
-    static let comfortableChrome = "(pointer: coarse), (max-width: 48rem), (max-height: 30rem)"
+    static let comfortableChrome = "(pointer: coarse), " + compactViewport
 
     /// Wraps the nav slot and the control cluster in one element, plus — where a page has
     /// more than one control — the button that reveals them.
@@ -1360,6 +1387,17 @@ enum ReaderChrome {
           function chromeIsOpen() {
             return !!chromeToggle && chromeToggle.getAttribute('aria-expanded') === 'true';
           }
+          // Focus a chrome button, or the toggle when that button has no box to take it.
+          // Opening a popover collapses the stack, so on a compact viewport every button
+          // that can open one is `display: none` by the time the panel is dismissed — and
+          // `focus()` on a display-less element is a no-op that leaves <body> focused, which
+          // is the fall-through the two call sites exist to prevent. Asked as "does it have
+          // boxes?" rather than by re-testing the breakpoint here: the collapse is a CSS
+          // fact, and the script would only be keeping a second copy of it.
+          function focusChrome(btn) {
+            if (btn.getClientRects().length) { btn.focus(); return; }
+            if (chromeToggle) { chromeToggle.focus(); }
+          }
           // Opens one popover and closes the rest; `null` closes everything.
           function setOpen(which) {
             popovers.forEach(function (p) {
@@ -1489,7 +1527,7 @@ enum ReaderChrome {
                 // The button the user just activated is gone, and the panel stays open to
                 // show the empty state — so focus has to go somewhere deliberate, or it
                 // falls to <body> and the next Tab restarts at the top of the document.
-                recentsBtn.focus();
+                focusChrome(recentsBtn);
                 readerPost('readerClear', '');
                 return;
               }
@@ -1565,9 +1603,10 @@ enum ReaderChrome {
           });
           document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') { return; }
-            // Return focus to the button that opened the popover being dismissed.
+            // Return focus to the button that opened the popover being dismissed — or to
+            // the toggle, since dismissing is also what collapsed that button away.
             var open = popovers.filter(function (p) { return !p.panel.hidden; })[0];
-            if (open) { setOpen(null); open.btn.focus(); return; }
+            if (open) { setOpen(null); focusChrome(open.btn); return; }
             // Nothing open but the stack: close it and hand focus back to the toggle, or
             // Escape would leave focus on a button that has just become invisible.
             if (chromeIsOpen()) { setChromeOpen(false); chromeToggle.focus(); }

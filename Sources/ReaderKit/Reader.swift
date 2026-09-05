@@ -407,7 +407,7 @@ public enum ReaderPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .reader))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader">
         <title>\(title)</title>

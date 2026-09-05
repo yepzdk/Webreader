@@ -87,6 +87,8 @@ public enum StartPage {
                             palette: ReaderPalette? = nil) -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
+        // The shared touch floor, bound once so the rules below read as CSS.
+        let touchTarget = ReaderChrome.touchTarget
         let copy = Copy(platform)
         // Only where a chord exists to name. On a touch host the field's own placeholder
         // is the whole instruction, and a hint naming a key nobody can press is worse
@@ -123,7 +125,7 @@ public enum StartPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader Start">
         <title>\(name)</title>
@@ -206,8 +208,10 @@ public enum StartPage {
              The size is not cosmetic — mobile Safari zooms the whole page in on focusing an
              input under 16px, which throws the layout off and needs a pinch to undo. */
           @media (pointer: coarse) {
-            #url { padding: 12px 12px; font-size: 16px; min-height: 44px; }
-            button[type="submit"] { padding: 12px 18px; font-size: 16px; min-height: 44px; }
+            #url { padding: 12px 12px; font-size: 16px; min-height: \(touchTarget)px; }
+            button[type="submit"] {
+              padding: 12px 18px; font-size: 16px; min-height: \(touchTarget)px;
+            }
           }
           .hint { color: var(--muted); font-size: 12px; margin: 0; text-align: center; }
           .hint code {
@@ -271,9 +275,14 @@ public enum StartPage {
           .row-action:hover { color: var(--fg); background: var(--border); }
           .row-action svg { display: block; }
           /* The 21px icon box is a fine pointer target and a poor finger one; on touch it
-             reaches the same floor as every other control, and the row grows to fit. */
+             reaches the same floor as every other control, and the row grows to fit. The
+             floor, not padding around the icon: 11px each side computes to 35px, which is
+             neither the 44px this claims nor any other control's size. */
           @media (pointer: coarse) {
-            .row-action { padding: 11px; }
+            .row-action {
+              min-height: \(touchTarget)px; min-width: \(touchTarget)px;
+              align-items: center; justify-content: center;
+            }
           }
           .link {
             padding: 0; border: 0; background: none; cursor: pointer;
@@ -296,7 +305,7 @@ public enum StartPage {
           @media (pointer: coarse) {
             .clear-history .link {
               display: inline-flex; align-items: center;
-              min-height: 44px; padding: 4px 2px;
+              min-height: \(touchTarget)px; padding: 4px 2px;
             }
           }
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))

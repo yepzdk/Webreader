@@ -25,6 +25,19 @@ final class TouchLayoutTests: XCTestCase {
         ]
     }
 
+    /// The collapse rule exactly as `chromeCSS` emits it — the id list *and* the
+    /// declaration it carries.
+    ///
+    /// Asserted as one string because `display: none` on its own appears in four unrelated
+    /// rules of the same stylesheet, so a collapse rewritten to `opacity: 0` would leave
+    /// every assertion below green while the boxes came back.
+    private var collapseRule: String {
+        ReaderChrome.stackButtonIDs
+            .map { "#\($0):not([\(ReaderChrome.chromeOpenAttr)])" }
+            .joined(separator: ",\n          ")
+            + " {\n    display: none;\n  }"
+    }
+
     // MARK: - The reveal that hid working controls
 
     func testRowActionsAreHiddenOnlyWhereAPointerCanHover() {
@@ -43,6 +56,23 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains(".row-actions:focus-within { opacity: 1; }"))
     }
 
+    func testTheRowActionsReachTheFloorRatherThanPaddingTowardsIt() {
+        // `padding: 11px` around a 13px icon computes to 35x35 — not the 44px its own
+        // comment claimed, and short of every other control on the page. Measured on the
+        // rendered row with a coarse pointer.
+        let css = StartPage.html(appName: "R")
+        guard let rule = css.range(of: ".row-action {", options: .backwards) else {
+            return XCTFail("the row actions need a coarse-pointer rule of their own")
+        }
+        let block = String(css[rule.upperBound...].prefix(120))
+        XCTAssertTrue(block.contains("min-height: \(ReaderChrome.touchTarget)px; "
+                                     + "min-width: \(ReaderChrome.touchTarget)px;"), block)
+        // The icon has to be centred in the box the floor just made, or the target grows
+        // downwards from a glyph still sitting in its corner.
+        XCTAssertTrue(block.contains("align-items: center; justify-content: center;"), block)
+        XCTAssertFalse(css.contains("padding: 11px"))
+    }
+
     // MARK: - Safe-area insets
 
     func testEveryFixedChromeElementIsSafeAreaAware() {
@@ -56,6 +86,23 @@ final class TouchLayoutTests: XCTestCase {
         ] {
             XCTAssertTrue(reader.contains(offset), offset)
         }
+    }
+
+    func testEveryPageOptsIntoTheSafeAreaItThenOffsetsBy() {
+        // iOS resolves every `safe-area-inset-*` to 0px until the document asks for the
+        // whole screen with `viewport-fit=cover`, so without this line every offset above
+        // is inert on the platform it was added for. Per page, because the meta is the one
+        // line a new page can forget while inheriting all the CSS that depends on it.
+        for platform in Platform.allCases {
+            for (name, html) in pages(platform) {
+                XCTAssertTrue(html.contains(ReaderChrome.viewportMeta),
+                              "\(name) on \(platform.rawValue) does not opt into the safe area")
+            }
+        }
+        // And zoom stays available: capping the scale is how a reading app becomes one
+        // nobody who needs larger text can read.
+        XCTAssertFalse(ReaderChrome.viewportMeta.contains("maximum-scale"))
+        XCTAssertFalse(ReaderChrome.viewportMeta.contains("user-scalable"))
     }
 
     func testSafeAreaInsetsAlwaysCarryAnExplicitFallback() {
@@ -247,7 +294,7 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains("bottom: calc(14px + env(safe-area-inset-bottom, 0px));"))
         XCTAssertTrue(css.contains("right: calc(14px + env(safe-area-inset-right, 0px));"))
         // Collapsed is the default, so the first paint is right without waiting for script.
-        XCTAssertTrue(css.contains("display: none;"))
+        XCTAssertTrue(css.contains(collapseRule))
     }
 
     func testCollapsingRemovesTheBoxAndNotJustThePaint() {
@@ -260,10 +307,7 @@ final class TouchLayoutTests: XCTestCase {
         // property changed, and an earlier version of this test matched that comment.
         XCTAssertFalse(css.contains("visibility: hidden;"))
         XCTAssertFalse(css.contains("visibility: visible;"))
-        XCTAssertTrue(css.contains(ReaderChrome.stackButtonIDs
-            .map { "#\($0):not([\(ReaderChrome.chromeOpenAttr)])" }
-            .joined(separator: ",\n          ")))
-        XCTAssertTrue(css.contains("display: none;"))
+        XCTAssertTrue(css.contains(collapseRule))
     }
 
     func testTheRevealRuleDoesNotRestateADisplayTheButtonsDoNotShare() {
@@ -302,9 +346,12 @@ final class TouchLayoutTests: XCTestCase {
         // things it was named for: it set one attribute and trusted the engine to resolve
         // seven descendants. The script must name each button and write to each one.
         let js = ReaderPage.html(article: article)
-        for id in ReaderChrome.stackButtonIDs {
-            XCTAssertTrue(js.contains(id), "\(id) is not named in the page")
-        }
+        // The list as the script emits it, not the ids one at a time: the page also embeds
+        // `chromeCSS`, whose selectors come from the same array, so every id is in the
+        // document whatever the script does — `startSettings` passed this on the reader
+        // page, which has no such button.
+        XCTAssertTrue(js.contains("var chromeButtons = "
+            + HTML.jsString(ReaderChrome.stackButtonIDs.joined(separator: " "))))
         XCTAssertTrue(js.contains("chromeButtons.forEach"))
         XCTAssertTrue(js.contains("b.setAttribute('\(ReaderChrome.chromeOpenAttr)', 'true')"))
         XCTAssertTrue(js.contains("b.removeAttribute('\(ReaderChrome.chromeOpenAttr)')"))
@@ -429,5 +476,22 @@ final class TouchLayoutTests: XCTestCase {
         // And the stack dismisses on the same gestures as the popovers.
         XCTAssertTrue(html.contains("if (!e.target.closest('.reader-chrome')) { setChromeOpen(false); }"))
         XCTAssertTrue(html.contains("if (chromeIsOpen()) { setChromeOpen(false); chromeToggle.focus(); }"))
+    }
+
+    func testDismissingNeverLeavesFocusOnACollapsedButton() {
+        // Opening a panel collapses the stack, so on a compact viewport the button that
+        // opened it is `display: none` by the time the panel is dismissed — and `focus()`
+        // on a display-less element is a no-op. At 390x844 Escape left `activeElement` on
+        // the hidden `#readerRecentsBtn` and the next Tab fell through to <body>, which is
+        // the fall-through both call sites exist to prevent. One helper, falling back to
+        // the toggle: the one control that never collapses.
+        let html = ReaderPage.html(article: article)
+        XCTAssertTrue(html.contains("function focusChrome(btn) {"))
+        XCTAssertTrue(html.contains("if (btn.getClientRects().length) { btn.focus(); return; }"))
+        XCTAssertTrue(html.contains("focusChrome(open.btn)"))
+        XCTAssertTrue(html.contains("focusChrome(recentsBtn)"))
+        // And no route reaches a stack button's own focus() any more.
+        XCTAssertFalse(html.contains("open.btn.focus()"))
+        XCTAssertFalse(html.contains("recentsBtn.focus()"))
     }
 }

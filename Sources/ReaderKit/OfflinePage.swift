@@ -99,7 +99,7 @@ public enum OfflineFallback {
         <html lang="en">
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <title>\(HTML.escape(appName))</title>
         \(ReaderChrome.transportScript(platform: platform))
@@ -136,7 +136,9 @@ public enum OfflineFallback {
           @media (prefers-reduced-motion: reduce) { .card button { transition: none; } }
           /* Touch: the one action on the page reaches the 44px floor. */
           @media (pointer: coarse) {
-            .card button { padding: 12px 22px; min-height: 44px; }
+            .card button {
+              padding: 12px 22px; min-height: \(ReaderChrome.touchTarget)px;
+            }
           }
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 2))
           \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 2))

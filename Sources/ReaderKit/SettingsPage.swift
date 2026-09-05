@@ -37,6 +37,8 @@ public enum SettingsPage {
                             syncSummary: String = "") -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
+        // The shared touch floor, bound once so the rules below read as CSS.
+        let touchTarget = ReaderChrome.touchTarget
         let sourceRows = suggestions.sources.isEmpty
             ? "<p class=\"empty\">No sources. Suggestions stay empty until you add one.</p>"
             : suggestions.sources.map(row).joined(separator: "\n        ")
@@ -134,7 +136,7 @@ public enum SettingsPage {
         <html lang="en"\(ReaderChrome.themeAttribute(settings))>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(ReaderChrome.viewportMeta)
         <meta name="color-scheme" content="light dark">
         <meta name="generator" content="WebReader Settings">
         <title>Settings — \(name)</title>
@@ -277,18 +279,21 @@ public enum SettingsPage {
           /* Touch: every control reaches the 44px floor, and the field's text goes to 16px
              so mobile Safari does not zoom the page in on focus. The checkbox itself stays
              small — the whole `.check` label is the target, which is why it takes the floor
-             and the box only needs `flex: none` to stop the row squashing it to 13px. */
+             and the box only needs `flex: none` to stop the row squashing it to 13px. The
+             label keeps the base `align-items: start`: the article-image label wraps at
+             phone widths, and centring a wrapped label leaves its box floating between the
+             lines — the case that rule was written for. */
           @media (pointer: coarse) {
             .source-remove {
-              min-height: 44px; min-width: 44px;
+              min-height: \(touchTarget)px; min-width: \(touchTarget)px;
               align-items: center; justify-content: center;
             }
-            #source { padding: 12px; font-size: 16px; min-height: 44px; }
-            form button { padding: 12px 18px; font-size: 16px; min-height: 44px; }
-            .check { min-height: 44px; align-items: center; }
+            #source { padding: 12px; font-size: 16px; min-height: \(touchTarget)px; }
+            form button { padding: 12px 18px; font-size: 16px; min-height: \(touchTarget)px; }
+            .check { min-height: \(touchTarget)px; }
             .check input { flex: none; width: 20px; height: 20px; margin-top: 0; }
             .langs { gap: 0 18px; }
-            #syncOpen { min-height: 44px; padding: 10px 14px; font-size: 15px; }
+            #syncOpen { min-height: \(touchTarget)px; padding: 10px 14px; font-size: 15px; }
           }
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))

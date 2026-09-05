@@ -161,7 +161,7 @@ public struct HiddenPhrases: Equatable {
            this button appears next to a fingertip-made selection and gets read in a hurry. */
         @media (pointer: coarse) {
           #readerHideBtn {
-            min-height: 44px; padding: 10px 14px; font-size: 14px;
+            min-height: \(ReaderChrome.touchTarget)px; padding: 10px 14px; font-size: 14px;
           }
         }
         """
@@ -182,7 +182,12 @@ public struct HiddenPhrases: Equatable {
     ///   pressed.** Pressing a button collapses the document selection, which the old code
     ///   fought with `preventDefault` on `mousedown` — a trick that has no reliable touch
     ///   equivalent. Reading the string in `update()` instead means the press is free to do
-    ///   whatever the platform wants with focus.
+    ///   whatever the platform wants with focus. `hide()` deliberately leaves `pending`
+    ///   alone for the same reason: WebKit queues `selectionchange` while a press is being
+    ///   made and synthesises the click only when it is released, so clearing the captured
+    ///   string on hide would put it back at the mercy of the press. `update()` rewrites it
+    ///   on every selection and the click handler is its only reader, so there is nothing
+    ///   a reset would protect.
     /// - **On a coarse pointer the button prefers to sit *below* the selection.** iOS draws
     ///   its own Copy / Look Up callout immediately above a selection, which is exactly
     ///   where this used to go — two overlapping popovers, with the system's on top.
@@ -220,7 +225,8 @@ public struct HiddenPhrases: Equatable {
           // selection the button prefers, and the answer cannot change mid-session.
           var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
-          function hide() { btn.removeAttribute('data-shown'); pending = ''; }
+          // Paint only — `pending` is left alone, see the note above.
+          function hide() { btn.removeAttribute('data-shown'); }
           // The selection has to lie inside the article: the chrome's own labels and the
           // page's heading are not article boilerplate.
           function selectionRange() {

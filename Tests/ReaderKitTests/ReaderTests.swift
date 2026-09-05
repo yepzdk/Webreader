@@ -650,19 +650,30 @@ final class ChromeBackdropTests: XCTestCase {
         // or a hard edge appears across the page. Reading `--bg` also means it follows every
         // theme — and a host-supplied palette for `auto` — with no extra rule.
         XCTAssertTrue(ReaderChrome.backdropCSS().contains(
-            "background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 65%, transparent 100%);"))
+            "background: linear-gradient(to bottom, var(--bg) 0%,"))
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains("transparent 100%);"))
+    }
+
+    func testTheSolidStopIsTheChromesOwnHeightRatherThanAGuess() {
+        // Sized at 65% of 72px — 47px — against the 41px pointer cluster, the fade started
+        // 11px above the bottom of the buttons on any roomy touch viewport, where the same
+        // buttons are 44px: article text ran between the icons at 1024x768 coarse. The stop
+        // is the chrome's own geometry now: the 14px inset plus the 44px floor.
+        let solid = 14 + ReaderChrome.touchTarget
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains(
+            "var(--bg) calc(\(solid)px + env(safe-area-inset-top, 0px)),"))
+        // And the element runs past that stop, or there is no room left to fade in.
+        XCTAssertTrue(css.contains("height: calc(\(solid + 24)px"))
     }
 
     func testItIsARoomyLayoutDeviceAndRetiresWhenCompact() {
-        // In the roomy layout the cluster ends 41px down, and 65% of 72px is 47px — so the
-        // buttons sit on solid colour rather than on the fade.
-        let css = ReaderChrome.backdropCSS()
-        XCTAssertTrue(css.contains("height: calc(72px + env(safe-area-inset-top, 0px));"))
         // On a compact viewport the chrome has moved to the bottom-right, so a fade along
         // the top edge would cover nothing. Retired rather than resized — and keyed on the
         // same condition the chrome is, or the two could disagree about where the chrome is.
-        XCTAssertTrue(css.contains("@media \(ReaderChrome.compactViewport) {\n"
-                                   + "  #readerBackdrop { display: none; }"))
+        XCTAssertTrue(ReaderChrome.backdropCSS().contains(
+            "@media \(ReaderChrome.compactViewport) {\n"
+            + "  #readerBackdrop { display: none; }"))
     }
 
     func testEveryScrollingPageCarriesItAndTheOfflinePageDoesNot() {
