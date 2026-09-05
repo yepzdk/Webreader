@@ -9,6 +9,11 @@ Package.resolved
 # Generated test bundles
 *.app
 
+# Xcode. The project file itself is checked in; what Xcode writes beside it is not.
+DerivedData/
+xcuserdata/
+*.xcuserdatad
+
 # Claude Code harness state
 .claude/
 build/

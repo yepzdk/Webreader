@@ -11,8 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Sync appearance settings and recents between devices through a folder you pick — your
   Nextcloud folder, iCloud Drive, anything that already syncs. Set it up in Settings (⌘,);
   page zoom stays local, and the Linux app has no folder picker yet.
+- **WebReader on iPhone and iPad** (#6). Share a link from Safari or anywhere else and it
+  opens in the same reader page as the Mac, with the same appearance settings, the same
+  recents, and sync to a folder you pick. Built from the same reader code as the Mac app,
+  not a second copy of it.
 
 ### Changed
+- The reader's WebKit half moves into a shared `ReaderWebKit` target (#6), so the coming
+  iPhone and iPad app runs the same page state, extraction and message handling as the Mac
+  rather than a second copy of it. No change to how the Mac app behaves.
 - **Recents live on the start page** (#32). The reader's recents popover duplicated the
   inline list and the hidden-text panel had no article to group against, so both leave the
   reader; hidden phrases move to the settings page, beside blocked outlets.
@@ -42,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Article text ran through the top buttons while scrolling.** The gaps between the buttons
   let the article through, leaving a line of text crossing the icons with neither readable. A
   gradient that follows the theme now sits behind them.
+- **Page text sat under the notch** (#36). The floating controls cleared the safe area from
+  the start, but the pages' own content did not, so on an iPhone the start page's title ran
+  behind the Dynamic Island. Only ever visible on hardware with an inset.
+- **On a tablet the article's first line started inside the top controls** (#36). Touch grew
+  the buttons to a 44px target without growing the headroom above the text to match, which a
+  mouse never showed because its buttons are smaller.
 
 ## [0.11.0] - 2026-08-31
 
