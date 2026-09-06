@@ -44,9 +44,22 @@ case " $(swift sdk list 2>/dev/null | tr '\n' ' ') " in
 esac
 
 # The runtime .so files are not in the build directory, only in the SDK. macOS and Linux
-# SwiftPM put installed SDKs in different places.
+# SwiftPM put installed SDKs in different places — and on neither does it necessarily agree
+# with $HOME: SwiftPM resolves its home from the passwd database, so in a container that
+# remaps HOME (a GitHub Actions container job sets HOME=/github/home while running as root)
+# the SDK lands in root's home and $HOME holds nothing. Both are searched, passwd first,
+# because that is where the install actually went.
+PASSWD_HOME=""
+if command -v getent >/dev/null 2>&1; then
+  PASSWD_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+fi
 SDK_ROOT=""
-for prefix in "$HOME/Library/org.swift.swiftpm/swift-sdks" "$HOME/.swiftpm/swift-sdks"; do
+for prefix in \
+  "$HOME/Library/org.swift.swiftpm/swift-sdks" \
+  "$HOME/.swiftpm/swift-sdks" \
+  "${PASSWD_HOME:-$HOME}/Library/org.swift.swiftpm/swift-sdks" \
+  "${PASSWD_HOME:-$HOME}/.swiftpm/swift-sdks"
+do
   if [ -d "$prefix/$SDK.artifactbundle/swift-android" ]; then
     SDK_ROOT="$prefix/$SDK.artifactbundle/swift-android"
     break
@@ -54,7 +67,8 @@ for prefix in "$HOME/Library/org.swift.swiftpm/swift-sdks" "$HOME/.swiftpm/swift
 done
 if [ -z "$SDK_ROOT" ]; then
   echo "build-android.sh: '$SDK' is listed but its artifact bundle is missing" >&2
-  echo "  Looked in ~/Library/org.swift.swiftpm/swift-sdks and ~/.swiftpm/swift-sdks." >&2
+  echo "  Looked under $HOME and ${PASSWD_HOME:-$HOME}, in both" >&2
+  echo "  Library/org.swift.swiftpm/swift-sdks and .swiftpm/swift-sdks." >&2
   exit 1
 fi
 

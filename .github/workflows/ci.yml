@@ -80,6 +80,10 @@ jobs:
       # Both downloads are large and version-pinned, so they are worth caching: ~1 GB of NDK
       # and ~1 GB of Swift SDK that change only when the pins below do.
       #
+      # `/root/.swiftpm`, not `~/.swiftpm`: SwiftPM resolves its home from the passwd database
+      # rather than from HOME, and a container job here runs as root with HOME=/github/home.
+      # Caching the tilde path cached an empty directory, which is how this job first failed.
+      #
       # Restore and save are separate on purpose. The combined action saves at the end of the
       # job whether or not it passed, which means a run that died halfway through unpacking
       # can publish a half-populated bundle that every later run then restores and trusts.
@@ -88,14 +92,16 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            ~/.swiftpm/swift-sdks
+            /root/.swiftpm/swift-sdks
             /opt/android-ndk
           key: android-sdk-swift-6.3.3-ndk-r27d
       - name: Install the Swift SDK for Android
         shell: bash
         run: |
           set -euo pipefail
-          sdks="$HOME/.swiftpm/swift-sdks"
+          # Where SwiftPM will actually put it: its home comes from the passwd database, not
+          # from HOME, which this job's container remaps.
+          sdks="$(getent passwd "$(id -u)" | cut -d: -f6)/.swiftpm/swift-sdks"
           # Keyed on the setup script rather than on `swift sdk list`, because a cache that
           # restored a partial bundle answers the name question yes and the file question no —
           # which is how this step first failed, with a "not found" that named a path the SDK
@@ -135,6 +141,6 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ~/.swiftpm/swift-sdks
+            /root/.swiftpm/swift-sdks
             /opt/android-ndk
           key: android-sdk-swift-6.3.3-ndk-r27d
