@@ -71,6 +71,24 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// without them and the task is cancelled the moment the page goes away.
     private var suggestionTask: Task<Void, Never>?
 
+    /// The stall watch, and what it is watching. A load that commits and then goes silent
+    /// produces no callback at all — no finish, no failure — so without this the app waits
+    /// behind the cover for as long as it is open. Owned here rather than by the cover
+    /// because the answer is a command sequence (the offline page), not a change of view.
+    private var stallWatchdog: Timer?
+    private var progressObserver: NSKeyValueObservation?
+    /// What `.load` asked for. `webView.url` is nil for a provisional load that never
+    /// committed, which is exactly the case being reported.
+    private var loadingURL: URL?
+
+    /// The reveal waiting for a paint, and which navigation it is waiting for.
+    private var paintTimer: Timer?
+    private var paintGeneration = 0
+
+    /// Silence before a load is called over. The app's is `LoadProgress.stallPatience`;
+    /// tests shorten it, since the point of the number is that it is longer than a test.
+    var stallPatience: Double = LoadProgress.stallPatience
+
     /// `userAgentApplicationName` is the shell's, because the string is a claim about the
     /// system: WKWebView's stock UA lacks the "Version/x Safari/x" suffix, which UA-sniffing
     /// sites read as an ancient or unknown browser ("this browser is no longer supported").
@@ -136,6 +154,13 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
             switch command {
             case let .load(url):
                 navigating = true
+                // Covered here rather than in `didStartProvisionalNavigation`: everything
+                // between issuing a load and WebKit reporting it is a window with the old
+                // page, or the first paint of the new one, uncovered.
+                loadingCover?.show(theme: ReaderStore.settings(store: session.store).theme)
+                loadingURL = url
+                paintGeneration += 1
+                watchForStall()
                 webView.load(URLRequest(url: url))
             case let .show(html, baseURL):
                 navigating = true
@@ -144,6 +169,10 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
                 guard !script.isEmpty else { continue }
                 webView.evaluateJavaScript(script)
             case let .extract(url, script):
+                // Extraction is the rest of this navigation, not the end of it: hiding the
+                // cover here would show the raw site for as long as Readability takes, which
+                // is the flash the cover exists to prevent (#24). `extract` settles instead.
+                navigating = true
                 extract(url: url, script: script)
             case .reject:
                 services.reject()
@@ -163,8 +192,86 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
                 }
             }
         }
-        if settled, !navigating { loadingCover?.hide() }
+        if settled, !navigating {
+            stopWatchingForStall()
+            revealWhenPainted()
+        }
         return navigating
+    }
+
+    /// Takes the cover down once the document now loaded has actually painted.
+    ///
+    /// `didFinish` is the document loaded, which is not the same as it being on screen: until
+    /// the new one paints, the web view is still showing the page it replaces. Measured on
+    /// Android as two frames of the site between the two, and WKWebView is composited the
+    /// same way — the same defect, closed by the same rule.
+    ///
+    /// WebKit has no first-paint delegate callback, so the page is asked instead:
+    /// `requestAnimationFrame` resolves after the frame that drew this document. On its own
+    /// that is not enough — a web view with no frames renders none, so an offscreen view or
+    /// a backgrounded app never answers, and the cover would be terminal. A short timer runs
+    /// beside it and the first of the two wins: the paint, within a frame, whenever there is
+    /// one to wait for.
+    private func revealWhenPainted() {
+        paintTimer?.invalidate()
+        let generation = paintGeneration
+        paintTimer = Timer.scheduledTimer(withTimeInterval: Self.paintPatience, repeats: false) {
+            [weak self] _ in MainActor.assumeIsolated { self?.reveal(generation) }
+        }
+        let script = "await new Promise(resolve => requestAnimationFrame(resolve)); return true"
+        webView.callAsyncJavaScript(script, in: nil, in: .page) { @MainActor [weak self] _ in
+            self?.reveal(generation)
+        }
+    }
+
+    /// Reveals, unless a navigation started after the reveal was asked for — that cover
+    /// belongs to the new load, and a late answer about the old one must not take it down.
+    private func reveal(_ generation: Int) {
+        guard generation == paintGeneration else { return }
+        paintTimer?.invalidate()
+        paintTimer = nil
+        loadingCover?.hide()
+    }
+
+    /// Long enough that a view which does render frames always wins the race, short enough
+    /// that one which never will is not a wait anybody notices.
+    private static let paintPatience: Double = 0.5
+
+    // MARK: - A load that never lands
+
+    /// Starts the silence over. Armed when a load is issued and re-armed on every scrap of
+    /// progress, so a slow load that is still moving is never interrupted.
+    private func watchForStall() {
+        if progressObserver == nil {
+            progressObserver = webView.observe(\.estimatedProgress, options: [.new]) {
+                [weak self] _, _ in
+                // The load moved, so it is not stuck.
+                guard let self, self.stallWatchdog != nil else { return }
+                self.watchForStall()
+            }
+        }
+        stallWatchdog?.invalidate()
+        stallWatchdog = Timer.scheduledTimer(withTimeInterval: stallPatience,
+                                             repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.giveUpOnTheLoad() }
+        }
+    }
+
+    /// For the paths that ended the load one way or another; the watch has nothing left to
+    /// answer for.
+    private func stopWatchingForStall() {
+        stallWatchdog?.invalidate()
+        stallWatchdog = nil
+    }
+
+    /// Nothing was ever going to end this load. Stops it and reports the timeout it is, so
+    /// the session answers with the page that says so — an ending, rather than a cover with
+    /// no way past it.
+    private func giveUpOnTheLoad() {
+        stopWatchingForStall()
+        webView.stopLoading()
+        let url = loadingURL ?? webView.url
+        run(session.loadFailed(url: url, code: NSURLErrorTimedOut), settled: true)
     }
 
     /// Runs the extraction script and hands the answer back with the document's title. The
@@ -206,9 +313,14 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// Loads one of our own generated documents. The single place `loadHTMLString` is called
     /// (mirroring the GTK host's `loadHTML`), which is what gives the loading cover one place
     /// to come down: every own page — reader, start, settings, offline — settles here.
+    ///
+    /// The cover is deliberately left up. Our document is the answer but it is not on screen
+    /// yet — `loadHTMLString` has to parse and paint first — and taking the cover down here
+    /// showed a frame or two of the page about to be replaced, which is the flash the cover
+    /// exists to prevent (#24). It comes down when this document's own load settles.
     private func loadOwnPage(_ html: String, baseURL: URL?) {
-        loadingCover?.hide()
         coverSuppressedOnce = true
+        paintGeneration += 1
         webView.loadHTMLString(html, baseURL: baseURL)
     }
 

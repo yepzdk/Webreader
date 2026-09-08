@@ -19,9 +19,6 @@ import WebKit
 final class LoadingCover: ReaderLoadingCover {
     private let view = NSView()
     private let label = ShimmerLabel()
-    private var watchdog: Timer?
-    /// Watches the load so the watchdog can measure *silence* rather than elapsed time.
-    private var progressObserver: NSKeyValueObservation?
 
     /// Whether the cover is currently up. The show/hide calls are spread across every path
     /// that changes what's on screen, so they must be idempotent.
@@ -44,24 +41,6 @@ final class LoadingCover: ReaderLoadingCover {
             label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
-        // The cover keeps its own eye on the load rather than being fed progress by the
-        // delegate: whether it may come down is its business, and `ProgressLine` watching the
-        // same key path is no obstacle.
-        progressObserver = webView.observe(\.estimatedProgress, options: [.new]) {
-            [weak self] _, _ in self?.noteProgress()
-        }
-    }
-
-    /// The load moved, so it is not stuck: start the silence over.
-    private func noteProgress() {
-        guard isVisible else { return }
-        armWatchdog()
-    }
-
-    private func armWatchdog() {
-        watchdog?.invalidate()
-        watchdog = Timer.scheduledTimer(withTimeInterval: LoadProgress.coverStallPatience,
-                                        repeats: false) { [weak self] _ in self?.hide() }
     }
 
     /// Covers the web view, painted for `theme` so the page it precedes doesn't arrive as a
@@ -78,15 +57,13 @@ final class LoadingCover: ReaderLoadingCover {
         view.isHidden = false
         label.startShimmer()
         isVisible = true
-        armWatchdog()
     }
 
     /// Reveals whatever is behind the cover. Called from every path that settles what's on
     /// screen — a rendered page of ours, an extraction that declined, a failed load, the
-    /// reader toggle — and from the watchdog.
+    /// reader toggle. Never on a timer: a load that is going nowhere is ended by
+    /// `ReaderWebController`, which has a page to put here instead of someone else's.
     func hide() {
-        watchdog?.invalidate()
-        watchdog = nil
         guard isVisible else { return }
         isVisible = false
         view.isHidden = true

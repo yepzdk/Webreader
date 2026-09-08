@@ -120,6 +120,68 @@ final class ReaderWebControllerTests: XCTestCase {
                        "a page that isn't ours must not be able to clear the reader's history")
     }
 
+    /// The cover comes down when our document is on screen, not when it is handed to the web
+    /// view. Hiding it at the hand-off showed a frame or two of the page being replaced —
+    /// the flash the cover exists to prevent.
+    func testTheCoverStaysUpUntilOurOwnPageHasLoaded() {
+        let cover = SpyCover()
+        controller.loadingCover = cover
+        cover.show(theme: .auto)
+
+        controller.showStartPage()
+        XCTAssertTrue(cover.isUp, "the cover came down as the document was handed over")
+
+        waitForGenerator("WebReader Start")
+        waitFor("the cover to come down") { !cover.isUp }
+    }
+
+    /// A site is covered from the moment the load is issued. WebKit reports a navigation
+    /// started some time after being asked to start it, and everything in between was the
+    /// page being left, uncovered.
+    func testASiteIsCoveredAsSoonAsTheLoadIsIssued() {
+        controller.showStartPage()
+        waitForGenerator("WebReader Start")
+        let cover = SpyCover()
+        controller.loadingCover = cover
+
+        // A port nothing is listening on: the load is issued and fails, which is all this
+        // needs — the assertion is about the same turn of the run loop, before any callback.
+        XCTAssertTrue(controller.openIncoming(URL(string: "http://127.0.0.1:9/x")!))
+        XCTAssertTrue(cover.isUp, "the site was uncovered between the load and its first callback")
+    }
+
+    /// A load that commits and then goes silent has to be given an ending. Nothing else will
+    /// end it: no finish, no failure, so the app would sit behind the cover for as long as it
+    /// was open — which is what shipped, and what the cover must never be allowed to become.
+    ///
+    /// The old answer was to reveal the site on a timer, and that is the flash: a news page
+    /// paints its masthead in the first second and then sits still while its trackers finish,
+    /// so the timer fired with the raw site on screen and extraction still to come.
+    func testALoadThatGoesSilentEndsWithAWayOut() throws {
+        let server = try XCTUnwrap(SilentServer(), "could not listen on the loopback interface")
+        defer { server.stop() }
+        let cover = SpyCover()
+        controller.loadingCover = cover
+        controller.stallPatience = 0.6
+
+        XCTAssertTrue(controller.openIncoming(URL(string: "http://127.0.0.1:\(server.port)/")!))
+        XCTAssertTrue(cover.isUp)
+        // No reveal on the way: the only thing that may take the cover down is the answer.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertTrue(cover.isUp, "the site was revealed on a timer")
+
+        waitFor("the load to be called over") { self.controller.session.isShowingFallback }
+        // The offline page is a page: it comes down when *it* has loaded, which is the same
+        // rule as everywhere else.
+        waitFor("the cover to come down") { !cover.isUp }
+        // `textContent`, not `innerText`: this web view has no frame, so nothing is laid
+        // out and `innerText` is empty whether the words are there or not.
+        XCTAssertTrue(probe("document.body.textContent.includes('timed out')"),
+                      "reported as something other than the timeout it is")
+        XCTAssertTrue(probe("document.body.textContent.includes('Try Again')"),
+                      "an ending with no way out of it")
+    }
+
     // MARK: - Driving the page
 
     /// Clicks a control the user clicks, once the page is ready to answer.
@@ -201,4 +263,68 @@ private final class StubServices: ReaderHostServices {
     func openExternally(_ url: URL) { externalOpens.append(url) }
     func bringToFront() {}
     func presentSyncSetup() { syncSetupRequests += 1 }
+}
+
+/// The cover, reduced to whether it is up.
+private final class SpyCover: ReaderLoadingCover {
+    private(set) var isUp = false
+
+    func show(theme: ReaderSettings.Theme) { isUp = true }
+    func hide() { isUp = false }
+}
+
+/// A socket that accepts a connection and then says nothing at all.
+///
+/// The shape of the load this exists to test: committed, silent, and never failing. No
+/// network and no service — a listener on the loopback interface, bound to whatever port the
+/// kernel hands out, holding every connection open until the test is over.
+final class SilentServer {
+    private let socketFD: Int32
+    private var accepted: [Int32] = []
+    private let lock = NSLock()
+    let port: UInt16
+
+    init?() {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = 0  // the kernel picks
+        let bound = withUnsafePointer(to: &address) {
+            bind(fd, UnsafeRawPointer($0).assumingMemoryBound(to: sockaddr.self),
+                 socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+        guard bound == 0, listen(fd, 4) == 0 else { close(fd); return nil }
+        var actual = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &actual) {
+            getsockname(fd, UnsafeMutableRawPointer($0).assumingMemoryBound(to: sockaddr.self),
+                        &length)
+        }
+        guard named == 0 else { close(fd); return nil }
+        socketFD = fd
+        port = UInt16(bigEndian: actual.sin_port)
+        // Every member is set: the accept loop can have the object now.
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let client = accept(fd, nil, nil)
+                guard client >= 0, let self else { return }
+                // Held, not answered, and not closed: closing would be an ending.
+                self.lock.lock()
+                self.accepted.append(client)
+                self.lock.unlock()
+            }
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        for client in accepted { close(client) }
+        accepted = []
+        lock.unlock()
+        close(socketFD)
+    }
 }

@@ -58,15 +58,22 @@ public enum LoadProgress: Equatable {
     /// Seconds for one pass of the highlight across the label. Slow enough to read as "still
     /// working" rather than as a flicker.
     public static let coverShimmerPeriod: Double = 1.6
-    /// How long the cover tolerates a load making **no progress at all** before revealing the
-    /// page anyway.
+    /// How long a load may make **no progress at all** before it is called over.
     ///
-    /// Idle time, not total time. A fixed cap from the moment the cover went up fired
-    /// mid-load on a slow connection and showed the site the cover exists to hide, which is
-    /// the opposite of the point. A load that is still moving is a load worth waiting for,
-    /// however long it takes; only silence means something is stuck — extraction that never
-    /// calls back, or a frame that will never settle.
-    public static let coverStallPatience: Double = 6
+    /// Idle time, not total time: a load that is still moving is worth waiting for however
+    /// long it takes, and only silence means something is stuck.
+    ///
+    /// This is deliberately not "how long the cover stays up". Revealing the site on a timer
+    /// was the old answer, and it showed exactly what the cover exists to hide: a news page
+    /// paints its masthead in the first second and then sits still while the trackers finish,
+    /// so the timer fired with the raw site on screen and extraction still to come. The cover
+    /// now comes down for one reason — the screen settled on a page the app meant to show —
+    /// and this number ends the load instead, which the hosts report as a timeout so there is
+    /// a page with a way out of it rather than someone else's page with no chrome on it.
+    ///
+    /// Long, because it is destructive. The Android host counts the same 20 seconds in ticks
+    /// of its own; the number is duplicated there because Kotlin cannot read this one.
+    public static let stallPatience: Double = 20
     /// Width of the highlight ramp, as a multiple of the label's own width. The label is
     /// painted in `--muted` and the band that travels over it in `--fg`; both hosts derive
     /// their gradient from these two numbers, so neither can shimmer at its own speed.
