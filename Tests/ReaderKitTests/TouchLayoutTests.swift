@@ -40,20 +40,22 @@ final class TouchLayoutTests: XCTestCase {
 
     // MARK: - The reveal that hid working controls
 
-    func testRowActionsAreHiddenOnlyWhereAPointerCanHover() {
-        // The defect this pins: `.row-actions { opacity: 0 }` with a `:hover` reveal made
-        // More/Less/Block permanently invisible AND unreachable on a touch screen. The rule
-        // has to be inside a `hover: hover` query — visible by default, hidden only where
-        // hovering is possible.
+    func testRowActionsAreRevealedByTheMenuAndNotByProximity() {
+        // Two defects, one after the other, and this is where they both landed. First
+        // `.row-actions { opacity: 0 }` with a `:hover` reveal, which made More/Less/Block
+        // invisible *and* unreachable on a touch screen. Then visible by default, which
+        // fixed the finger and left four icons beside every headline on a desktop — a
+        // toolbar per row, competing with the thing it belongs to.
+        //
+        // So: no proximity rule of any kind. The row's own button is the only way in, at
+        // every width and with any pointer.
         let css = StartPage.html(appName: "R")
-        guard let query = css.range(of: "@media (hover: hover) {"),
-              let hide = css.range(of: ".row-actions { opacity: 0; }") else {
-            return XCTFail("the row-action reveal must be gated on hover capability")
-        }
-        XCTAssertGreaterThan(hide.lowerBound, query.lowerBound,
-                             "opacity: 0 must sit inside the hover query, not before it")
-        // The keyboard route survives alongside the pointer one.
-        XCTAssertTrue(css.contains(".row-actions:focus-within { opacity: 1; }"))
+        XCTAssertFalse(css.contains("@media (hover: hover)"),
+                       "a hover reveal is back, and a finger cannot hover")
+        XCTAssertFalse(css.contains(".suggestion:hover .row-actions"))
+        XCTAssertTrue(css.contains(".row-actions {\n    flex: none; display: none;"),
+                      "the controls must start hidden")
+        XCTAssertTrue(css.contains(".suggestion[data-actions=\"open\"] .row-actions { display: flex; }"))
     }
 
     func testTheRowActionsReachTheFloorRatherThanPaddingTowardsIt() {
@@ -635,5 +637,64 @@ final class TouchLayoutTests: XCTestCase {
         // And no route reaches a stack button's own focus() any more.
         XCTAssertFalse(html.contains("open.btn.focus()"))
         XCTAssertFalse(html.contains("recentsBtn.focus()"))
+    }
+
+    func testTheWidthSettingBecomesTheGutterOnACompactViewport() {
+        // A phone's viewport is about 26rem and the narrowest `max-width` is 36rem, so on a
+        // phone none of the three can ever bind and the control did nothing at all. What is
+        // left to vary is the gutter.
+        let widths = ReaderSettings.Width.allCases
+        XCTAssertEqual(Set(widths.map(\.compactGutter)).count, widths.count,
+                       "each width has to mean a different gutter, or the control still does nothing")
+        // `normal` stays where the 24px baseline was on a 411px screen, so the default reads
+        // exactly as it did before.
+        XCTAssertEqual(ReaderSettings.Width.normal.compactGutter, "6%")
+
+        // Emitted for the page, and read only inside the compact block: a desktop keeps its
+        // centred column.
+        var settings = ReaderSettings()
+        settings.width = .narrow
+        let reader = ReaderPage.html(article: article, settings: settings)
+        XCTAssertTrue(reader.contains("--reader-gutter: 12%;"))
+        guard let gutter = reader.range(of: "padding-left: max(var(--reader-gutter)"),
+              let compact = reader.range(of: "@media \(ReaderChrome.compactViewport) {",
+                                         options: String.CompareOptions.backwards,
+                                         range: reader.startIndex..<gutter.lowerBound) else {
+            return XCTFail("the gutter must sit inside a compact-viewport block")
+        }
+        XCTAssertLessThan(compact.lowerBound, gutter.lowerBound)
+        // And the Aa popover moves it live, or the setting only answers after a re-render.
+        XCTAssertTrue(reader.contains("root.style.setProperty('--reader-gutter', GUTTERS[s.width]);"))
+    }
+
+    func testASuggestedRowsControlsCollapseBehindOneButtonAtEveryWidth() {
+        let start = StartPage.html(appName: "R")
+        // Not a question of room any more. Three 44px targets beside a title leave a phone
+        // about 270px of headline, which is what started this — but four icons beside every
+        // headline in a roomy window is a toolbar per row, and the row's own menu answers
+        // both. So the collapse is unconditional: no media query may gate it.
+        XCTAssertTrue(start.contains(".row-menu"))
+        XCTAssertTrue(start.contains(".row-menu {\n    display: flex;"),
+                      "the menu must be present at every width")
+        for gate in ["@media \(ReaderChrome.compactViewport) {\n    .row-menu",
+                     "@media \(ReaderChrome.compactViewport) {\n    .suggestion"] {
+            XCTAssertFalse(start.contains(gate), "the collapse is gated on the viewport again")
+        }
+        // Opening one swaps the button out for the controls, so the row keeps its width.
+        XCTAssertTrue(start.contains(".suggestion[data-actions=\"open\"] .row-menu { display: none; }"))
+        XCTAssertTrue(start.contains(".suggestion[data-actions=\"open\"] .row-actions { display: flex; }"))
+        // And the button is a real disclosure, not a decoration: it starts closed, says so
+        // when it opens, and says so again on every path that closes it — the X, an opinion
+        // that has been registered, and opening a different row.
+        XCTAssertTrue(start.contains("setAttribute('aria-expanded', 'false')"))
+        XCTAssertTrue(start.contains("setAttribute('aria-expanded', 'true')"))
+        XCTAssertTrue(start.contains("function closeRowMenu(suggestion)"))
+        // The X closes the menu; blocking an outlet has its own mark, because an X beside two
+        // opinions read as "dismiss this" and did something much harder to undo.
+        XCTAssertTrue(start.contains("action('close', 'Hide options', ICON_CLOSE)"))
+        XCTAssertFalse(start.contains("var ICON_BLOCK = '<svg width=\"13\" height=\"13\" "
+            + "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" "
+            + "stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg>'"),
+            "the ban control must not be the same X the close control uses")
     }
 }

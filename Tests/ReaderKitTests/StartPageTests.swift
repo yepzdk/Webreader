@@ -170,8 +170,9 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("readerBlockHost"))
         XCTAssertTrue(html.contains("'More like this'"))
         XCTAssertTrue(html.contains("'Less like this'"))
-        // Controls are revealed on hover but must stay keyboard-reachable.
-        XCTAssertTrue(html.contains(".row-actions:focus-within"))
+        // The controls live behind the row's own menu at every width, so the keyboard route
+        // in is that button — a real disclosure, which `TouchLayoutTests` pins in full.
+        XCTAssertTrue(html.contains("className = 'row-menu'"))
     }
 
     func testActionsConfirmWithAToast() {
