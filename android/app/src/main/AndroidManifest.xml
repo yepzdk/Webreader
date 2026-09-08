@@ -8,6 +8,12 @@
          the GTK host puts to GLib, and it is what keeps `OfflineFallback.classify` shared. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Cleartext is allowed, because the intent filter below offers this app for every http
+         link on the device. Blocking it would mean accepting those links and then refusing to
+         load them: the user picks WebReader for an http article and gets an error page — and
+         WebView reports the block as ERROR_UNKNOWN, so it reads as "you're offline" on a
+         device that is demonstrably online. An app shaped like a browser has to load what it
+         agrees to handle. -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -15,7 +21,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.WebReader"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -50,9 +56,10 @@
         </activity>
     </application>
 
-    <!-- Declared so `openExternally` can resolve a handler under package visibility (API 30+);
-         without it `Intent.ACTION_VIEW` for a mailto: or msteams: link silently resolves to
-         nothing. -->
+    <!-- Not required for `openExternally`: launching an implicit intent is exempt from package
+         visibility, and `startActivity` is all that method does. What this buys is a truthful
+         answer from `queryIntentActivities` and `resolveActivity` if anything here ever asks
+         one — nothing does today, and the app catches `ActivityNotFoundException` instead. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />

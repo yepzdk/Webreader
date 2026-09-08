@@ -1,12 +1,15 @@
 # Gradle
 .gradle/
 build/
+# Kotlin 2.x per-project state (session files, the build-report cache). AGP 9 compiles Kotlin
+# through its embedded plugin, so this appears without a Kotlin Gradle plugin in sight.
+.kotlin/
 
 # `sdk.dir`, written by Android Studio and by whoever runs the build. Machine-specific;
 # CI sets ANDROID_HOME instead.
 local.properties
 
-# ReaderKit and the Swift runtime, produced by `Scripts/build-android.sh`. Around 100 MB of
+# ReaderKit and the Swift runtime, produced by `Scripts/build-android.sh`. Around 104 MB of
 # unstripped `.so` per ABI, entirely derived from `Sources/` — a build output that happens to
 # live under `src/` because that is where AGP looks for it.
 app/src/main/jniLibs/

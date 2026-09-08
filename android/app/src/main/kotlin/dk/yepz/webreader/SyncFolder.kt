@@ -46,12 +46,27 @@ internal class SyncFolder(private val context: Context) {
         }
 
     /**
-     * Records the chosen tree. Read *and* write: a device that can only read is a device that
-     * receives everyone else's articles and publishes none of its own, which looks like sync
-     * working right up until the other end is checked.
+     * Records the chosen tree, and lets go of the one before it.
+     *
+     * Read *and* write: a device that can only read is a device that receives everyone else's
+     * articles and publishes none of its own, which looks like sync working right up until the
+     * other end is checked.
+     *
+     * Releasing first is what makes re-picking a folder work. `tree()` takes the first
+     * persisted grant that can do both, in an order the platform does not promise, so a grant
+     * left behind can outrank the new one — and that is exactly the state the app tells the
+     * user to fix by choosing the folder again. It also stops a folder the user de-selected
+     * from keeping live read and write access.
      */
     fun remember(tree: Uri) {
-        context.contentResolver.takePersistableUriPermission(
+        val resolver = context.contentResolver
+        for (existing in resolver.persistedUriPermissions) {
+            if (existing.uri == tree) continue
+            resolver.releasePersistableUriPermission(
+                existing.uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        resolver.takePersistableUriPermission(
             tree,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
     }

@@ -47,10 +47,17 @@ internal object ReaderBridge {
     class Reply(private val json: JSONObject) {
         val commands: JSONArray = json.optJSONArray("commands") ?: JSONArray()
 
-        fun flag(key: String): Boolean = json.optBoolean(key, false)
+        fun flag(key: String, default: Boolean = false): Boolean = json.optBoolean(key, default)
+
+        /** Whether the reply spoke about [key] at all, which "false" and "absent" do not
+         *  answer the same way for. */
+        fun has(key: String): Boolean = json.has(key)
 
         /** Null for both an absent key and a JSON `null`, which the contract uses for "no". */
         fun text(key: String): String? = if (json.isNull(key)) null else json.optString(key)
+
+        /** A number the engine owns — a size, a duration — with the host's own fallback. */
+        fun number(key: String, default: Double): Double = json.optDouble(key, default)
 
         fun strings(key: String): List<String> {
             val array = json.optJSONArray(key) ?: return emptyList()
@@ -91,9 +98,20 @@ internal object ReaderBridge {
      * Navigation policy: does the web view load this itself, or does it belong to another
      * app? Asked rather than answered here, because the list is longer than http/https —
      * `about:` and `data:` are the app's own pages too.
+     *
+     * The one answer that defaults to yes. Every other field can fail closed and lose a
+     * feature; this one, missing, would hand the app's own `data:` and `about:` pages to
+     * whatever else on the device claims them — which is precisely what asking prevents.
      */
     fun loadsInApp(url: String): Boolean =
-        invoke("loadsInApp") { put("url", url) }.flag("value")
+        invoke("loadsInApp") { put("url", url) }.flag("value", default = true)
+
+    /**
+     * Back, as the reader means it: the previous article, or the page it came from. The reply's
+     * `handled` says whether the session had a destination of its own — when it did not, the
+     * web view's history is the right answer and this side falls through to it.
+     */
+    fun back(): Reply = invoke("back")
 
     fun navigationStarted(): Reply = invoke("navigationStarted")
 
@@ -163,14 +181,30 @@ internal object ReaderBridge {
             put("states", JSONArray(states))
         }
 
+    /**
+     * The reader's own colours, for the surfaces no page reaches: the cover a site loads
+     * behind, the window under a document that has not painted, and the strips beside an inset
+     * web view. The theme is a stored setting the Apple hosts read directly; this side cannot,
+     * so it asks — and answers [dark] for `auto`, since the system mode is the host's to know.
+     */
+    fun palette(dark: Boolean): Reply = invoke("palette") { put("dark", dark) }
+
+    /**
+     * What the cover says while a site loads, and at what size. Re-asked on every appearance,
+     * because the engine picks from a list rather than always saying the same word.
+     */
+    fun coverMessage(): Reply = invoke("coverMessage")
+
     // MARK: - Plumbing
 
     private fun invoke(name: String, build: JSONObject.() -> Unit = {}): Reply {
         val args = JSONObject().apply(build)
         val raw = call(name, args.toString())
         if (raw == null) {
-            // The shim returns null only when ReaderKit itself could not answer. An empty
-            // reply is then the honest result: no commands, so what is on screen stays.
+            // Null means the shim could not allocate the reply, and nothing else: an unknown
+            // call and a call before `start` both answer an empty `commands` array. So this
+            // is an out-of-memory report, logged as the anomaly it is — and an empty reply is
+            // still the only honest thing to return, which leaves what is on screen alone.
             Log.w(TAG, "no reply for $name")
             return Reply(JSONObject())
         }

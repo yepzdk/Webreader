@@ -24,8 +24,9 @@ Scripts/build-android.sh
 
 writes `android/app/src/main/jniLibs/<abi>/*.so`: `libReaderKitAndroid.so` (ReaderKit plus
 the JNI shim) and the two dozen Swift runtime libraries the app has to carry, because Android
-ships none of them. Around 100 MB per ABI unstripped. Run it from the repository root; see the
-comments at the top of that script for `TOOLCHAIN`, `SDK`, `ABIS` and `CONFIG`.
+ships none of them. Around 104 MB per ABI unstripped. It clears the whole `jniLibs` tree
+first, so what is there afterwards is exactly what that run built. Run it from the repository
+root; see the comments at the top of that script for `TOOLCHAIN`, `SDK`, `ABIS` and `CONFIG`.
 
 Add the emulator ABI when you need one:
 
@@ -54,9 +55,15 @@ adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 adb shell am start -n dk.yepz.webreader/.MainActivity
 ```
 
-`splits.abi` produces one APK per ABI and no universal one: the Swift runtime is around 69 MB
-of stripped `.so` per architecture, every device installs exactly one of them, and a universal
-APK would simply be both.
+`splits.abi` produces one APK per ABI and no universal one: the stripped Swift runtime is the
+bulk of the app, so a release APK is around 74 MB per ABI, every device installs exactly one
+of them, and a universal APK would simply be both.
+
+Which ABIs it splits on is read off `app/src/main/jniLibs/` at configuration time rather than
+written down, so the APK set always matches what `Scripts/build-android.sh` last produced —
+build arm64 only and there is one APK to install. A checkout that has never run the script
+has no native code to split on at all, and Gradle then emits a single APK that compiles and
+lints but dies in `System.loadLibrary` on launch.
 
 Opening a link the way the app is meant to be used:
 
@@ -77,9 +84,9 @@ packages them as they are:
 Unable to strip the following libraries, packaging them as they are: libFoundation.so, …
 ```
 
-The APK still works; it is 118 MB per ABI instead of 83. Point the build at the NDK the Swift
-SDK was linked against to get the smaller one — the revision is read off the NDK itself, so
-nothing here has to agree with a pinned version:
+The APK still works; it is around 104 MB per ABI instead of 74. Point the build at the NDK the
+Swift SDK was linked against to get the smaller one — the revision is read off the NDK itself,
+so nothing here has to agree with a pinned version:
 
 ```sh
 ANDROID_NDK_ROOT=/path/to/android-ndk-r27d ./gradlew :app:assembleDebug

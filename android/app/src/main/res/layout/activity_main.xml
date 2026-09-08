@@ -13,6 +13,30 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- What a site loads behind (#24). Opaque and painted from the reader's own palette, so
+         the page it precedes does not arrive as a change of colour; the progress line above is
+         what says the load is still moving. A plain view rather than a generated page: a
+         `loadDataWithBaseURL` cover would be a real back/forward entry between every pair of
+         pages, and `PageState` would consume the real navigation's finish as its own. -->
+    <FrameLayout
+        android:id="@+id/cover"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <!-- What the other hosts say on the same screen. The text and its size come from
+             ReaderKit so the app does not introduce itself differently per platform; the
+             colour is the palette's `muted`, like every other secondary line in the app.
+             No highlight sweep here yet - the Apple and GTK covers shimmer this word, and
+             the progress hairline above carries "still working" in the meantime. -->
+        <TextView
+            android:id="@+id/coverMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:importantForAccessibility="no" />
+    </FrameLayout>
+
     <!-- Indeterminate on purpose. A determinate bar would need the fraction curve
          `ReaderKit.LoadProgress` owns, and that is not reachable through the native facade;
          showing a made-up percentage would be worse than showing none. -->

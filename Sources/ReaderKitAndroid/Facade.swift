@@ -14,19 +14,25 @@ import ReaderKit
 /// the intents, and the document tree sync reads through — the things a JVM is actually
 /// holding.
 
-/// Everything the process keeps between calls. A class behind a lock rather than globals:
-/// JNI makes no promise about which thread arrives, and a reader that corrupted its history
-/// because two threads folded at once would be very hard to see.
+/// Everything the process keeps between calls, and the turn-taking that makes it safe.
+///
+/// The session is single-threaded by design; Kotlin is not. The sync cycle and the two calls
+/// that wait for the network arrive on a background executor while the UI thread posts
+/// messages, navigation and extraction results. So the lock is held for the whole of a call
+/// rather than for the moment it takes to read the session out — a reader that folded its
+/// history while the other thread rewrote page state would be very hard to see.
 private final class Bridge {
     static let shared = Bridge()
     private let lock = NSLock()
     private var session: ReaderSession?
 
-    /// Builds the session on the first `start`, and rebuilds it if the host ever starts
-    /// again — a second `start` means a new Activity over the same process, which Android
-    /// does routinely, and reusing the old session would keep a page state that no longer
-    /// matches anything on screen.
-    func start(filesDirectory: String, cacheDirectory: String) -> ReaderSession {
+    /// Builds the session and answers the call that built it, under one lock.
+    ///
+    /// Rebuilds it if the host ever starts again — a second `start` means a new Activity over
+    /// the same process, which Android does routinely, and reusing the old session would keep
+    /// a page state that no longer matches anything on screen.
+    func start(filesDirectory: String, cacheDirectory: String,
+               then body: (ReaderSession) -> [String: Any]) -> [String: Any] {
         lock.withLock {
             let store = FileStore(fileURL: URL(fileURLWithPath: filesDirectory)
                 .appendingPathComponent("reader.json"))
@@ -35,12 +41,22 @@ private final class Bridge {
             let session = ReaderSession(store: store, cache: cache, appName: "WebReader",
                                         platform: .android)
             self.session = session
-            return session
+            return body(session)
         }
     }
 
-    /// The live session, or nil before `start`. Every other call is a no-op until then,
-    /// which is the honest answer: there is nothing on screen to act on yet.
+    /// Runs `body` on the live session with every other call locked out, or answers nil
+    /// before `start` — which is the honest answer: there is nothing on screen to act on yet.
+    func withSession<T>(_ body: (ReaderSession) -> T) -> T? {
+        lock.withLock {
+            guard let session else { return nil }
+            return body(session)
+        }
+    }
+
+    /// The session for the two calls that must let go of it while they wait on the network.
+    /// What they await reaches no session state at all; what they do with the answer goes
+    /// back through `withSession`.
     var current: ReaderSession? { lock.withLock { session } }
 }
 
@@ -67,25 +83,73 @@ public func readerkit_free(_ string: UnsafeMutablePointer<CChar>?) {
 private func reply(for call: String, arguments: [String: Any]) -> [String: Any] {
     // `start` is the one call that may arrive without a session, because it makes one.
     if call == "start" {
-        let session = Bridge.shared.start(
+        return Bridge.shared.start(
             filesDirectory: arguments["filesDir"] as? String ?? "",
-            cacheDirectory: arguments["cacheDir"] as? String ?? "")
-        // `text`, not a URL: the launch link may have arrived in an ACTION_SEND extra with a
-        // headline wrapped around it, and normalising it here is what keeps a cold start on a
-        // shared article from drawing the start page on the way past.
-        guard let text = arguments["text"] as? String, !text.isEmpty else {
-            return ["commands": encode(session.showStartPage())]
+            cacheDirectory: arguments["cacheDir"] as? String ?? "") { session in
+            // `text`, not a URL: the launch link may have arrived in an ACTION_SEND extra
+            // with a headline wrapped around it, and normalising it here is what keeps a cold
+            // start on a shared article from drawing the start page on the way past.
+            guard let text = arguments["text"] as? String, !text.isEmpty else {
+                return ["accepted": true, "commands": session.showStartPage().json]
+            }
+            let shared = session.openShared(text)
+            // `accepted` because a refusal is the host's to answer for: the start page it
+            // gets instead says nothing about the link it handed over, and the warm path
+            // rejects audibly for exactly this.
+            return ["accepted": shared.accepted,
+                    "commands": (shared.accepted ? shared.commands
+                                                 : session.showStartPage()).json]
         }
-        let shared = session.openShared(text)
-        return ["commands": encode(shared.accepted ? shared.commands : session.showStartPage())]
     }
-    guard let session = Bridge.shared.current else { return ["commands": []] }
 
+    // The two calls that wait for the network let go of the session while they wait: what
+    // they await reaches no session state, and the answer is applied under the lock again.
+    // Kotlin makes both off its main thread, which is what lets this block on the async work
+    // rather than inventing a callback into the JVM for a result the caller is waiting for.
+    switch call {
+    case "suggestions":
+        guard let session = Bridge.shared.current,
+              let request = Bridge.shared.withSession({ $0.suggestionRequest() })
+        else { return ["commands": []] }
+        let items = blocking { await session.suggestions(for: request) }
+        return Bridge.shared.withSession { answering($0, ["commands": $0.showSuggestions(items).json]) }
+            ?? ["commands": []]
+
+    case "resolveSource":
+        guard let session = Bridge.shared.current, let url = url(arguments["url"])
+        else { return ["commands": []] }
+        let source = blocking { await session.resolveSource(url) }
+        return Bridge.shared.withSession { answering($0, ["commands": $0.sourceResolved(source).json]) }
+            ?? ["commands": []]
+
+    default:
+        return Bridge.shared.withSession { answering($0, dispatch(call, session: $0, arguments: arguments)) }
+            ?? ["commands": []]
+    }
+}
+
+/// Adds what every answer carries regardless of what was asked.
+///
+/// `reading` is which surface is up, and the host paints by it: the reader is the one page
+/// with nothing to say about the phone, so it is the one page whose system bars go away. It
+/// rides on every reply rather than on a command because a back or forward restore changes
+/// the answer without issuing one — the web view walks its own history, and the only thing
+/// that knows what landed is the session.
+private func answering(_ session: ReaderSession, _ reply: [String: Any]) -> [String: Any] {
+    var reply = reply
+    reply["reading"] = session.isShowingReader
+    return reply
+}
+
+/// Everything that answers without waiting for anything, and therefore runs start to finish
+/// under the lock.
+private func dispatch(_ call: String, session: ReaderSession,
+                      arguments: [String: Any]) -> [String: Any] {
     switch call {
     case "openIncoming":
         guard let url = url(arguments["url"]) else { return ["accepted": false, "commands": []] }
         let opened = session.openIncoming(url)
-        return ["accepted": opened.accepted, "commands": encode(opened.commands)]
+        return ["accepted": opened.accepted, "commands": opened.commands.json]
 
     case "navigationStarted":
         session.navigationStarted()
@@ -96,7 +160,7 @@ private func reply(for call: String, arguments: [String: Any]) -> [String: Any] 
         // a link inside it rather than a bare URL.
         guard let text = arguments["text"] as? String else { return ["accepted": false, "commands": []] }
         let shared = session.openShared(text)
-        return ["accepted": shared.accepted, "commands": encode(shared.commands)]
+        return ["accepted": shared.accepted, "commands": shared.commands.json]
 
     case "loadsInApp":
         // Navigation policy. The list is `WebURL.loadsInApp`'s, not the host's: `about:` and
@@ -106,53 +170,80 @@ private func reply(for call: String, arguments: [String: Any]) -> [String: Any] 
         return ["value": session.loadsInApp(target)]
 
     case "navigationFinished":
-        return ["commands": encode(session.navigationFinished(
-            url: url(arguments["url"]), generator: arguments["generator"] as? String ?? ""))]
+        return ["commands": session.navigationFinished(
+            url: url(arguments["url"]), generator: arguments["generator"] as? String ?? "").json]
 
     case "extractionResult":
         guard let url = url(arguments["url"]) else { return ["commands": []] }
-        return ["commands": encode(session.extractionResult(
+        return ["commands": session.extractionResult(
             url: url, result: arguments["result"] as? String,
-            title: arguments["title"] as? String))]
+            title: arguments["title"] as? String).json]
 
     case "loadFailed":
-        return ["commands": encode(session.loadFailed(
-            url: url(arguments["url"]), code: arguments["code"] as? Int ?? -1009))]
+        return ["commands": session.loadFailed(
+            url: url(arguments["url"]), code: arguments["code"] as? Int ?? -1009).json]
 
     case "message":
         guard let name = arguments["name"] as? String,
-              let body = body(arguments["body"]) else { return ["commands": []] }
-        return ["commands": encode(session.message(name, body: body))]
+              let body = ReaderSession.MessageBody(json: arguments["body"]) else { return ["commands": []] }
+        return ["commands": session.message(name, body: body).json]
 
     case "toggleReader":
-        return ["commands": encode(session.toggleReader(currentURL: url(arguments["url"])))]
+        return ["commands": session.toggleReader(currentURL: url(arguments["url"])).json]
+
+    case "back":
+        // Back, as the reader means it. Answers with nothing when it has no destination of its
+        // own, and the host then falls through to the web view's history — or leaves the app,
+        // which on Android is what Back means once there is nowhere left to go.
+        //
+        // Asked once and answered from that one answer: `back()` pops, so calling it twice to
+        // fill two fields would walk two places back and show the wrong one.
+        let commands = session.back()
+        return ["commands": commands.json, "handled": !commands.isEmpty,
+                "fallback": session.backFallback == .webViewHistory ? "webViewHistory" : "leave"]
 
     case "home":
-        return ["commands": encode(session.home())]
+        return ["commands": session.home().json]
 
     case "reload":
-        return ["commands": encode(session.reload())]
+        return ["commands": session.reload().json]
 
     case "resetAppearance":
-        return ["commands": encode(session.resetAppearance())]
+        return ["commands": session.resetAppearance().json]
 
-    // The two calls that wait for the network. Kotlin makes them off its main thread, which
-    // is what lets this block on the async work rather than inventing a callback into the
-    // JVM for a result the host is already waiting for.
-    case "suggestions":
-        return ["commands": encode(blocking { await session.suggestions() })]
+    case "palette":
+        // The colours a host has to paint where no page reaches: the cover a site loads
+        // behind, the window under a document that has not painted yet, and the strips the
+        // system bars leave beside an inset web view. The Apple hosts read the theme off the
+        // store directly; Kotlin cannot, so it asks.
+        //
+        // `dark` is the host's answer for `.auto` — the same question the pages put to
+        // `prefers-color-scheme`, asked of the one side that knows.
+        //
+        // `followsSystem` is what the answer was for: only under `.auto` may a host let its
+        // web view decide anything about light and dark. Pinned, the theme is the user's
+        // answer and the page carries it.
+        let theme = ReaderStore.settings(store: session.store).theme
+        let palette = ReaderPalette.stock(for: theme,
+                                          prefersDark: arguments["dark"] as? Bool ?? false)
+        return ["background": palette.bg, "text": palette.muted, "dark": palette.isDark,
+                "followsSystem": theme == .auto, "commands": []]
 
-    case "resolveSource":
-        guard let url = url(arguments["url"]) else { return ["commands": []] }
-        return ["commands": encode(blocking { await session.resolveSource(url) })]
+    case "coverMessage":
+        // The word on the cover while a site loads, from the same list the Apple and GTK
+        // hosts draw from, with the same point size. A native cover on three platforms is
+        // three views; what it says is one implementation, or the app introduces itself
+        // differently depending on the phone in your hand.
+        return ["message": LoadProgress.randomCoverMessage(),
+                "size": LoadProgress.coverLabelSize, "commands": []]
 
     case "syncStatus":
         // What the settings page says about sync, and — because the page renders the section
         // only for a non-empty summary — whether it shows the section at all. The host owns
         // the folder picker and the wording that goes with it.
-        return ["commands": encode(session.syncStatus(
+        return ["commands": session.syncStatus(
             folder: arguments["folder"] as? String,
-            summary: arguments["summary"] as? String ?? ""))]
+            summary: arguments["summary"] as? String ?? "").json]
 
     case "syncPeers":
         return sync(session, arguments: arguments)
@@ -185,7 +276,7 @@ private func sync(_ session: ReaderSession, arguments: [String: Any]) -> [String
         reply["writeFileName"] = written.fileName
         reply["writeContents"] = written.json
     }
-    reply["commands"] = encode(session.applySync(result))
+    reply["commands"] = session.applySync(result).json
     return reply
 }
 
@@ -194,49 +285,6 @@ private func sync(_ session: ReaderSession, arguments: [String: Any]) -> [String
 private func url(_ value: Any?) -> URL? {
     guard let string = value as? String, !string.isEmpty else { return nil }
     return URL(string: string)
-}
-
-/// What a page posted, as the host decoded it from the bridge envelope. The three shapes
-/// are all the pages ever send; anything else is a host bug and is refused rather than
-/// guessed at.
-private func body(_ value: Any?) -> ReaderSession.MessageBody? {
-    if let text = value as? String { return .text(text) }
-    if let list = value as? [String] { return .list(list) }
-    if let fields = value as? [String: Any] {
-        return .object(fields.compactMapValues { field in
-            if let text = field as? String { return .text(text) }
-            if let number = field as? Int { return .number(number) }
-            return nil
-        })
-    }
-    return nil
-}
-
-private func encode(_ commands: [ReaderCommand]) -> [[String: Any]] {
-    commands.compactMap { command in
-        switch command {
-        case let .load(url):
-            return ["kind": "load", "url": url.absoluteString]
-        case let .show(html, baseURL):
-            return ["kind": "show", "html": html, "baseUrl": baseURL?.absoluteString as Any]
-        case let .evaluate(script):
-            // An empty script is the session saying "nothing to push"; sending it would cost
-            // a JNI hop and a WebView round trip to run nothing.
-            return script.isEmpty ? nil : ["kind": "evaluate", "script": script]
-        case let .extract(url, script):
-            return ["kind": "extract", "url": url.absoluteString, "script": script]
-        case .reject:
-            return ["kind": "reject"]
-        case let .openExternally(url):
-            return ["kind": "openExternally", "url": url.absoluteString]
-        case .presentSyncSetup:
-            return ["kind": "presentSyncSetup"]
-        case .fetchSuggestions:
-            return ["kind": "fetchSuggestions"]
-        case let .resolveSource(url):
-            return ["kind": "resolveSource", "url": url.absoluteString]
-        }
-    }
 }
 
 /// Runs an async call to completion on the calling thread.
