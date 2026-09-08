@@ -540,7 +540,12 @@ final class ReaderPageTests: XCTestCase {
 
     func testTheSuggestedGroupIsCappedAndCarriesNoRowControls() {
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains(".slice(0, \(ReaderChrome.popoverSuggestions))"))
+        // Two lists, one filler, two caps: the popover is a list you went looking for, the
+        // end-of-article block is an offer to someone who just finished reading.
+        XCTAssertTrue(html.contains(
+            "fillSuggestions(suggested, suggestedList, items, \(ReaderChrome.popoverSuggestions));"))
+        XCTAssertTrue(html.contains(
+            "fillSuggestions(readNext, readNextList, items, \(ReaderChrome.readNextSuggestions));"))
         // More/Less/Block are the start page's; their handlers are gated to it, and three
         // icon buttons do not fit a 280px row.
         XCTAssertFalse(html.contains("readerTopicFeedback"))
@@ -549,11 +554,46 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("readerPost('readerOpen'"))
     }
 
+    func testTheArticleEndsWithSomethingToReadNext() {
+        let html = ReaderPage.html(article: article)
+        // Inside `main`, after the article: it belongs to the reading column, and it is only
+        // reached by finishing what is above it.
+        guard let content = html.range(of: "</article>"),
+              let section = html.range(of: "<section id=\"readNext\"",
+                                       range: content.upperBound..<html.endIndex),
+              let main = html.range(of: "</main>", range: section.upperBound..<html.endIndex) else {
+            return XCTFail("the offer must sit after the article and inside its column")
+        }
+        XCTAssertLessThan(section.lowerBound, main.lowerBound)
+        // Hidden and empty until a ranking arrives, which on a device with no network or no
+        // sources is never — an empty "Read next" would be a promise the page cannot keep.
+        XCTAssertTrue(html.contains("<section id=\"readNext\" hidden"))
+        XCTAssertTrue(html.contains("<div id=\"readNextList\"></div>"))
+        // Its own click handler: the popover's covers only what is inside the popover.
+        XCTAssertTrue(html.contains("readNextList.addEventListener('click'"))
+        // Named for a screen reader by the heading it already shows.
+        XCTAssertTrue(html.contains("aria-labelledby=\"readNextLabel\""))
+        // Chrome type, not the reading settings: `.recent` says `font-family: inherit`, and
+        // inside an article that is the reading serif at 12px.
+        XCTAssertTrue(html.contains("#readNext {"))
+        XCTAssertTrue(html.contains("#readNext .recent { font-size: 14px;"))
+    }
+
+    func testOnlyTheReaderCarriesTheEndOfArticleOffer() {
+        // The start page is a list of things to read already; a second list at the bottom of
+        // it would be the same offer twice.
+        XCTAssertFalse(StartPage.html(appName: "R").contains("id=\"readNext\""))
+        XCTAssertFalse(SettingsPage.html(appName: "R").contains("id=\"readNext\""))
+        XCTAssertFalse(OfflineFallback.html(appName: "R", host: nil, kind: .offline)
+            .contains("id=\"readNext\""))
+    }
+
     func testTheStartPageKeepsItsOwnRicherSuggestionRows() {
         // Both pages implement the same host call; the popover's version installs only where
         // its container exists, so neither can shadow the other.
         let html = StartPage.html(appName: "Reader")
-        XCTAssertTrue(html.contains("if (suggested && suggestedList) {"))
+        XCTAssertTrue(html.contains(
+            "if ((suggested && suggestedList) || (readNext && readNextList)) {"))
         XCTAssertTrue(html.contains("readerTopicFeedback"))
         XCTAssertEqual(html.components(separatedBy: "window.readerSetSuggestions = function").count - 1, 2)
     }

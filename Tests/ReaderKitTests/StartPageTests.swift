@@ -378,18 +378,27 @@ final class StartPageTests: XCTestCase {
                                                     content: "<p>x</p>"))
         XCTAssertTrue(html.contains("if (img.closest('[hidden]')) { return; }"))
         XCTAssertTrue(html.contains("if (which) { window.readerRevealThumbs(); }"))
-        // …which only holds if a list is unhidden before it is revealed. Scoped to each
-        // page's OWN filler: the chrome script emits its copy first, so an unscoped search
-        // finds those two lines on both pages and the start page's ordering goes untested.
-        for (page, unhideLine) in [(html, "suggested.hidden = false;"),
-                                   (StartPage.html(appName: "Reader"), "section.hidden = false;")] {
-            let filler = try XCTUnwrap(page.range(of: "window.readerSetSuggestions = function (items) {",
-                                                  options: .backwards))
-            let own = page[filler.upperBound...]
-            let unhide = try XCTUnwrap(own.range(of: unhideLine))
-            let reveal = try XCTUnwrap(own.range(of: "window.readerRevealThumbs()"))
-            XCTAssertTrue(unhide.lowerBound < reveal.lowerBound, unhideLine)
-        }
+        // …which only holds if a list is unhidden before it is revealed.
+        //
+        // The reader page factors its two lists — the popover's group and the block at the
+        // end of the article — through one `fillSuggestions`, which unhides inside itself
+        // and is defined above the filler that calls it twice. So the guarantee is that the
+        // reveal comes after the last unhide, in document order.
+        let unhide = try XCTUnwrap(html.range(of: "section.hidden = false;", options: .backwards))
+        let reveal = try XCTUnwrap(html.range(of: "window.readerRevealThumbs()",
+                                              range: unhide.upperBound..<html.endIndex))
+        XCTAssertTrue(unhide.lowerBound < reveal.lowerBound,
+                      "the reader's lists are revealed before they are unhidden")
+        // The start page keeps its own filler. Scoped to it, because the chrome script emits
+        // its copy first and an unscoped search would test that one twice.
+        let start = StartPage.html(appName: "Reader")
+        let own = start[try XCTUnwrap(
+            start.range(of: "window.readerSetSuggestions = function (items) {",
+                        options: .backwards)).upperBound...]
+        let startUnhide = try XCTUnwrap(own.range(of: "section.hidden = false;"))
+        let startReveal = try XCTUnwrap(own.range(of: "window.readerRevealThumbs()"))
+        XCTAssertTrue(startUnhide.lowerBound < startReveal.lowerBound,
+                      "the start page's list is revealed before it is unhidden")
     }
 
     func testSuggestionRowsGetTheSameThumbnailAsRecents() {

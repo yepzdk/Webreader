@@ -578,6 +578,56 @@ enum ReaderChrome {
         "<div id=\"readerToast\" role=\"status\" aria-live=\"polite\"></div>"
     }
 
+    /// The offer at the end of an article: two or three things to read next, so finishing
+    /// one is not a dead end that has to be walked back out of.
+    ///
+    /// Ships hidden and empty. The ranking arrives from the host long after the page — or
+    /// never, on a device with no network or no sources — and an empty "Read next" under an
+    /// article would be a promise the page could not keep.
+    static func readNextMarkup() -> String {
+        """
+        <section id="readNext" hidden aria-labelledby="readNextLabel">
+              <h2 id="readNextLabel">Read next</h2>
+              <div id="readNextList"></div>
+            </section>
+        """
+    }
+
+    /// The end-of-article offer. Rows are the same `.recent` rows as everywhere else; what
+    /// this adds is where they sit and what they are set in.
+    static func readNextCSS(platform: Platform = .macOS) -> String {
+        """
+        /* Chrome, not content: these are other people's headlines, so they take the app's
+           sans face at a fixed size rather than the reading settings — the same rows, in the
+           same face, as the popover that offers the same list. `.recent` says
+           `font-family: inherit`, which inside an article would be the reading serif. */
+        #readNext {
+          margin: 44px 0 0; padding-top: 18px;
+          border-top: 1px solid var(--border);
+          font-family: \(platform.sansStack);
+        }
+        #readNext[hidden] { display: none; }
+        #readNextLabel {
+          margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+          text-transform: uppercase; color: var(--muted);
+        }
+        /* Pulled out by its own padding so the titles line up with the article's text and
+           only the hover background reaches past it. */
+        #readNextList { margin: 0 -8px; }
+        #readNext .recent { font-size: 14px; padding: 9px 8px; }
+        /* Two lines, clamped: a full-width row rarely needs the second, and a headline that
+           does should not push the next row down a line on a phone. */
+        #readNext .recent-title {
+          white-space: normal;
+          display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        }
+        #readNext .recent-host { font-size: 12px; }
+        @media (pointer: coarse) {
+          #readNext .recent { min-height: \(touchTarget)px; padding: 11px 8px; }
+        }
+        """
+    }
+
     /// Defines `window.readerToast(text)`. Text only — the message is set with `textContent`,
     /// so a host name from a feed can never become markup.
     static func toastScript() -> String {
@@ -1180,6 +1230,11 @@ enum ReaderChrome {
     static let popoverRecents = 5
     static let popoverSuggestions = 5
 
+    /// How many suggestions the end of an article carries. Fewer than the popover's, and
+    /// deliberately: the popover is a list you went looking for, and this is an offer made
+    /// to someone who has just finished reading. Three is a choice; five is a homepage.
+    static let readNextSuggestions = 3
+
     /// The recents popover's contents: the recents group — heading, rows, and the clear
     /// action — then the suggested group the host fills in later.
     ///
@@ -1758,62 +1813,81 @@ enum ReaderChrome {
               readerPost('readerOpen', row.dataset.url);
             });
           }
-          // The panel's second group: what to read next, so finishing an article doesn't
-          // mean going home first (#33). Delivered by the host long after the page — or
-          // never, which is why the group ships hidden.
+          // What to read next, in two places on this page: the popover's second group (#33)
+          // and the block at the end of the article, which is where finishing one leaves
+          // you. Both are the same host call, the same ranking and the same rows — the only
+          // difference is how many. Delivered long after the page, or never, which is why
+          // both ship hidden.
           //
           // Plain rows, unlike the start page's: More/Less/Block are gated to that page,
           // three icon buttons don't fit a 280px row, and this page already carries its own
-          // rating pair for the article on screen. Defined only where the container exists,
-          // so the start page's richer implementation of the same host call is never
-          // shadowed by this one, whatever order the scripts run in.
+          // rating pair for the article on screen. Defined only where a container exists, so
+          // the start page's richer implementation of the same host call is never shadowed by
+          // this one, whatever order the scripts run in.
           var suggested = document.getElementById('readerSuggested');
           var suggestedList = document.getElementById('readerSuggestedList');
-          if (suggested && suggestedList) {
-            window.readerSetSuggestions = function (items) {
-              var rows = (items || []).slice(0, \(popoverSuggestions));
-              suggestedList.textContent = '';
-              if (!rows.length) { suggested.hidden = true; return; }
+          var readNext = document.getElementById('readNext');
+          var readNextList = document.getElementById('readNextList');
+          if ((suggested && suggestedList) || (readNext && readNextList)) {
+            // One row, built once. Titles and outlet names come from other people's feeds:
+            // text, never markup.
+            var suggestionRow = function (item, thumbs) {
+              var row = document.createElement('button');
+              row.className = 'recent';
+              row.type = 'button';
+              row.dataset.url = item.url;
+              if (thumbs && item.image) {
+                var thumb = document.createElement('img');
+                thumb.className = 'recent-thumb';
+                thumb.alt = '';
+                thumb.loading = 'lazy';
+                thumb.referrerPolicy = 'no-referrer';
+                thumb.dataset.src = item.image;
+                thumb.onerror = function () {
+                  thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
+                  thumb.remove();
+                };
+                row.appendChild(thumb);
+              } else if (thumbs) {
+                row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
+              }
+              var title = document.createElement('span');
+              title.className = 'recent-title';
+              title.textContent = item.title;
+              var source = document.createElement('span');
+              source.className = 'recent-host';
+              source.textContent = item.source || '';
+              row.appendChild(title);
+              row.appendChild(source);
+              return row;
+            };
+            var fillSuggestions = function (section, list, items, limit) {
+              if (!section || !list) { return; }
+              var rows = (items || []).slice(0, limit);
+              list.textContent = '';
+              if (!rows.length) { section.hidden = true; return; }
               // Same rule as every other list: a column only where this one brought images.
               var thumbs = rows.some(function (item) { return !!item.image; });
-              rows.forEach(function (item) {
-                var row = document.createElement('button');
-                row.className = 'recent';
-                row.type = 'button';
-                row.dataset.url = item.url;
-                if (thumbs && item.image) {
-                  var thumb = document.createElement('img');
-                  thumb.className = 'recent-thumb';
-                  thumb.alt = '';
-                  thumb.loading = 'lazy';
-                  thumb.referrerPolicy = 'no-referrer';
-                  thumb.dataset.src = item.image;
-                  thumb.onerror = function () {
-                    thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
-                    thumb.remove();
-                  };
-                  row.appendChild(thumb);
-                } else if (thumbs) {
-                  row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
-                }
-                // Titles and outlet names come from other people's feeds: text, never markup.
-                var title = document.createElement('span');
-                title.className = 'recent-title';
-                title.textContent = item.title;
-                var source = document.createElement('span');
-                source.className = 'recent-host';
-                source.textContent = item.source || '';
-                row.appendChild(title);
-                row.appendChild(source);
-                suggestedList.appendChild(row);
-              });
-              suggestedList.classList.toggle('has-thumbs', thumbs);
+              rows.forEach(function (item) { list.appendChild(suggestionRow(item, thumbs)); });
+              list.classList.toggle('has-thumbs', thumbs);
               // Unhide first: the reveal withholds a src while the row is still behind a
-              // `hidden` ancestor. The panel itself may well be closed, in which case
-              // `setOpen` reveals these when it is opened.
-              suggested.hidden = false;
+              // `hidden` ancestor. The popover may well be closed, in which case `setOpen`
+              // reveals those when it is opened.
+              section.hidden = false;
+            };
+            window.readerSetSuggestions = function (items) {
+              fillSuggestions(suggested, suggestedList, items, \(popoverSuggestions));
+              fillSuggestions(readNext, readNextList, items, \(readNextSuggestions));
               if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
             };
+            // The end-of-article rows are outside the popover, so they need their own
+            // handler: the panel's covers only what is inside it.
+            if (readNextList) {
+              readNextList.addEventListener('click', function (e) {
+                var row = e.target.closest('button[data-url]');
+                if (row) { readerPost('readerOpen', row.dataset.url); }
+              });
+            }
           }
           document.addEventListener('click', function (e) {
             if (!e.target.closest('.reader-controls')) { setOpen(null); }
