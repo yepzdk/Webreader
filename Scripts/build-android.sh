@@ -37,7 +37,10 @@ case " $(swift sdk list 2>/dev/null | tr '\n' ' ') " in
   *" $SDK "*) ;;
   *)
     echo "build-android.sh: Swift SDK '$SDK' is not installed" >&2
-    echo "  swift sdk install https://download.swift.org/swift-6.3.3-release/android/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz" >&2
+    # `android-sdk/`, not `android/`: the latter 404s. The checksum is the one CI pins and
+    # not optional politeness — without it `swift sdk install` trusts a ~1 GB download.
+    echo "  swift sdk install https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz \\" >&2
+    echo "    --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5" >&2
     echo "  then link an NDK into it with its scripts/setup-android-sdk.sh." >&2
     exit 1
     ;;
@@ -76,6 +79,13 @@ fi
 # runs the manifest for --show-bin-path too and would otherwise report the host's path.
 export WEBREADER_ANDROID=1
 
+# The whole tree, not just the ABIs this run builds. Gradle reads the ABI split's APK list
+# off these directories, so an x86_64 left behind by an earlier two-ABI run would go on being
+# packaged — with a ReaderKit that no longer matches Sources/. It happens before the ABIS
+# list is validated below, which is affordable precisely because all of it is derived: an
+# unrecognised triple costs the next run a rebuild and nothing else.
+rm -rf android/app/src/main/jniLibs
+
 for triple in $ABIS; do
   arch="${triple%%-*}"
   case "$arch" in
@@ -91,7 +101,6 @@ for triple in $ABIS; do
   bin="$(swift build -c "$CONFIG" --swift-sdk "$triple" --show-bin-path)"
 
   dest="android/app/src/main/jniLibs/$abi"
-  rm -rf "$dest"
   mkdir -p "$dest"
   cp "$bin/libReaderKitAndroid.so" "$dest/"
 

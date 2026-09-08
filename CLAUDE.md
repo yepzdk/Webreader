@@ -29,6 +29,10 @@ switch, two more built only by Xcode, no dependencies:
     `.reject`, `.openExternally`, `.presentSyncSetup`, `.fetchSuggestions`, `.resolveSource`).
     All three hosts drive this one implementation — which is the point, since the fourth
     cannot even be written in Swift.
+  - `ReaderCommand+JSON.swift` — the same commands and the posted-message shapes as JSON, for
+    a host that is not written in Swift. It lives here rather than beside the JNI facade
+    because `ReaderKitAndroid` is only in the package while cross-compiling, so nothing there
+    is reachable from a test; `ReaderCommandJSONTests` pins every `kind` string Kotlin matches.
   - `Reader.swift` — `Article`, `ReaderSettings` (appearance, tolerant JSON codec),
     `Reader.extractionScript` (Readability over a cloned document), `ReaderPage.html`.
   - `ReaderChrome.swift` — the Aa popover, recents popover, theme palette, and scroll-progress
@@ -133,7 +137,7 @@ switch, two more built only by Xcode, no dependencies:
 - **`android/`** — the Kotlin host (issue #9). One Activity over a `WebView`, the `readerHost`
   JavaScript interface, `ACTION_VIEW` + `ACTION_SEND` intent filters, and the Storage Access
   Framework for sync's folder. `Scripts/build-android.sh` must run first: it fills
-  `app/src/main/jniLibs/` with the `.so` and the Swift runtime, ~100 MB per ABI of build
+  `app/src/main/jniLibs/` with the `.so` and the Swift runtime, ~104 MB per ABI of build
   output that is gitignored. See `android/README.md`.
 
 ### Rules that aren't obvious from the code
@@ -143,6 +147,13 @@ switch, two more built only by Xcode, no dependencies:
 - Page state (`isShowingStartPage`, `isShowingFallback`, `isShowingReader`,
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
+- `ReaderSession` is **single-threaded, and says so**. A host either drives it from one thread
+  (the Apple hosts, from the main actor) or serialises its calls (the Android facade, under
+  `Bridge`'s lock for the whole of a call, not just the session lookup). The only methods that
+  may be awaited off that thread are `suggestions(for:)` and `resolveSource(_:)`: they take a
+  value, reach nothing session-owned, and hand back an answer the caller applies through
+  `showSuggestions(_:)` / `sourceResolved(_:)`. Anything that reads `store`, the cache or
+  `pageState` from a second thread is a race, however small the window looks.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
   `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
   `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,

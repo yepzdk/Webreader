@@ -15,7 +15,7 @@ xcuserdata/
 *.xcuserdatad
 
 # Android. The Gradle project keeps its own `android/.gitignore` for its build outputs —
-# including the ~100 MB of Swift runtime per ABI that `Scripts/build-android.sh` produces.
+# including the ~104 MB of Swift runtime per ABI that `Scripts/build-android.sh` produces.
 # Only the packaged artefacts belong here, since a release drops them anywhere.
 *.apk
 *.aab

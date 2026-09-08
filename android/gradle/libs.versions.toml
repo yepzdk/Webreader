@@ -1,13 +1,17 @@
 [versions]
 # AGP 9 compiles Kotlin itself; there is deliberately no Kotlin Gradle plugin here, because
 # `org.jetbrains.kotlin.android` is incompatible with AGP 9's DSL.
-agp = "9.3.0"
+# 9.3.2, not 9.3.0: the intellij-core bundled in 9.3.0 and 9.3.1 calls `List.removeLast()`,
+# which is Java 21, so `:app:lint` dies with `NoSuchMethodError` on the JDK 17 this project
+# documents and targets (b/522845800).
+agp = "9.3.2"
 # Material carries appcompat, core and activity with it; those three are declared anyway
 # because this app calls them directly, and a transitive version is not a contract.
 material = "1.14.0"
 appcompat = "1.8.0"
-# 1.19 requires compiling against API 37; this project compiles against 36, which is the
-# highest AGP 9.3 supports.
+# 1.19 requires compiling against API 37, and AGP 9.3 does support 37 — so staying on 36 is
+# a choice, not a ceiling. `targetSdk` is 36 and nothing this app calls needs a newer API, so
+# it compiles against the one platform `android/README.md` asks contributors to install.
 core = "1.18.0"
 activity = "1.13.0"
 # The only way to walk a Storage Access Framework tree without hand-rolling

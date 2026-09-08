@@ -85,8 +85,11 @@ if [ -n "${ANDROID_KEYSTORE:-}" ] && [ -f "${ANDROID_KEYSTORE}" ]; then
     [ -f "$unsigned" ] || die "expected $unsigned"
     signed="build/WebReader-$VERSION-$abi.apk"
     # zipalign before apksigner: the aligner cannot fix a signed archive, and an unaligned
-    # APK is rejected on install.
-    "$ANDROID_BUILD_TOOLS/zipalign" -f -p 4 "$unsigned" "$signed.aligned"
+    # APK is rejected on install. `-P 16`, not `-p`: every `.so` here has a PT_LOAD p_align
+    # of 16384 and `useLegacyPackaging = false` maps them straight from the archive, so the
+    # 4 KB alignment `-p` gives leaves the loader nothing to map on a 16 KB-page device.
+    # The two flags are mutually exclusive; `4` is still the zip entry alignment.
+    "$ANDROID_BUILD_TOOLS/zipalign" -f -P 16 4 "$unsigned" "$signed.aligned"
     "$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$ANDROID_KEYSTORE" \
       --out "$signed" "$signed.aligned"
     rm -f "$signed.aligned"

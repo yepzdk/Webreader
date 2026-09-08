@@ -8,7 +8,7 @@ android {
 
     // Optional, and only about size: AGP strips the packaged `.so`s with the NDK's
     // `llvm-strip`, and with no NDK in sight it packages the Swift runtime unstripped —
-    // around 119 MB per APK instead of 70. Nothing in this module is compiled with the NDK
+    // around 104 MB per APK instead of 74. Nothing in this module is compiled with the NDK
     // (the Swift side already used one to produce `jniLibs`), so a missing one is a warning
     // at package time and never a failed build.
     //
@@ -40,16 +40,32 @@ android {
         versionName = "0.11.0"
     }
 
-    // One APK per ABI, and no universal one. The Swift runtime is around 70 MB of stripped
+    // One APK per ABI, and no universal one. The Swift runtime is around 74 MB of stripped
     // `.so` per architecture, so a universal APK would be twice that for no reason — every
-    // device installs exactly one of them. The two ABIs are the two
-    // `Scripts/build-android.sh` produces; an APK advertising a third would install and then
-    // die in `System.loadLibrary`.
+    // device installs exactly one of them.
+    //
+    // The ABI list is read off `jniLibs` rather than written down here, because a written
+    // list lies in both directions: an ABI listed but not built ships an APK that installs
+    // and then dies in `System.loadLibrary`, and an ABI built but not listed is silently
+    // thrown away. `Scripts/build-android.sh` clears the whole tree before it writes, so
+    // what is on disk is exactly what the last cross-build produced.
+    //
+    // Nothing there at all is not a misconfiguration: the `.so`s are build outputs and are
+    // not in git, so a checkout that has never run the script — CI's Kotlin job — has no
+    // native code to split on, and the split switches itself off rather than asking AGP to
+    // honour an empty include list.
+    val builtAbis = file("src/main/jniLibs")
+        .listFiles()
+        ?.filter { it.isDirectory && it.list()?.any { name -> name.endsWith(".so") } == true }
+        ?.map { it.name }
+        ?.sorted()
+        .orEmpty()
+
     splits {
         abi {
-            isEnable = true
+            isEnable = builtAbis.isNotEmpty()
             reset()
-            include("arm64-v8a", "x86_64")
+            include(*builtAbis.toTypedArray())
             isUniversalApk = false
         }
     }

@@ -63,9 +63,9 @@ jobs:
   # for Android only works with a matching open-source toolchain — Xcode's cannot
   # cross-compile at all, and the container's *is* the open-source one.
   #
-  # The APK itself is not built here. Assembling it needs the Android SDK and a JDK on top of
-  # everything below, and what actually breaks is portability: a Foundation API that does not
-  # exist on Android, or a facade signature that drifts. That is exactly what this catches.
+  # The APK itself is not built here — the `apk` job below does that, without the NDK or a
+  # Swift toolchain. What this job catches is portability: a Foundation API that does not
+  # exist on Android, or a facade signature that drifts.
   android:
     runs-on: ubuntu-latest
     container: swift:6.3-noble
@@ -144,3 +144,29 @@ jobs:
             /root/.swiftpm/swift-sdks
             /opt/android-ndk
           key: android-sdk-swift-6.3.3-ndk-r27d
+
+  # The Kotlin half, and the only place the Gradle build is exercised before a release runs
+  # `assembleRelease` for real. Deliberately independent of the `android` job above: the
+  # `.so`s are build outputs and are not in git, so this compiles against an absent
+  # `jniLibs` — which proves the Kotlin, the manifest, the resources and the lint baseline,
+  # and says nothing about whether `ReaderBridge`'s `native fun` finds its symbol at runtime.
+  # Cross-building the engine just to link it would double the job's cost to test nothing
+  # this job is about.
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 17, because that is what `compileOptions` targets and what `android/README.md`
+          # tells contributors to install. A newer JDK would pass here and still leave the
+          # documented setup untested.
+          java-version: '17'
+          cache: gradle
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Compile the Kotlin host and run lint
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug :app:lint
