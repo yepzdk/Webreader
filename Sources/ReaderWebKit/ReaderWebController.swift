@@ -37,6 +37,12 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         didSet {
             session.onLocalStateChanged = { [weak self] in self?.sync?.localStateChanged() }
             session.onStartPageShown = { [weak self] in self?.sync?.startPageShown() }
+            // Read at render time, not cached: the summary is relative to now, so a settings
+            // page opened an hour after the last cycle would otherwise still say "a few
+            // seconds ago".
+            session.syncStatusProvider = { [weak self] in
+                (self?.sync?.folderDisplayPath, self?.sync?.summary ?? "")
+            }
             // Seeds the settings page's Sync section before anything is on screen: without
             // it the first render would carry an empty summary and leave the section out.
             _ = session.syncStatus(folder: sync?.folderDisplayPath, summary: sync?.summary ?? "")
@@ -163,13 +169,16 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// title travels with it because a restored reader document's baked-in title belongs to
     /// whatever was rendered last, and reading it here costs one round trip instead of two.
     private func extract(url: URL, script: String) {
-        webView.evaluateJavaScript(script) { [weak self] result, _ in
+        // WebKit delivers this on the main thread, but its signature does not say so, and
+        // the branches below push state into the page. Spelled out rather than left to
+        // Swift 5's leniency, which downgrades it to a warning that Swift 6 will not.
+        webView.evaluateJavaScript(script) { @MainActor [weak self] result, _ in
             guard let self else { return }
             // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
             // already the new (provisional) URL and this result belongs to a page nobody
             // wants any more — rendering it would file page A's body under page B's key.
             guard self.webView.url == url else { return }
-            self.webView.evaluateJavaScript("document.title") { title, _ in
+            self.webView.evaluateJavaScript("document.title") { @MainActor title, _ in
                 guard self.webView.url == url else { return }
                 self.run(self.session.extractionResult(url: url, result: result as? String,
                                                        title: title as? String),
@@ -266,6 +275,29 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         }
     }
 
+    /// The response arrived and is not a web page — a feed, a PDF, a zip.
+    ///
+    /// Without this, WebKit decides on its own: it cancels the navigation with
+    /// `WebKitErrorFrameLoadInterruptedByPolicyChange` (102), which `isIgnorable` deliberately
+    /// swallows because that code is also what our own policy cancellations raise. Nothing
+    /// renders, so whatever the window was showing stays — with no chrome of ours on it and no
+    /// way back. Pasting a feed address into "Open URL from Clipboard" landed exactly there.
+    ///
+    /// Cancelled and answered with our own page instead, which carries Home. The code is
+    /// WebKit's own `WebKitErrorCannotShowMIMEType`; `OfflineFallback.classify` turns it into
+    /// the one kind that offers no Try Again, since asking again cannot answer differently.
+    @MainActor
+    public func webView(_ webView: WKWebView,
+                        decidePolicyFor navigationResponse: WKNavigationResponse,
+                        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard navigationResponse.isForMainFrame, !navigationResponse.canShowMIMEType else {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        run(session.loadFailed(url: navigationResponse.response.url, code: 100), settled: true)
+    }
+
     // target=_blank / window.open: load in the same view rather than dropping it.
     public func webView(_ webView: WKWebView,
                         createWebViewWith configuration: WKWebViewConfiguration,
@@ -302,8 +334,12 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         // carry no URL of their own — and asking unconditionally keeps one path instead of a
         // fast lane that has to know which finishes can skip it.
         let url = webView.url
-        webView.evaluateJavaScript(ReaderSession.generatorScript) { [weak self] result, _ in
+        webView.evaluateJavaScript(ReaderSession.generatorScript) { @MainActor [weak self] result, _ in
             guard let self else { return }
+            // A navigation that started inside this round trip owns the page now, and it has
+            // already told the session so. Committing this finish over it would mark a live
+            // site as one of our own documents, with every message handler open to it.
+            guard self.webView.url == url else { return }
             self.run(self.session.navigationFinished(url: url,
                                                      generator: (result as? String) ?? ""),
                      settled: true)
