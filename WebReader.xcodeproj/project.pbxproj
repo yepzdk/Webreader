@@ -474,6 +474,8 @@
 				<string>App/iOS/WebReader.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
+				<key>DEVELOPMENT_TEAM</key>
+				<string>96DL4CMTDZ</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>NO</string>
 				<key>INFOPLIST_FILE</key>
@@ -503,6 +505,8 @@
 				<string>App/iOS/WebReader.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
+				<key>DEVELOPMENT_TEAM</key>
+				<string>96DL4CMTDZ</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>NO</string>
 				<key>INFOPLIST_FILE</key>
@@ -546,6 +550,8 @@
 				<string>App/iOS/Share.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
+				<key>DEVELOPMENT_TEAM</key>
+				<string>96DL4CMTDZ</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>NO</string>
 				<key>INFOPLIST_FILE</key>
@@ -578,6 +584,8 @@
 				<string>App/iOS/Share.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
+				<key>DEVELOPMENT_TEAM</key>
+				<string>96DL4CMTDZ</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>NO</string>
 				<key>INFOPLIST_FILE</key>
