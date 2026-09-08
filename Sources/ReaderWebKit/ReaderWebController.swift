@@ -226,6 +226,30 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         return true
     }
 
+
+    /// Back, as the reader means it: the previous article, or the page it came from.
+    ///
+    /// The session is asked first because the web view's history also holds every article
+    /// page that was extracted on the way, and going back through one of those re-extracts it
+    /// and returns you to the article you were leaving (#42). When the session has nothing of
+    /// its own — a site's own pages — the web view's history is exactly right, so it answers.
+    public func back() {
+        let commands = session.back()
+        guard commands.isEmpty else {
+            run(commands)
+            return
+        }
+        // Only someone else's page defers to the web view. From one of ours there is nowhere
+        // left to go, and its history still holds our own documents — going back into one puts
+        // an article on screen that the reader already left.
+        if session.backFallback == .webViewHistory { webView.goBack() }
+    }
+
+    /// Whether Back has anywhere to go, from either half of the answer.
+    public var canGoBack: Bool {
+        session.canGoBack || (session.backFallback == .webViewHistory && webView.canGoBack)
+    }
+
     public func showStartPage() { run(session.home()) }
     public func showSettingsPage() { run(session.showSettingsPage()) }
     public func toggleReader() { run(session.toggleReader(currentURL: webView.url)) }

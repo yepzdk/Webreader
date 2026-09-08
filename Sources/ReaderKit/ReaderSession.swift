@@ -111,6 +111,33 @@ public final class ReaderSession {
     /// article's terms under another's URL.
     var readerArticleTitle: String?
 
+    /// Where the reader has been, as the reader thinks of it.
+    ///
+    /// Deliberately not the web view's history, which also holds every article page that was
+    /// extracted on the way — a step in a pipeline, never a place anyone asked to be. Back
+    /// through one of those is what returned someone to the article they were trying to leave
+    /// (#42): the site loads, is offered to Readability exactly as any page is, and renders
+    /// the same reader again, so Back appeared to do nothing at all.
+    ///
+    /// Only the reader's own destinations go here. A site's own pages stay the web view's
+    /// business, and `back()` says so by answering with nothing.
+    private enum Place: Equatable {
+        case startPage
+        case settings
+        case reader(URL)
+    }
+
+    /// Capped because a stack nobody ever pops is a leak with good manners: bouncing between
+    /// two articles would otherwise grow it for as long as the app runs. Thirty is the same
+    /// number recents holds, and for the same reason — further back than anyone reaches.
+    private var places: [Place] = []
+    private static let placeLimit = 30
+
+    /// The feed a not-a-page address turned out to be, kept between the offer and the tap
+    /// that accepts it so accepting costs no second fetch. Cleared whenever that page is
+    /// rendered again, because the next address is a different question.
+    var offeredFeed: FeedSource?
+
     let feeds = FeedFetcher()
 
     public init(store: KeyValueStore, cache: ArticleCache, appName: String,
@@ -343,6 +370,73 @@ public final class ReaderSession {
         return [.show(html: html, baseURL: nil)]
     }
 
+    // MARK: - Going back
+
+    /// What a host should do when `back()` answers with nothing.
+    public enum BackFallback: Equatable, Sendable {
+        /// Someone else's page is on screen, so its own history is exactly the right answer:
+        /// a site's links are its own to walk.
+        case webViewHistory
+        /// One of ours is on screen and there is nothing before it. The web view's history is
+        /// the wrong place to look — our own documents are sitting in it, and walking back
+        /// into one resurrects an article the reader already left. Back means leave.
+        case leave
+    }
+
+    /// Where Back goes when this session has nowhere of its own left.
+    public var backFallback: BackFallback {
+        isShowingReader || pageState.isOwnPage || isShowingFallback ? .leave : .webViewHistory
+    }
+
+    /// What Back means where the reader is the one that knows.
+    ///
+    /// Answers with nothing when it has no destination of its own, and `backFallback` then
+    /// says whether that means "the web view's history knows" or "there is nowhere left".
+    /// Both answers matter: consulting that history from one of our own pages is what put an
+    /// article back on screen after the reader had already left it.
+    public func back() -> [ReaderCommand] {
+        // A fallback page is not somewhere anyone navigated to, so leaving one means going
+        // back to whatever was showing before it rather than past it.
+        if isShowingFallback, let destination = places.last {
+            return render(destination)
+        }
+        guard places.count > 1 else { return [] }
+        places.removeLast()
+        guard let destination = places.last else { return [] }
+        return render(destination)
+    }
+
+    /// Whether `back()` has somewhere to go. Half the answer to whether a host's Back control
+    /// should be enabled: the other half is its own history, which it alone can see.
+    public var canGoBack: Bool {
+        isShowingFallback ? !places.isEmpty : places.count > 1
+    }
+
+    private func render(_ place: Place) -> [ReaderCommand] {
+        switch place {
+        case .startPage: return showStartPage()
+        case .settings: return showSettingsPage()
+        case let .reader(url):
+            // The saved copy is the whole point of going back to an article: no network, no
+            // second extraction, the same rendering that was on screen.
+            if let cached = cache.article(for: URLCleaner.clean(url)) {
+                return renderReader(cached, source: url)
+            }
+            // Pruned since — a clear, or thirty newer articles. Fetching it again re-extracts
+            // and re-renders, which arrives at the same place this was already popped to.
+            enterReaderForURL = URLCleaner.clean(url)
+            return [.load(url)]
+        }
+    }
+
+    /// Records where the reader now is, unless it is already there: `resetAppearance`
+    /// re-renders the page it is on, and a cache hit re-renders the article it is on.
+    private func arrive(at place: Place) {
+        guard places.last != place else { return }
+        places.append(place)
+        if places.count > Self.placeLimit { places.removeFirst(places.count - Self.placeLimit) }
+    }
+
     // MARK: - Pages
 
     /// The start page: URL field, recents, and the appearance controls — reading the same
@@ -351,6 +445,7 @@ public final class ReaderSession {
         isShowingFallback = false
         failedURL = nil
         pageState.willShow(.startPage)
+        arrive(at: .startPage)
         onStartPageShown?()
         return [.show(html: StartPage.html(appName: appName,
                                            settings: ReaderStore.settings(store: store),
@@ -368,6 +463,7 @@ public final class ReaderSession {
         isShowingFallback = false
         failedURL = nil
         pageState.willShow(.settings)
+        arrive(at: .settings)
         return [.show(html: SettingsPage.html(appName: appName,
                                               settings: ReaderStore.settings(store: store),
                                               suggestions: ReaderStore.suggestions(store: store),
@@ -387,6 +483,7 @@ public final class ReaderSession {
         pageState.clear()
         failedURL = nil
         readerSourceURL = source
+        arrive(at: .reader(source))
         readerArticleTitle = article.title
         // Record before rendering so the article being opened is the panel's top row. The
         // cleaned URL, because opening a row routes through `openIncoming`, which cleans —
