@@ -299,6 +299,19 @@ final class SuggestionsTests: XCTestCase {
                        ["https://site.test/feed", "https://other.test/atom"])
     }
 
+    func testAFeedLinkIsFoundBehindHalfAMegabyteOfInlinedCSS() {
+        // theguardian.com: ~580 KB of inlined stylesheets, then the feed link, then `</head>`.
+        // The search used to stop at 200_000 characters, so the paper read as having no feed.
+        let html = "<html><head><style>"
+            + String(repeating: "a{color:red}", count: 50_000)
+            + "</style>"
+            + "<link rel=\"alternate\" type=\"application/rss+xml\" href=\"/europe/rss\">"
+            + "</head><body></body></html>"
+        XCTAssertGreaterThan(html.count, 200_000, "the fixture has to clear the old cap")
+        XCTAssertEqual(Feed.discover(inHTML: html, base: URL(string: "https://site.test/")!)
+            .map(\.absoluteString), ["https://site.test/europe/rss"])
+    }
+
     func testDiscoveryIgnoresPagesWithoutFeeds() {
         XCTAssertTrue(Feed.discover(inHTML: "<html><head><title>x</title></head></html>",
                                     base: URL(string: "https://site.test/")!).isEmpty)
@@ -350,6 +363,31 @@ final class SuggestionsTests: XCTestCase {
         // Recents store the cleaned URL, so the tracking-param variant must still match.
         let ranked = Suggestions.rank(items, read: [], readURLs: ["https://a.test/seen"])
         XCTAssertEqual(ranked.map(\.url), ["https://a.test/fresh"])
+    }
+
+    func testAnArticleReadUnderAnotherSpellingOfItsAddressIsNotOfferedAgain() {
+        // The bug, exactly as it happened: dr.dk's feed offers `dr.dk/…`, opening it lands
+        // on `www.dr.dk/…` because the site redirects, recents record where you landed —
+        // and the article you had just finished was the first thing offered at the end of
+        // it, on every article you opened from there.
+        let items = [
+            item("The one just read", "https://dr.dk/nyheder/mathilde-tror-paa"),
+            item("Something else", "https://dr.dk/nyheder/andet"),
+        ]
+        let ranked = Suggestions.rank(
+            items, read: [], readURLs: ["https://www.dr.dk/nyheder/mathilde-tror-paa"])
+        XCTAssertEqual(ranked.map(\.title), ["Something else"])
+    }
+
+    func testTheSameArticleFromTwoFeedsUnderTwoSpellingsAppearsOnce() {
+        // Two feeds carrying one story, one of them with `www.` and a trailing slash: the
+        // same list twice is the same defect from the other side.
+        let items = [
+            item("One story", "https://a.test/story"),
+            item("One story", "https://www.a.test/story/"),
+            item("One story", "http://a.test/story#comments"),
+        ]
+        XCTAssertEqual(Suggestions.rank(items, read: []).count, 1)
     }
 
     func testNearIdenticalHeadlinesFromDifferentOutletsCollapse() {

@@ -46,6 +46,36 @@ public enum URLCleaner {
         return stripTrackingParams(from: current) ?? current
     }
 
+    /// The key two URLs share when they are the same article.
+    ///
+    /// Deliberately not `clean`, and never used to navigate. `clean` answers "where should
+    /// this go?", and its first rule is that it must not turn a working URL into a broken
+    /// one — so it keeps the host exactly as written, because plenty of sites answer on
+    /// `www.` and nowhere else. This answers a different question: "have I already read
+    /// this?", where `dr.dk/x` and `www.dr.dk/x` are the same piece of writing.
+    ///
+    /// The bug it exists for: a feed offers `https://dr.dk/…`, the site redirects to
+    /// `https://www.dr.dk/…`, recents record where you landed — and the article you just
+    /// finished was still the first thing offered at the end of it, because the two strings
+    /// are not equal. Scheme, a leading `www.`, host case, a trailing slash and a fragment
+    /// all come off; the cleaned query stays, since `?p=2` is a different page.
+    public static func identity(_ url: URL) -> String {
+        let cleaned = clean(url)
+        guard var components = URLComponents(url: cleaned, resolvingAgainstBaseURL: false),
+              let host = components.host?.lowercased()
+        else { return cleaned.absoluteString }
+        components.scheme = nil
+        components.fragment = nil
+        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        var path = components.percentEncodedPath
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        // A port only where it is not the default one: two articles on the same host cannot
+        // differ by :443, and a local server on :8080 is genuinely somewhere else.
+        let port = components.port.flatMap { $0 == 80 || $0 == 443 ? nil : ":\($0)" } ?? ""
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return bare + port + path + query
+    }
+
     // MARK: - Unwrapping
 
     /// One unwrapping pass: the embedded destination if `url` looks like a
