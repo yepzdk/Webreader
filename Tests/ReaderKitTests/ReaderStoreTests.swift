@@ -73,6 +73,27 @@ final class ReaderStoreTests: XCTestCase {
         XCTAssertEqual(ReaderStore.topics(store: store), topics)
     }
 
+    func testResetAppearanceKeepsWhatTheSettingsPageOwns() {
+        // Reset Reader Appearance is about the Aa popover. The article-image switches and the
+        // start page's section order are not appearance — they live on the settings page —
+        // and one of the switches means "fetch no images from publishers".
+        let store = MemoryStore()
+        var settings = ReaderSettings()
+        settings.theme = .black
+        settings.startPageThumbnails = .off
+        settings.readerThumbnails = .off
+        settings.startPageOrder = .suggestionsFirst
+        ReaderStore.setSettings(settings, store: store)
+
+        ReaderStore.resetAppearance(store: store)
+
+        let reset = ReaderStore.settings(store: store)
+        XCTAssertEqual(reset.theme, .auto, "what the popover owns does go back to stock")
+        XCTAssertEqual(reset.startPageThumbnails, .off)
+        XCTAssertEqual(reset.readerThumbnails, .off)
+        XCTAssertEqual(reset.startPageOrder, .suggestionsFirst)
+    }
+
     func testTopicPreferencesRoundTrip() {
         let store = MemoryStore()
         XCTAssertTrue(ReaderStore.topics(store: store).weights.isEmpty)

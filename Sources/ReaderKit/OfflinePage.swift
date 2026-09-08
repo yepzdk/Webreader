@@ -74,18 +74,25 @@ public enum OfflineFallback {
         // The button label stays white on the accent in every palette: `ReaderPalette` has
         // no foreground-on-accent role, and inventing one from a colour literal the host
         // may have written as anything is guesswork the stock themes don't do either.
+        // This page spells its own palette rather than taking `ReaderChrome.themeCSS`, so it
+        // has to define the safe-area variables its chrome offsets read. Left out, every
+        // `var(--safe-*)` here resolves to nothing, the declaration around it is invalid, and
+        // the page loses the insets that keep Home clear of a notch.
+        let safeArea = ReaderChrome.safeAreaCSS(platform: platform)
         let theme = palette.map {
             """
             :root {
               --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
               --accent-fg: #ffffff; --border: \($0.border);
               color-scheme: \($0.isDark ? "dark" : "light");
+            \(safeArea)
             }
             """
         } ?? """
         :root {
           --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
           --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+        \(safeArea)
         }
         @media (prefers-color-scheme: dark) {
           :root {
@@ -118,8 +125,8 @@ public enum OfflineFallback {
             text-align: center; max-width: 30rem;
             /* The card is centred in the viewport, so it needs no safe-area padding of its
                own on the block axis — but a landscape notch does eat into the inline one. */
-            padding: 24px max(24px, env(safe-area-inset-left, 0px)) 24px
-                        max(24px, env(safe-area-inset-right, 0px));
+            padding: 24px max(24px, var(--safe-left)) 24px
+                        max(24px, var(--safe-right));
           }
           .icon { color: var(--muted); margin-bottom: 16px; }
           .icon svg { width: 44px; height: 44px; }

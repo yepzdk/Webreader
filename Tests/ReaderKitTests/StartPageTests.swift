@@ -435,6 +435,52 @@ final class StartPageTests: XCTestCase {
         }
     }
 
+    // MARK: - Which section leads
+
+    func testRecentsLeadWithNothingBakedIntoTheDocument() {
+        // The default is the page as it has always been, down to the html tag: a reader who
+        // never opens the setting must not be able to tell it exists.
+        XCTAssertTrue(StartPage.html(appName: "Reader").contains("<html lang=\"en\">"))
+    }
+
+    func testSuggestionsFirstIsBakedInForTheFirstPaint() {
+        var settings = ReaderSettings()
+        settings.startPageOrder = .suggestionsFirst
+        let html = StartPage.html(appName: "Reader", settings: settings)
+        XCTAssertTrue(html.contains("<html lang=\"en\" data-order=\"suggestionsFirst\">"))
+        // Ordered by CSS, so the document itself is untouched: the suggestions still arrive
+        // from the host into the section it wrote in the same place.
+        let recents = html.range(of: "class=\"recents-column\"")
+        let suggested = html.range(of: "<section id=\"suggested\"")
+        XCTAssertNotNil(recents)
+        XCTAssertNotNil(suggested)
+        XCTAssertTrue(recents!.lowerBound < suggested!.lowerBound)
+    }
+
+    func testBothLayoutsHonourTheOrder() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(":root[data-order=\"suggestionsFirst\"] #suggested { order: -1; }"))
+        // The two-column layout gives its leading column a tighter heading; `:first-child`
+        // cannot follow `order`, so the reversed case says so itself.
+        XCTAssertTrue(html.contains(
+            ":root[data-order=\"suggestionsFirst\"] .recents-column .section { margin-top: 36px; }"))
+        XCTAssertTrue(html.contains(
+            ":root[data-order=\"suggestionsFirst\"] #suggested .section { margin-top: 28px; }"))
+    }
+
+    func testTheOrderChangesLiveWithoutARerender() {
+        // The settings page posts the key, the host pushes the stored settings back
+        // (`pushSettings`), and the shared chrome script moves the attribute — the same path
+        // the theme and the thumbnails take, so an open start page never has to be rebuilt.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerSetSettings = function (next)"))
+        XCTAssertTrue(html.contains(
+            "if (s.startPageOrder === 'suggestionsFirst') { root.setAttribute('data-order', 'suggestionsFirst'); }"))
+        XCTAssertTrue(html.contains("else { root.removeAttribute('data-order'); }"))
+        // …and the script is seeded with the field, so a pushed payload has one to replace.
+        XCTAssertTrue(html.contains("\"startPageOrder\":\"recentsFirst\""))
+    }
+
     // MARK: - Nav slot
 
     func testSettingsSitsInTheTopLeftNavSlot() {
@@ -466,7 +512,7 @@ final class StartPageTests: XCTestCase {
         XCTAssertEqual(nav, topOffset(ReaderChrome.controlsCSS()))
         // And the offset is safe-area aware, with the explicit 0px fallback that keeps the
         // declaration valid on an engine without `env()`.
-        XCTAssertEqual(nav, "calc(14px + env(safe-area-inset-top, 0px))")
+        XCTAssertEqual(nav, "calc(14px + var(--safe-top))")
     }
 
     func testTheNavSlotIsNotAControlCluster() {

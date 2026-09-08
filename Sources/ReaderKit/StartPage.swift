@@ -150,14 +150,14 @@ public enum StartPage {
                the top: a pointer in a window narrower than the breakpoint. */
             padding-top: 56px;
             padding-bottom: 48px;
-            padding-left: max(16px, env(safe-area-inset-left, 0px));
-            padding-right: max(16px, env(safe-area-inset-right, 0px));
+            padding-left: max(16px, var(--safe-left));
+            padding-right: max(16px, var(--safe-right));
           }
           @media (min-width: 34rem) {
             main {
               padding-top: 18vh; padding-bottom: 64px;
-              padding-left: max(24px, env(safe-area-inset-left, 0px));
-              padding-right: max(24px, env(safe-area-inset-right, 0px));
+              padding-left: max(24px, var(--safe-left));
+              padding-right: max(24px, var(--safe-right));
             }
           }
           /* Last, so it wins at every width. On a compact viewport the chrome is a floating
@@ -179,11 +179,21 @@ public enum StartPage {
           /* Grid children default to min-width:auto, which refuses to shrink and breaks the
              ellipsis on long titles. */
           .lists > * { min-width: 0; }
+          /* The reader's chosen order (`startPageOrder`). `order` rather than rearranging the
+             nodes: the suggestions arrive from the host long after this document is written
+             and the recents column rebuilds itself when it is cleared, so a DOM order the two
+             had to agree on would be one more thing for either of them to get wrong. Both
+             layouts honour it — the stack below 60rem and the two columns above it. */
+          :root[data-order="suggestionsFirst"] #suggested { order: -1; }
           @media (min-width: 60rem) {
             main { max-width: 62rem; padding-top: 12vh; }
             .lists { grid-template-columns: 1fr 1fr; }
             /* Both columns start level: the recents heading has no top margin to fight. */
             .lists > *:first-child .section { margin-top: 28px; }
+            /* `order` moves the columns and `:first-child` cannot follow it, so the leading
+               column's tighter heading is moved by hand when the order is reversed. */
+            :root[data-order="suggestionsFirst"] .recents-column .section { margin-top: 36px; }
+            :root[data-order="suggestionsFirst"] #suggested .section { margin-top: 28px; }
           }
           h1 {
             font-size: 22px; font-weight: 600; letter-spacing: -0.01em;

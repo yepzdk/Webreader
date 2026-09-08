@@ -60,12 +60,46 @@ public enum WebURL {
         if let url = clipboardURL(from: raw) { return url }
         guard let raw else { return nil }
         for token in raw.split(whereSeparator: { $0.isWhitespace }) {
-            let lowered = token.lowercased()
+            // Leading punctuation comes off first: a link the sentence wrapped in brackets or
+            // quotes is still the link that was handed over, and the scheme test below has to
+            // be able to see the scheme.
+            let candidate = token.drop(while: { openingPunctuation.contains($0) })
+            let lowered = candidate.lowercased()
             guard lowered.hasPrefix("http://") || lowered.hasPrefix("https://") else { continue }
-            // Trailing punctuation is what a sentence leaves on a link it ends with.
-            let trimmed = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}\"'"))
-            if let url = clipboardURL(from: trimmed) { return url }
+            if let url = clipboardURL(from: withoutSentencePunctuation(candidate)) { return url }
         }
         return nil
+    }
+
+    private static let openingPunctuation: Set<Character> = ["(", "[", "{", "\"", "'", "\u{201C}", "\u{2018}"]
+    private static let closingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", "\"", "'", "\u{201D}", "\u{2019}"]
+    private static let bracketPairs: [Character: Character] = [")": "(", "]": "[", "}": "{"]
+
+    /// Drops what a sentence leaves on a link it ends with, and nothing more.
+    ///
+    /// A closing bracket is the sentence's only when the URL did not open it itself.
+    /// "…/wiki/Foo_(bar)" is an ordinary address, and trimming its bracket quietly opens a
+    /// different page that usually does not exist.
+    private static func withoutSentencePunctuation(_ token: Substring) -> String {
+        var end = token.endIndex
+        while end > token.startIndex {
+            let last = token.index(before: end)
+            let character = token[last]
+            if let opener = bracketPairs[character] {
+                // One pass, counting both: `count(where:)` is Swift 6, and the Mac app is
+                // built on an older toolchain on purpose (see .github/workflows/ci.yml).
+                var openers = 0
+                var closers = 0
+                for scanned in token[token.startIndex..<last] {
+                    if scanned == opener { openers += 1 }
+                    else if scanned == character { closers += 1 }
+                }
+                guard openers <= closers else { break }
+            } else if !closingPunctuation.contains(character) {
+                break
+            }
+            end = last
+        }
+        return String(token[token.startIndex..<end])
     }
 }

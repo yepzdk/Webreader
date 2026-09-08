@@ -109,10 +109,12 @@ public enum ReaderStore {
     /// a presentation default, and this action offers no undo — clearing it lives behind
     /// its own affordance in the recents panel.
     ///
-    /// The two thumbnail switches survive for the same reason. They stopped being appearance
-    /// when they left the Aa popover for the settings page's own "Article images" section
-    /// (#33): one of their states means "fetch no images from publishers", and a menu item
-    /// called Reset Reader Appearance has no business turning that back on.
+    /// The two thumbnail switches survive for the same reason, and so does the start page's
+    /// section order. Neither is appearance: the switches stopped being it when they left the
+    /// Aa popover for the settings page's own "Article images" section (#33), and the order
+    /// was never in the popover at all. One thumbnail state means "fetch no images from
+    /// publishers", and a menu item called Reset Reader Appearance has no business turning
+    /// that back on — or deciding which list somebody's start page opens with.
     ///
     /// The reset is stamped like any other settings write, so it propagates to the other
     /// devices instead of being overwritten by their older settings on the next sync.
@@ -122,6 +124,7 @@ public enum ReaderStore {
         var stock = ReaderSettings()
         stock.startPageThumbnails = kept.startPageThumbnails
         stock.readerThumbnails = kept.readerThumbnails
+        stock.startPageOrder = kept.startPageOrder
         setSettings(stock, store: store, at: now)
         store.set(nil, forKey: Key.zoom)
     }

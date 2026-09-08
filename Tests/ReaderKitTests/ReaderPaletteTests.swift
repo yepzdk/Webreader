@@ -108,7 +108,12 @@ final class ReaderPaletteTests: XCTestCase {
           --reader-size: 17px;
           --reader-leading: 1.6;
           --reader-width: 42rem;
+          --reader-gutter: 6%;
           --reader-font: ui-serif, "New York", Georgia, serif;
+          --safe-top: env(safe-area-inset-top, 0px);
+          --safe-bottom: env(safe-area-inset-bottom, 0px);
+          --safe-left: env(safe-area-inset-left, 0px);
+          --safe-right: env(safe-area-inset-right, 0px);
         }
         @media (prefers-color-scheme: dark) {
           :root {
@@ -199,6 +204,10 @@ final class ReaderPalettePageTests: XCTestCase {
             --bg: #0c0b0c; --fg: #FAFCFB; --muted: #9b9c9c; --accent: #b59790;
             --accent-fg: #ffffff; --border: rgba(250,252,251,0.16);
             color-scheme: dark;
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
           }
         """))
         XCTAssertFalse(html.contains("prefers-color-scheme"))
@@ -210,6 +219,10 @@ final class ReaderPalettePageTests: XCTestCase {
           :root {
             --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
             --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
           }
           @media (prefers-color-scheme: dark) {
             :root {

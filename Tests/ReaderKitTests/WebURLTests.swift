@@ -81,6 +81,18 @@ final class SharedURLTests: XCTestCase {
                        URL(string: "https://example.com/a"))
     }
 
+    func testABracketTheAddressOpenedItselfStaysInTheLink() {
+        // Wikipedia's disambiguated titles are the common case, and truncating one opens a
+        // different page that usually does not exist.
+        XCTAssertEqual(WebURL.sharedURL(from: "Read https://en.wikipedia.org/wiki/Foo_(bar)"),
+                       URL(string: "https://en.wikipedia.org/wiki/Foo_(bar)"))
+        // A bracket the sentence opened is the sentence's, wherever the link sits in it.
+        XCTAssertEqual(WebURL.sharedURL(from: "Read (https://example.com/a) today"),
+                       URL(string: "https://example.com/a"))
+        XCTAssertEqual(WebURL.sharedURL(from: "Read \"https://example.com/a\"."),
+                       URL(string: "https://example.com/a"))
+    }
+
     func testProseWithNoSchemeIsStillRefused() {
         // A word with a dot in it is a word. Requiring the scheme once there is surrounding
         // text is what keeps "See you on tuesday. we agreed" from becoming a navigation.
