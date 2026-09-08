@@ -333,6 +333,13 @@ public final class ReaderSession {
             // that this navigation did not repeat.
             return [pushRating(for: url, silent: true), pushSettings(), .fetchSuggestions]
         }
+        // Not a page: a feed, or any other file an engine rendered as markup. Readability
+        // would have made an article out of the angle brackets, and the site behind it is not
+        // something to reveal either — there is no site, only the file. Our own page says so
+        // and carries Home, which is the way out of an address that will never be readable.
+        if result == Reader.notAPageSentinel {
+            return showNotAPage(url: url)
+        }
         guard let article = Reader.decode(result) else {
             // Not an article. The site itself is the honest answer, so reveal it.
             return requested ? [.reject] : []
@@ -353,6 +360,12 @@ public final class ReaderSession {
         enterReaderForURL = nil
         requestedExtraction = false
         guard !OfflineFallback.isIgnorable(errorCode: code) else { return [] }
+        // A response the web view refused to display is not a failed load at all, and it is
+        // the one case that has something more to offer than a message. One door for it,
+        // whichever engine noticed — and it takes no cached copy, since nothing was read.
+        if OfflineFallback.classify(errorCode: code) == .notAPage {
+            return showNotAPage(url: url)
+        }
         failedURL = url
         // A saved copy beats an error page — the article is what was asked for, and a reload
         // fetches the live page again once the network is back. Not when the user just asked
@@ -368,6 +381,37 @@ public final class ReaderSession {
                                         platform: platform, palette: palette)
         isShowingFallback = true
         return [.show(html: html, baseURL: nil)]
+    }
+
+    /// The page for an address that answered with a file rather than something to read.
+    ///
+    /// Reached two ways, because the engines differ: a host whose web view refuses the
+    /// response reports it as a failure (`WebKitErrorCannotShowMIMEType`), and a host whose
+    /// web view renders it anyway gets here through the extraction script's sentinel. Both
+    /// land on the same page, which offers Home and no Try Again.
+    ///
+    /// `failedURL` stays nil on purpose: there is nothing to retry, and leaving the last real
+    /// failure's URL in place would let a Try Again on some later page retry the wrong thing.
+    func showNotAPage(url: URL?) -> [ReaderCommand] {
+        pageState.clear()
+        enterReaderForURL = nil
+        requestedExtraction = false
+        failedURL = nil
+        isShowingReader = false
+        isShowingFallback = true
+        offeredFeed = nil
+        let page = ReaderCommand.show(html: OfflineFallback.html(appName: appName, host: url?.host,
+                                                                 kind: .notAPage,
+                                                                 platform: platform,
+                                                                 palette: palette),
+                                      baseURL: nil)
+        // The page goes up first and stands on its own, then the address is looked up: a
+        // reader handed a feed was handed a list of articles it knows what to do with, and
+        // saying only "there is nothing to read here" would be true and useless (#43). The
+        // same command the settings page's add form uses — the host cannot tell the two apart
+        // and does not need to, because `sourceResolved` knows which page is showing.
+        guard let url else { return [page] }
+        return [page, .resolveSource(url)]
     }
 
     // MARK: - Going back

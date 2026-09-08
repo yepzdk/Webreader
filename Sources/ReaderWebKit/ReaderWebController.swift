@@ -156,8 +156,10 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
             case let .resolveSource(url):
                 Task { [weak self] in
                     guard let self else { return }
-                    let next = await self.session.resolveSource(url)
-                    await MainActor.run { _ = self.run(next) }
+                    // Only the lookup happens off the main actor; what it found is applied
+                    // back on it, because that half touches the session's state.
+                    let source = await self.session.resolveSource(url)
+                    await MainActor.run { _ = self.run(self.session.sourceResolved(source)) }
                 }
             }
         }
@@ -189,11 +191,15 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
 
     private func fetchSuggestions() {
         suggestionTask?.cancel()
+        // Snapshotted here, on the main actor: the ranking runs while the session keeps being
+        // driven, so what it reads has to be taken before it leaves.
+        let request = session.suggestionRequest()
         suggestionTask = Task { [weak self] in
             guard let self else { return }
-            let commands = await self.session.suggestions()
+            let items = await self.session.suggestions(for: request)
             guard !Task.isCancelled else { return }
-            await MainActor.run { _ = self.run(commands) }
+            // The session decides whether the page these were ranked for is still up.
+            await MainActor.run { _ = self.run(self.session.showSuggestions(items)) }
         }
     }
 

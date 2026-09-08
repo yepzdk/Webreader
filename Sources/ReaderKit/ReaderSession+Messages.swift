@@ -119,10 +119,18 @@ extension ReaderSession {
             return showStartPage()
 
         case "readerAddSource":
-            // The page has already disabled its button and waits for one of two callbacks,
-            // so a host that answers neither leaves the form dead. Resolving a feed is
-            // network work, which this method cannot do: the command hands it back to the
-            // host, which awaits `resolveSource(_:)` and applies what that returns.
+            // Two pages post this. The offer on a not-a-page fallback already knows what the
+            // address turned out to be, so accepting it costs no second lookup — and it is
+            // matched against what was offered, so a page cannot talk this into adding an
+            // address nobody looked at.
+            if isShowingFallback, let offered = offeredFeed, body.text == offered.url {
+                return addOfferedFeed(offered)
+            }
+            // The settings page has already disabled its button and waits for one of two
+            // callbacks, so a host that answers neither leaves the form dead. Resolving a feed
+            // is network work, which this method cannot do: the command hands it back to the
+            // host, which awaits `resolveSource(_:)` and hands the answer to
+            // `sourceResolved(_:)`.
             guard isShowingSettings, let raw = body.text,
                   let url = WebURL.clipboardURL(from: raw) else {
                 return [Self.rejectSource()]
@@ -239,41 +247,104 @@ extension ReaderSession {
 
     // MARK: - The parts that have to wait for the network
 
-    /// Ranks the sources against what has been read and hands the result to whichever page
-    /// shows suggestions — the start page's list, or the reader's recents popover.
+    /// Everything the ranking reads, taken off the session in one go.
     ///
-    /// Answers the `fetchSuggestions` command. Strictly best-effort: the page is already on
-    /// screen and stays usable whatever happens, and a host that never calls this loses
-    /// suggestions and nothing else. Cancellation is the host's: it drops the result, and
-    /// `showSuggestions` re-checks the page is still up.
-    public func suggestions() async -> [ReaderCommand] {
+    /// A snapshot rather than the session itself, because the ranking is the one thing that
+    /// happens while the host carries on driving: the fetch resumes on another thread, and a
+    /// method that read `store` or the cache from there would be reading them mid-change.
+    public struct SuggestionRequest: Sendable {
+        let sources: [FeedSource]
+        let languages: Set<String>?
+        let blockedHosts: Set<String>
+        let topics: TopicPreferences
+        let read: [Article]
+        let readURLs: Set<String>
+    }
+
+    /// Snapshots what the ranking needs, on the session's own thread like everything else.
+    ///
+    /// The profile is the recent articles' own text, straight from the cache. A row whose
+    /// body has fallen out of the cache still contributes its title — a weaker signal than
+    /// the full text, but far better than dropping the article from the profile.
+    public func suggestionRequest() -> SuggestionRequest {
         let settings = ReaderStore.suggestions(store: store)
-        // No sources is precisely when the page's "add a source" empty state should show, so
-        // tell the page that rather than leaving the section hidden.
-        guard !settings.sources.isEmpty else { return [showSuggestions([])] }
         let history = ReaderStore.history(store: store)
-        let topics = ReaderStore.topics(store: store)
-        let items = await feeds.items(for: settings.sources)
-        // The profile is the recent articles' own text, straight from the cache. A row whose
-        // body has fallen out of the cache still contributes its title — a weaker signal than
-        // the full text, but far better than dropping the article from the profile.
         let read = history.entries.map { entry in
             URL(string: entry.url).flatMap { cache.article(for: $0) }
                 ?? Article(title: entry.title, byline: nil, siteName: nil, content: "")
         }
-        let ranked = Suggestions.rank(items, read: read,
-                                      readURLs: Set(history.entries.map(\.url)),
-                                      languages: settings.languages,
-                                      blockedHosts: settings.blockedHosts,
-                                      topics: topics)
-        return [showSuggestions(ranked)]
+        return SuggestionRequest(sources: settings.sources,
+                                 languages: settings.languages,
+                                 blockedHosts: settings.blockedHosts,
+                                 topics: ReaderStore.topics(store: store),
+                                 read: read,
+                                 readURLs: Set(history.entries.map(\.url)))
     }
 
-    /// Answers the `resolveSource` command: looks the feed up, stores it, and tells the
-    /// settings page which of the two answers it got.
-    public func resolveSource(_ url: URL) async -> [ReaderCommand] {
-        guard let source = try? await feeds.resolve(url) else { return [Self.rejectSource()] }
+    /// Fetches the sources and ranks them against what has been read.
+    ///
+    /// One of the two methods a host may await off the thread it drives the session from,
+    /// and for the same reason: nothing session-owned is reachable from here. `FeedFetcher`
+    /// is an actor, and everything else arrived in `request`.
+    public func suggestions(for request: SuggestionRequest) async -> [FeedItem] {
+        guard !request.sources.isEmpty else { return [] }
+        let items = await feeds.items(for: request.sources)
+        return Suggestions.rank(items, read: request.read,
+                                readURLs: request.readURLs,
+                                languages: request.languages,
+                                blockedHosts: request.blockedHosts,
+                                topics: request.topics)
+    }
+
+    /// Hands the ranked list to whichever page shows suggestions. Both surfaces implement
+    /// `readerSetSuggestions`; each renders the shape that fits it. An empty list is worth
+    /// sending: no sources is precisely when the page's "add a source" empty state should
+    /// show, rather than the section staying hidden.
+    ///
+    /// Gated because the ranking can land after the page it was ranked for went away, and
+    /// these rows are ranked against everything this device has read. Without the gate they
+    /// would be evaluated into whatever document is on screen by then, including a site's.
+    public func showSuggestions(_ items: [FeedItem]) -> [ReaderCommand] {
+        guard isShowingStartPage || isShowingReader else { return [] }
+        let rows: [[String: String]] = items.map { item in
+            var row = ["title": item.title, "url": item.url, "source": item.host]
+            if let image = item.image { row["image"] = image }
+            return row
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else {
+            return []
+        }
+        return [.evaluate("window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")]
+    }
+
+    /// Looks a feed address up: the half of `readerAddSource` that has to wait for a server.
+    /// Awaitable off the session's thread on the same terms as `suggestions(for:)`.
+    public func resolveSource(_ url: URL) async -> FeedSource? {
+        try? await feeds.resolve(url)
+    }
+
+    /// Stores what the lookup found and tells the page that asked which of the two answers it
+    /// got — and there are two pages that ask.
+    ///
+    /// From the settings page's form it is added straight away, which is what that form is
+    /// for. From an address that turned out to be a file, nothing is added yet: the page only
+    /// offers, because opening a link is not the same as asking to subscribe to it, and
+    /// nobody typed that address wanting a source list changed under them.
+    ///
+    /// Nothing to say to a page that has gone: the form this would re-enable went with it, and
+    /// the message would land in whatever replaced it.
+    public func sourceResolved(_ source: FeedSource?) -> [ReaderCommand] {
+        if isShowingFallback {
+            guard let source else { return [] }
+            offeredFeed = source
+            let row: [String: Any] = ["title": source.title, "url": source.url]
+            guard let data = try? JSONSerialization.data(withJSONObject: row, options: []) else {
+                return []
+            }
+            return [.evaluate("window.readerOfferFeed && window.readerOfferFeed(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")]
+        }
         guard isShowingSettings else { return [] }
+        guard let source else { return [Self.rejectSource()] }
         var settings = ReaderStore.suggestions(store: store)
         let languagesBefore = settings.availableLanguages
         guard settings.add(source) else {
@@ -295,23 +366,26 @@ extension ReaderSession {
         return [.evaluate("window.readerSourceAdded && window.readerSourceAdded(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")]
     }
 
+    /// Adds the feed the not-a-page fallback offered, and goes to the start page — which is
+    /// where its articles will turn up, and a better place to be left than a page that says
+    /// there is nothing to read.
+    ///
+    /// A duplicate lands there too, because "this feed is one of my sources" is then already
+    /// true and the page has nothing to add. A full list is the one case this says nothing
+    /// about; the list it could not join is on the settings page, which is where it lives.
+    private func addOfferedFeed(_ source: FeedSource) -> [ReaderCommand] {
+        offeredFeed = nil
+        var settings = ReaderStore.suggestions(store: store)
+        guard settings.add(source) else { return showStartPage() }
+        ReaderStore.setSuggestions(settings, store: store)
+        onLocalStateChanged?()
+        return showStartPage()
+    }
+
     /// Re-enables the settings page's add form with an inline message.
     static func rejectSource(message: String = "No feed found at that address.") -> ReaderCommand {
         let escaped = message.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
         return .evaluate("window.readerSourceRejected && window.readerSourceRejected('\(escaped)')")
-    }
-
-    /// Both surfaces implement `readerSetSuggestions`; each renders the shape that fits it.
-    private func showSuggestions(_ items: [FeedItem]) -> ReaderCommand {
-        let rows: [[String: String]] = items.map { item in
-            var row = ["title": item.title, "url": item.url, "source": item.host]
-            if let image = item.image { row["image"] = image }
-            return row
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else {
-            return .evaluate("")
-        }
-        return .evaluate("window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
     }
 }

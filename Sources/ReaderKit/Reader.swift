@@ -286,6 +286,16 @@ public enum Reader {
     /// treats it as "no article"; the host treats it as "already the reader".
     public static let ownPageSentinel = "webreader-page"
 
+    /// What `extractionScript` returns for a document that is not a web page at all — a feed,
+    /// an XML file, anything an engine chose to render as markup rather than hand back.
+    ///
+    /// Distinct from "not an article", which leaves the site on screen as the honest answer:
+    /// there is no site here to leave, only a file — and the two engines disagree about what
+    /// to do with one. WebKit refuses to display it and cancels the response; Chromium renders
+    /// its own XML view, which Readability will happily extract into an article made of angle
+    /// brackets. This is the one answer that covers both.
+    public static let notAPageSentinel = "webreader-not-a-page"
+
     /// Wraps inline quotations in `<span class="q">` so the page can style them, and marks a
     /// paragraph that opens with a quote `qp` (quotation plus attribution — the common shape
     /// of "»…,« siger X"). Text nodes only, and only inside `<p>`; a pair must open and
@@ -373,6 +383,12 @@ public enum Reader {
         \(quoteScript)
         \(leadImageScript)
         if (document.querySelector('meta[name="generator"][content="WebReader"]')) { return "\(ownPageSentinel)"; }
+        // Readability is for HTML. An engine that renders XML in place hands this script a
+        // perfectly parseable document whose "article" would be the markup itself.
+        var type = (document.contentType || '').toLowerCase();
+        if (type && type !== 'text/html' && type !== 'application/xhtml+xml') {
+          return "\(notAPageSentinel)";
+        }
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
         if (!article || !article.content) { return null; }
