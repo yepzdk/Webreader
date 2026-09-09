@@ -70,7 +70,14 @@ echo "Uploading WebReader $VERSION ($BUILD) to TestFlight"
 # `-allowProvisioningUpdates` lets Xcode register the two bundle IDs and the app group on
 # first run, and fetch the distribution profiles afterwards. It talks to Apple, so it is the
 # one step that needs the account to be reachable.
-ARCHIVE=build/WebReader.xcarchive
+#
+# Archived into Xcode's own Archives folder, not into build/. The Organizer lists that folder
+# and nothing else, so an archive written anywhere else is invisible there — which is how a
+# rejected build got uploaded a second time while a fixed one sat on disk unseen. The name
+# carries the build number for the same reason: the Organizer shows it, so the row you pick
+# can be checked against what this script just said.
+ARCHIVE="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/WebReader $VERSION ($BUILD).xcarchive"
+mkdir -p "$(dirname "$ARCHIVE")"
 rm -rf "$ARCHIVE"
 xcodebuild -project WebReader.xcodeproj -scheme WebReaderiOS \
   -configuration Release -destination 'generic/platform=iOS' \
@@ -118,8 +125,9 @@ if [ "$UPLOAD_WITH" = "nothing" ]; then
   echo
   echo "No credentials set, so it stops here. Two ways to send it:"
   echo
-  echo "  * Xcode: open build/WebReader.xcarchive, then Distribute App in the Organizer"
-  echo "    window that opens. Uses the account already signed into Xcode — no key needed."
+  echo "  * Xcode: Window > Organizer > Archives, pick the row that reads"
+  echo "    \"$VERSION ($BUILD)\" — it is the newest — then Distribute App. Uses the"
+  echo "    account already signed into Xcode, so no key is needed."
   echo "  * Transporter (free, App Store): drag the .ipa in and press Deliver."
   echo
   echo "For an unattended run, set either ASC_KEY_ID + ASC_ISSUER_ID (an App Store Connect"
