@@ -470,6 +470,8 @@
 		<dict>
 			<key>buildSettings</key>
 			<dict>
+				<key>ASSETCATALOG_COMPILER_APPICON_NAME</key>
+				<string>AppIcon</string>
 				<key>CODE_SIGN_ENTITLEMENTS</key>
 				<string>App/iOS/WebReader.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
@@ -501,6 +503,8 @@
 		<dict>
 			<key>buildSettings</key>
 			<dict>
+				<key>ASSETCATALOG_COMPILER_APPICON_NAME</key>
+				<string>AppIcon</string>
 				<key>CODE_SIGN_ENTITLEMENTS</key>
 				<string>App/iOS/WebReader.entitlements</string>
 				<key>CODE_SIGN_STYLE</key>
