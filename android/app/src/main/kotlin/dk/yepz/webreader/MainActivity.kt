@@ -17,6 +17,7 @@ import android.provider.Settings
 import android.text.format.DateUtils
 import android.util.Log
 import android.view.HapticFeedbackConstants
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceError
@@ -206,6 +207,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        // Signing in on a site the reader stays out of the way on (#44) is worth nothing if
+        // the cookie is still in memory when the process is killed. WebView writes them
+        // lazily; leaving the app is the moment to insist.
+        CookieManager.getInstance().flush()
         webView.onPause()
         super.onPause()
     }

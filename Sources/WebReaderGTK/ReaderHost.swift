@@ -43,6 +43,7 @@ final class ReaderHost {
         "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
         "readerAddSource", "readerRemoveSource", "readerSetLanguages",
         "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate",
+        "readerOriginal",
     ]
 
     // MARK: - Collaborators

@@ -412,3 +412,88 @@ final class ReaderSessionTests: XCTestCase {
         XCTAssertEqual(session.backFallback, .webViewHistory)
     }
 }
+
+final class ReaderOffPerSiteTests: XCTestCase {
+    private var store: MemoryStore!
+    private var session: ReaderSession!
+    private let article = URL(string: "https://www.example.test/news/paywalled")!
+
+    override func setUp() {
+        super.setUp()
+        store = MemoryStore()
+        session = ReaderSession(store: store,
+                                cache: ArticleCache(directory: FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("ReaderOff-\(UUID().uuidString)")),
+                                appName: "WebReader", platform: .iOS)
+    }
+
+    /// Turning the reader off has to *go and get* the site: what is on screen when the menu
+    /// item is pressed is an extracted copy, and no copy has a login form in it.
+    func testTurningItOffLoadsTheSiteItself() {
+        _ = session.openIncoming(article)
+        _ = session.navigationFinished(url: article, generator: "")
+        _ = session.extractionResult(url: article, result: Self.extracted, title: nil)
+        // The render is a load of its own; the reader is up when that lands, not when the
+        // extraction returns.
+        _ = session.navigationFinished(url: article, generator: "WebReader Page")
+        XCTAssertTrue(session.isShowingReader)
+
+        let commands = session.message("readerOriginal", body: .text(""))
+        XCTAssertEqual(commands, [.load(article)])
+        XCTAssertFalse(session.isShowingReader)
+        // Keyed by host, not by article: signing in takes several of the site's pages.
+        XCTAssertEqual(ReaderStore.settings(store: store).originalHosts, ["example.test"])
+    }
+
+    /// And the next page from that host is left alone, with our own way back on it.
+    func testAnExcludedHostIsLeftAloneAndKeepsAWayBack() {
+        var settings = ReaderStore.settings(store: store)
+        settings.originalHosts = ["example.test"]
+        ReaderStore.setSettings(settings, store: store)
+
+        let login = URL(string: "https://www.example.test/account/login")!
+        let commands = session.navigationFinished(url: login, generator: "")
+        guard case let .evaluate(script)? = commands.first else {
+            return XCTFail("the site was extracted anyway: \(commands)")
+        }
+        XCTAssertFalse(commands.contains { if case .extract = $0 { return true } else { return false } })
+        XCTAssertTrue(script.contains("Read this page"))
+        XCTAssertTrue(script.contains("readerOriginal"))
+        // A closed shadow root, so the site's own CSS cannot hide the way out.
+        XCTAssertTrue(script.contains("attachShadow"))
+        // Injected on every load of that host, so it must not stack.
+        XCTAssertTrue(script.contains("if (document.getElementById('__readerGuest')) { return; }"))
+    }
+
+    /// Pressing it again reads the page that is already on screen, and stops excluding the
+    /// host — the login it was turned off for has happened by then.
+    func testTurningItBackOnReadsThePageThatIsUp() {
+        var settings = ReaderStore.settings(store: store)
+        settings.originalHosts = ["example.test"]
+        ReaderStore.setSettings(settings, store: store)
+        _ = session.navigationFinished(url: article, generator: "")
+
+        let commands = session.message("readerOriginal", body: .text(""))
+        XCTAssertTrue(commands.contains { if case .extract = $0 { return true } else { return false } },
+                      "expected the page on screen to be read, got \(commands)")
+        XCTAssertTrue(ReaderStore.settings(store: store).originalHosts.isEmpty)
+    }
+
+    /// The list travels with the other settings, or signing in on one device leaves the
+    /// others extracting the paywall notice.
+    func testTheListSyncsWithTheRestOfTheSettings() {
+        var settings = ReaderSettings()
+        settings.originalHosts = ["example.test", "other.test"]
+        let decoded = ReaderSettings.fromJSON(settings.json)
+        XCTAssertEqual(decoded.originalHosts, ["example.test", "other.test"])
+        // Sorted on the way out: two devices holding the same set must write equal bytes,
+        // or the folder is rewritten forever.
+        XCTAssertTrue(settings.json.contains("\"example.test\",\"other.test\"")
+                      || settings.json.contains("\"example.test\", \"other.test\""),
+                      settings.json)
+    }
+
+    private static let extracted =
+        #"{"title":"Paywalled","content":"<p>Half of it.</p>","byline":null,"#
+        + #""siteName":null,"image":null,"hidden":{}}"#
+}

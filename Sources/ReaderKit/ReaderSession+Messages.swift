@@ -106,6 +106,12 @@ extension ReaderSession {
             ReaderStore.setHiddenPhrases(phrases, store: store)
             return []
 
+        case "readerOriginal":
+            // A toggle, and deliberately one message rather than two: the two callers are
+            // the same decision seen from either side, and a second name would be one more
+            // thing for three hosts to register.
+            return toggleOriginal()
+
         case "readerOpenSettings":
             guard isShowingStartPage else { return [] }
             return showSettingsPage()

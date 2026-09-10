@@ -171,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ReaderHostServices {
         home.target = self
         let reader = viewMenu.addItem(withTitle: "Toggle Reader View",
                                       action: #selector(toggleReader(_:)), keyEquivalent: "r")
+        viewMenu.addItem(withTitle: "Show the Original Page",
+                         action: #selector(toggleOriginal(_:)), keyEquivalent: "R")
         reader.keyEquivalentModifierMask = [.command, .shift]
         reader.target = self
         viewMenu.addItem(.separator())
@@ -226,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ReaderHostServices {
     @objc private func goHome(_ sender: Any?) { controller.showStartPage() }
     @objc private func showSettings(_ sender: Any?) { controller.showSettingsPage() }
     @objc private func toggleReader(_ sender: Any?) { controller.toggleReader() }
+    @objc private func toggleOriginal(_ sender: Any?) { controller.toggleOriginal() }
 
     @objc private func showSyncSheet(_ sender: Any?) {
         let sheet = syncSheet ?? SyncSheet(controller: sync)

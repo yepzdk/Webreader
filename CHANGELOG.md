@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Turn the reader off for a site, so you can log in** (#44). A paywall's sign-in form is
+  the site's own page, and an extracted copy has no form in it. The reader's menu hands the
+  site back and stays out of the way on that host; our own way back is injected over it, so
+  the decision is reversible from where it was made. Travels between devices with the rest
+  of the settings.
+
 ## [0.12.0] - 2026-09-10
 
 ### Added

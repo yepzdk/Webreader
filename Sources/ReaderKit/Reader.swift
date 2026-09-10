@@ -170,6 +170,18 @@ public struct ReaderSettings: Equatable, Sendable {
     /// The edge the reader's chrome sits against. Right by default, which is where it has
     /// always been and which suits the majority hand.
     public var controlSide = ControlSide.right
+    /// Hosts the reader stays out of the way on.
+    ///
+    /// A paywalled site cannot be logged into through an extracted copy of it: the login
+    /// form, the cookie banner it hides behind and the "you are now signed in" answer are
+    /// all the site's own page (#44). Naming the host rather than the article is what makes
+    /// that work — signing in is several pages long, and every one of them has to be the
+    /// site's.
+    ///
+    /// A setting rather than a suggestion preference, so it travels between devices with
+    /// the rest of them: signing in on the iPad should not leave the phone extracting the
+    /// paywall notice.
+    public var originalHosts: Set<String> = []
 
     public init() {}
 
@@ -224,6 +236,9 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["controlSide"] as? String, let value = ControlSide(rawValue: raw) {
             settings.controlSide = value
         }
+        if let hosts = dict["originalHosts"] as? [String] {
+            settings.originalHosts = Set(hosts.filter { !$0.isEmpty })
+        }
         return settings
     }
 
@@ -241,6 +256,9 @@ public struct ReaderSettings: Equatable, Sendable {
             "readerThumbnails": readerThumbnails.rawValue,
             "startPageOrder": startPageOrder.rawValue,
             "controlSide": controlSide.rawValue,
+            // Sorted, because two devices holding the same set must write the same bytes or
+            // sync rewrites the file forever.
+            "originalHosts": originalHosts.sorted(),
         ]
     }
 
