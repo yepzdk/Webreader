@@ -365,17 +365,27 @@ final class GatedServer {
         guard named == 0 else { close(fd); return nil }
         socketFD = fd
         port = UInt16(bigEndian: actual.sin_port)
-        // Every member is set: the accept loop can have the object now.
-        DispatchQueue(label: "gated-server").async { while GatedServer.serveOne(fd) {} }
+        // A thread per connection, not a serial loop. WebKit opens speculative connections
+        // and sends nothing on them; serving one at a time meant a single idle socket
+        // blocked every real request behind it, which is what made this hang about one run
+        // in ten. The read timeout drops those instead of waiting on them.
+        DispatchQueue(label: "gated-server").async {
+            while true {
+                let client = accept(fd, nil, nil)
+                guard client >= 0 else { return }
+                Thread.detachNewThread { GatedServer.serve(client) }
+            }
+        }
     }
 
-    private static func serveOne(_ fd: Int32) -> Bool {
-        let client = accept(fd, nil, nil)
-        guard client >= 0 else { return false }
+    private static func serve(_ client: Int32) {
         defer { close(client) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                   socklen_t(MemoryLayout<timeval>.size))
         var buffer = [UInt8](repeating: 0, count: 4096)
         let count = read(client, &buffer, buffer.count)
-        guard count > 0 else { return true }
+        guard count > 0 else { return }
         let request = String(decoding: buffer[0..<count], as: UTF8.self)
         let signedIn = request.contains("Cookie:") && request.contains("session=in")
         let body: String
@@ -399,10 +409,14 @@ final class GatedServer {
                 + "<form><p>Denne artikel er for abonnenter.</p>"
                 + "<a id='signin' href='/login'>Log ind</a></form></body></html>"
         }
+        // `no-store`, because the same URL answers differently before and after the login
+        // and WebKit is entitled to reuse the first answer otherwise — which it did, about
+        // one run in four, serving the paywall notice to a request that had the cookie.
+        // Every real paywall sends this for the same reason.
         let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+            + "Cache-Control: no-store, no-cache, must-revalidate\r\nVary: Cookie\r\n"
             + extra + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
         _ = response.withCString { write(client, $0, strlen($0)) }
-        return true
     }
 
     func stop() { close(socketFD) }
@@ -457,6 +471,10 @@ final class ReaderOffLoginTests: XCTestCase {
         //    this test exists to check.
         XCTAssertTrue(controller.openIncoming(URL(string: "http://127.0.0.1:\(server.port)/login")!))
         waitFor("the site's signed-in page") { self.probe("document.title === 'Signed in'") }
+        // The cookie reaching the jar is the claim, so wait for it rather than for a page
+        // that implies it: the store is written by another process and the next load can
+        // otherwise be issued before it lands, which is what made this flaky.
+        waitFor("the session cookie in the store") { self.storedCookie() != nil }
         XCTAssertTrue(controller.openIncoming(article))
         waitFor("the article, served because the cookie came back") {
             self.probe("document.title === 'Artiklen'")
@@ -469,6 +487,19 @@ final class ReaderOffLoginTests: XCTestCase {
         XCTAssertTrue(probe("document.body.textContent.includes('\(GatedServer.secret)')"),
                       "the reader extracted the paywall notice, not the article")
         XCTAssertTrue(ReaderStore.settings(store: store).originalHosts.isEmpty)
+    }
+
+    /// The cookie as the web view's own store has it — the thing that has to outlive the
+    /// page that set it.
+    private func storedCookie() -> HTTPCookie? {
+        var found: HTTPCookie?
+        let done = expectation(description: "cookies")
+        controller.webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            found = cookies.first { $0.name == "session" && $0.value == "in" }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        return found
     }
 
     private func evaluate(_ script: String) {
