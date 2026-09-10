@@ -110,7 +110,15 @@ extension ReaderSession {
             // A toggle, and deliberately one message rather than two: the two callers are
             // the same decision seen from either side, and a second name would be one more
             // thing for three hosts to register.
-            return toggleOriginal()
+            //
+            // Only one of its directions is safe to accept from a page we did not write.
+            // Turning the reader *off* is a durable, syncing decision about a whole host,
+            // and Android's bridge is reachable from any page — so a site could quietly opt
+            // itself out of ever being read, on every device the settings reach. That
+            // direction has to come from our own chrome. Turning it back *on* is the
+            // injected chrome's whole job and cannot be abused: the worst a hostile page
+            // achieves is being read.
+            return toggleOriginal(fromOwnPage: ownPage)
 
         case "readerOpenSettings":
             guard isShowingStartPage else { return [] }

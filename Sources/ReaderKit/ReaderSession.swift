@@ -291,6 +291,7 @@ public final class ReaderSession {
         // paywall notice and then discarding it still costs the fetch — and still leaves
         // the login form on a page nobody can see.
         let host = Suggestions.normalizedHost(url.host ?? "")
+        displayedSiteURL = url
         if !host.isEmpty, ReaderStore.settings(store: store).originalHosts.contains(host) {
             isShowingReader = false
             readerSourceURL = url
@@ -313,10 +314,28 @@ public final class ReaderSession {
     /// it, and the copy is what is on screen when this is pressed from the reader's menu.
     /// On means the site is already up — pressed from the chrome injected over it — so
     /// there is nothing to load and the page under the finger is the one to read.
-    public func toggleOriginal() -> [ReaderCommand] {
-        guard let url = readerSourceURL else { return [.reject] }
+    /// Someone else's page, as last seen by `navigationFinished`.
+    ///
+    /// Separate from `readerSourceURL`, which is what the reader was *made from* and
+    /// outlives the page it was made from. A message arriving from a page we did not write
+    /// has to act on that page's host and no other — otherwise a site can reach a decision
+    /// about a different site, which is how example.com came to re-enable the reader on
+    /// dr.dk during testing.
+    private var displayedSiteURL: URL?
+
+    /// `fromOwnPage` gates the destructive direction only. A native menu passes `true`,
+    /// because a menu bar is not a web page; a script message passes what the session knows
+    /// about the document that sent it.
+    public func toggleOriginal(fromOwnPage: Bool = true) -> [ReaderCommand] {
+        // A refusal is audible — `.reject` is the error haptic — and a page we did not
+        // write must not be able to buzz the phone by asking repeatedly. Our own chrome
+        // still gets the feedback, because there the refusal means something went wrong.
+        let refuse: [ReaderCommand] = fromOwnPage ? [.reject] : []
+        // One of ours asks about the article it is showing; anyone else asks about
+        // themselves, whatever the reader happens to remember.
+        guard let url = fromOwnPage ? readerSourceURL : displayedSiteURL else { return refuse }
         let host = Suggestions.normalizedHost(url.host ?? "")
-        guard !host.isEmpty else { return [.reject] }
+        guard !host.isEmpty else { return refuse }
         var settings = ReaderStore.settings(store: store)
         if settings.originalHosts.contains(host) {
             settings.originalHosts.remove(host)
@@ -324,6 +343,7 @@ public final class ReaderSession {
             onLocalStateChanged?()
             return [extractCommand(for: url)]
         }
+        guard fromOwnPage else { return [] }
         settings.originalHosts.insert(host)
         ReaderStore.setSettings(settings, store: store)
         onLocalStateChanged?()
@@ -563,6 +583,7 @@ public final class ReaderSession {
         pageState.clear()
         failedURL = nil
         readerSourceURL = source
+        displayedSiteURL = nil
         arrive(at: .reader(source))
         readerArticleTitle = article.title
         // Record before rendering so the article being opened is the panel's top row. The
