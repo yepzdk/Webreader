@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-11
+
 ### Added
 - **Turn the reader off for a site, so you can log in** (#44). A paywall's sign-in form is
   the site's own page, and an extracted copy has no form in it. The reader's menu hands the
@@ -229,7 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/yepzdk/webreader/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/yepzdk/webreader/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/yepzdk/webreader/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/yepzdk/webreader/compare/v0.10.0...v0.10.1
