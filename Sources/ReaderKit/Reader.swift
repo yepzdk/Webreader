@@ -170,6 +170,16 @@ public struct ReaderSettings: Equatable, Sendable {
     /// The edge the reader's chrome sits against. Right by default, which is where it has
     /// always been and which suits the majority hand.
     public var controlSide = ControlSide.right
+    /// The colour links and pressed controls take (#45).
+    ///
+    /// A short list rather than a colour well, because the value has to clear 4.5:1 against
+    /// four backgrounds and a free choice cannot be made to. Each name resolves to its own
+    /// hex per theme — the shade that reads on sepia is not the one that reads on black —
+    /// and `ReaderPaletteTests` recomputes every pair rather than trusting this comment.
+    public enum Accent: String, CaseIterable, Sendable {
+        case blue, teal, violet, rust, moss
+    }
+
     /// Hosts the reader stays out of the way on.
     ///
     /// A paywalled site cannot be logged into through an extracted copy of it: the login
@@ -182,6 +192,8 @@ public struct ReaderSettings: Equatable, Sendable {
     /// the rest of them: signing in on the iPad should not leave the phone extracting the
     /// paywall notice.
     public var originalHosts: Set<String> = []
+    /// Blue, which is what every reader already has.
+    public var accent = Accent.blue
 
     public init() {}
 
@@ -236,6 +248,9 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["controlSide"] as? String, let value = ControlSide(rawValue: raw) {
             settings.controlSide = value
         }
+        if let raw = dict["accent"] as? String, let value = Accent(rawValue: raw) {
+            settings.accent = value
+        }
         if let hosts = dict["originalHosts"] as? [String] {
             settings.originalHosts = Set(hosts.filter { !$0.isEmpty })
         }
@@ -258,6 +273,7 @@ public struct ReaderSettings: Equatable, Sendable {
             "controlSide": controlSide.rawValue,
             // Sorted, because two devices holding the same set must write the same bytes or
             // sync rewrites the file forever.
+            "accent": accent.rawValue,
             "originalHosts": originalHosts.sorted(),
         ]
     }

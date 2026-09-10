@@ -115,11 +115,21 @@ final class ReaderPaletteTests: XCTestCase {
           --safe-left: env(safe-area-inset-left, 0px);
           --safe-right: env(safe-area-inset-right, 0px);
         }
+        .swatch-blue { background: #2563eb; }
+        .swatch-teal { background: #0f766e; }
+        .swatch-violet { background: #7c3aed; }
+        .swatch-rust { background: #c2410c; }
+        .swatch-moss { background: #15803d; }
         @media (prefers-color-scheme: dark) {
           :root {
             --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
             --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           }
+        :root:not([data-theme]) .swatch-blue { background: #3b82f6; }
+          :root:not([data-theme]) .swatch-teal { background: #0d9488; }
+          :root:not([data-theme]) .swatch-violet { background: #a78bfa; }
+          :root:not([data-theme]) .swatch-rust { background: #ea580c; }
+          :root:not([data-theme]) .swatch-moss { background: #16a34a; }
         }
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
@@ -128,21 +138,41 @@ final class ReaderPaletteTests: XCTestCase {
           --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
           color-scheme: light;
         }
+        :root[data-theme="light"] .swatch-blue { background: #2563eb; }
+        :root[data-theme="light"] .swatch-teal { background: #0f766e; }
+        :root[data-theme="light"] .swatch-violet { background: #7c3aed; }
+        :root[data-theme="light"] .swatch-rust { background: #c2410c; }
+        :root[data-theme="light"] .swatch-moss { background: #15803d; }
         :root[data-theme="sepia"] {
-          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #2563eb;
+          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #1d4ed8;
           --border: rgba(61,50,37,0.18); --surface: rgba(61,50,37,0.07);
           color-scheme: light;
         }
+        :root[data-theme="sepia"] .swatch-blue { background: #1d4ed8; }
+        :root[data-theme="sepia"] .swatch-teal { background: #0f766e; }
+        :root[data-theme="sepia"] .swatch-violet { background: #7c3aed; }
+        :root[data-theme="sepia"] .swatch-rust { background: #9a3412; }
+        :root[data-theme="sepia"] .swatch-moss { background: #166534; }
         :root[data-theme="dark"] {
           --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
           --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           color-scheme: dark;
         }
+        :root[data-theme="dark"] .swatch-blue { background: #3b82f6; }
+        :root[data-theme="dark"] .swatch-teal { background: #0d9488; }
+        :root[data-theme="dark"] .swatch-violet { background: #a78bfa; }
+        :root[data-theme="dark"] .swatch-rust { background: #ea580c; }
+        :root[data-theme="dark"] .swatch-moss { background: #16a34a; }
         :root[data-theme="black"] {
           --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #3b82f6;
           --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
           color-scheme: dark;
         }
+        :root[data-theme="black"] .swatch-blue { background: #3b82f6; }
+        :root[data-theme="black"] .swatch-teal { background: #0d9488; }
+        :root[data-theme="black"] .swatch-violet { background: #8b5cf6; }
+        :root[data-theme="black"] .swatch-rust { background: #ea580c; }
+        :root[data-theme="black"] .swatch-moss { background: #16a34a; }
         """#)
     }
 }
@@ -349,6 +379,71 @@ final class StockPaletteTests: XCTestCase {
         for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
             XCTAssertEqual(ReaderPalette.stock(for: theme, prefersDark: false),
                            ReaderPalette.stock(for: theme, prefersDark: true))
+        }
+    }
+}
+
+
+/// Every accent, against every background it can land on.
+///
+/// The table in `ReaderPalette.hex` is a judgement call written down; this recomputes it.
+/// A link is body text, so 4.5:1 is the bar, and the point of five vetted colours rather
+/// than a colour well is that all twenty pairs can be held to it.
+final class AccentContrastTests: XCTestCase {
+    private func luminance(_ hex: String) -> Double {
+        let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        func channel(_ start: Int) -> Double {
+            let i = h.index(h.startIndex, offsetBy: start)
+            let j = h.index(i, offsetBy: 2)
+            let value = Double(Int(h[i..<j], radix: 16) ?? 0) / 255
+            return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+    }
+
+    private func contrast(_ a: String, _ b: String) -> Double {
+        let (x, y) = (luminance(a), luminance(b))
+        return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+    }
+
+    func testEveryAccentIsReadableOnEveryTheme() {
+        for accent in ReaderSettings.Accent.allCases {
+            for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+                let palette = ReaderPalette.stock(for: theme, prefersDark: false, accent: accent)
+                let ratio = contrast(palette.accent, palette.bg)
+                XCTAssertGreaterThanOrEqual(
+                    ratio, 4.5,
+                    "\(accent) on \(theme) is \(String(format: "%.2f", ratio)):1 — a link is body text")
+            }
+        }
+    }
+
+    func testBlueIsUnchangedWhereItAlreadyPassed() {
+        // Nobody asked for their reader to look different: blue keeps the exact values it
+        // has always had on light, dark and black.
+        XCTAssertEqual(ReaderPalette.stock(for: .light, prefersDark: false).accent, "#2563eb")
+        XCTAssertEqual(ReaderPalette.stock(for: .dark, prefersDark: false).accent, "#3b82f6")
+        XCTAssertEqual(ReaderPalette.stock(for: .black, prefersDark: false).accent, "#3b82f6")
+        // Sepia is the exception, and deliberately: #2563eb measured 4.39:1 on #f4ecd8.
+        XCTAssertNotEqual(ReaderPalette.stock(for: .sepia, prefersDark: false).accent, "#2563eb")
+    }
+
+    func testTheChoiceRoundTripsAndDefaultsToBlue() {
+        XCTAssertEqual(ReaderSettings().accent, .blue)
+        var settings = ReaderSettings()
+        settings.accent = .moss
+        XCTAssertEqual(ReaderSettings.fromJSON(settings.json).accent, .moss)
+        XCTAssertEqual(ReaderSettings.decode(["accent": "chartreuse"]).accent, .blue)
+    }
+
+    func testThePopoverOffersOneSwatchPerAccent() {
+        let page = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                    content: "<p>x</p>", hiddenHits: [:], image: nil),
+                                   settings: ReaderSettings(), history: ReaderHistory(),
+                                   platform: .iOS)
+        for accent in ReaderSettings.Accent.allCases {
+            XCTAssertTrue(page.contains("data-key=\"accent\" data-value=\"\(accent.rawValue)\""),
+                          "no swatch for \(accent)")
         }
     }
 }

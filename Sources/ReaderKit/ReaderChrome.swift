@@ -263,7 +263,8 @@ enum ReaderChrome {
                          palette: ReaderPalette? = nil) -> String {
         let hosted = settings.theme == .auto ? palette : nil
         let rootPalette = hosted.map { properties($0, colorScheme: true) }
-            ?? properties(.stock(for: .light, prefersDark: false), colorScheme: false)
+            ?? properties(.stock(for: .light, prefersDark: false, accent: settings.accent),
+                          colorScheme: false)
         var blocks = ["""
         :root {
           \(indent(rootPalette, by: 2))
@@ -274,21 +275,26 @@ enum ReaderChrome {
           --reader-font: \(settings.fontFamily.css(on: platform));
         \(indent(safeAreaCSS(platform: platform), by: 0))
         }
+        \(hosted == nil ? swatchCSS(for: .light) : hostedSwatchCSS)
         """]
         if hosted == nil {
             blocks.append("""
             @media (prefers-color-scheme: dark) {
               :root {
-                \(indent(properties(.stock(for: .dark, prefersDark: true), colorScheme: false), by: 4))
+                \(indent(properties(.stock(for: .dark, prefersDark: true,
+                                            accent: settings.accent), colorScheme: false), by: 4))
               }
+            \(indent(swatchCSS(for: .dark, scoped: ":root:not([data-theme])"), by: 2))
             }
             """)
         }
         let pinned = [ReaderSettings.Theme.light, .sepia, .dark, .black].map { theme in
             """
             :root[data-theme="\(theme.rawValue)"] {
-              \(indent(properties(.stock(for: theme, prefersDark: false), colorScheme: true), by: 2))
+              \(indent(properties(.stock(for: theme, prefersDark: false,
+                                          accent: settings.accent), colorScheme: true), by: 2))
             }
+            \(swatchCSS(for: theme, scoped: ":root[data-theme=\"\(theme.rawValue)\"]"))
             """
         }.joined(separator: "\n")
         blocks.append("""
@@ -298,6 +304,24 @@ enum ReaderChrome {
         """)
         return blocks.joined(separator: "\n")
     }
+
+    /// The accent swatches, in the shade each theme actually renders.
+    ///
+    /// Emitted from here rather than written into `controlsCSS` because only this function
+    /// knows whether the host supplied a palette. A static block would have added a
+    /// `prefers-color-scheme` query to pages that must not answer one — a hosted desktop
+    /// theme is the answer, and a page that second-guesses it flickers on login.
+    static func swatchCSS(for theme: ReaderSettings.Theme, scoped: String = ":root") -> String {
+        ReaderSettings.Accent.allCases.map { accent in
+            let selector = scoped == ":root" ? ".swatch-\(accent.rawValue)"
+                                             : "\(scoped) .swatch-\(accent.rawValue)"
+            return "\(selector) { background: \(ReaderPalette.hex(accent, on: theme)); }"
+        }.joined(separator: "\n")
+    }
+
+    /// A hosted palette supplies the accent itself, so the choice has nothing to change and
+    /// the control says so by not being there.
+    static let hostedSwatchCSS = ".accents { display: none; }"
 
     /// A palette's six custom properties, two declarations to a line, as every block in
     /// `themeCSS` has always written them. `colorScheme` adds the `color-scheme` line: the
@@ -557,6 +581,7 @@ enum ReaderChrome {
         .swatch-sepia { background: #f4ecd8; }
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
+        .accents { display: flex; justify-content: space-between; padding: 2px; }
         /* Two blocks at the end, so source order settles every override without a
            specificity fight. They answer different questions, which is why they are two.
 
@@ -1534,6 +1559,13 @@ enum ReaderChrome {
                 <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
                 <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
                 <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
+              </div>
+              <div class="accents" role="group" aria-label="Accent colour">
+                <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue accent" title="Blue"></button>
+                <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal accent" title="Teal"></button>
+                <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet accent" title="Violet"></button>
+                <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust accent" title="Rust"></button>
+                <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss accent" title="Moss"></button>
               </div>
             </div>
           </div>

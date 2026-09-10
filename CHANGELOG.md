@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   site back and stays out of the way on that host; our own way back is injected over it, so
   the decision is reversible from where it was made. Travels between devices with the rest
   of the settings.
+- **Pick the colour links take** (#45). Five vetted accents, each with its own shade per
+  theme — the blue that reads on cream is not the one that reads on black. Sepia's default
+  blue measured 4.39:1 against its background, under the 4.5:1 a link needs, and now
+  clears it.
 
 ## [0.12.0] - 2026-09-10
 
