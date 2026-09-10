@@ -48,26 +48,77 @@ public struct ReaderPalette: Equatable, Sendable {
     /// `ReaderChrome.themeCSS` renders its stylesheet from these same values, so the cover
     /// cannot drift from the document — the `LoadProgress.lineThickness` arrangement, one
     /// step further.
-    public static func stock(for theme: ReaderSettings.Theme, prefersDark: Bool) -> ReaderPalette {
+    public static func stock(for theme: ReaderSettings.Theme, prefersDark: Bool,
+                             accent: ReaderSettings.Accent = .blue) -> ReaderPalette {
         switch theme {
-        case .auto: return prefersDark ? stock(for: .dark, prefersDark: true)
-                                       : stock(for: .light, prefersDark: false)
+        case .auto: return prefersDark ? stock(for: .dark, prefersDark: true, accent: accent)
+                                       : stock(for: .light, prefersDark: false, accent: accent)
         case .light:
             return ReaderPalette(bg: "#fafafa", fg: "#1c1c1e", muted: "#6b6b70",
-                                 accent: "#2563eb", border: "rgba(0,0,0,0.12)",
+                                 accent: hex(accent, on: .light), border: "rgba(0,0,0,0.12)",
                                  surface: "rgba(0,0,0,0.05)", isDark: false)
         case .sepia:
             return ReaderPalette(bg: "#f4ecd8", fg: "#3d3225", muted: "#6f6049",
-                                 accent: "#2563eb", border: "rgba(61,50,37,0.18)",
+                                 accent: hex(accent, on: .sepia), border: "rgba(61,50,37,0.18)",
                                  surface: "rgba(61,50,37,0.07)", isDark: false)
         case .dark:
             return ReaderPalette(bg: "#1c1c1e", fg: "#f2f2f7", muted: "#9a9aa0",
-                                 accent: "#3b82f6", border: "rgba(255,255,255,0.16)",
+                                 accent: hex(accent, on: .dark), border: "rgba(255,255,255,0.16)",
                                  surface: "rgba(255,255,255,0.08)", isDark: true)
         case .black:
             return ReaderPalette(bg: "#000000", fg: "#f2f2f7", muted: "#98989e",
-                                 accent: "#3b82f6", border: "rgba(255,255,255,0.18)",
+                                 accent: hex(accent, on: .black), border: "rgba(255,255,255,0.18)",
                                  surface: "rgba(255,255,255,0.10)", isDark: true)
+        }
+    }
+
+    /// The accent's hex for one theme.
+    ///
+    /// A table rather than a formula: the same colour cannot serve a near-white page and a
+    /// black one, and picking the vivid end of each ramp that still clears 4.5:1 against
+    /// that theme's background is a judgement made once, here, with the measured ratio
+    /// beside it. `ReaderPaletteTests` recomputes all twenty pairs.
+    ///
+    /// Blue's light, dark and black values are the ones the reader has always had. Its
+    /// sepia value is not: `#2563eb` measured 4.39:1 on `#f4ecd8`, which is under the bar
+    /// for body text, and a link is body text.
+    static func hex(_ accent: ReaderSettings.Accent, on theme: ReaderSettings.Theme) -> String {
+        switch accent {
+        case .blue:
+            switch theme {
+            case .light: return "#2563eb"   // 4.95:1
+            case .sepia: return "#1d4ed8"   // 5.69:1
+            case .dark:  return "#3b82f6"   // 4.63:1
+            default:     return "#3b82f6"   // 5.71:1 on black
+            }
+        case .teal:
+            switch theme {
+            case .light: return "#0f766e"   // 5.24:1
+            case .sepia: return "#0f766e"   // 4.65:1
+            case .dark:  return "#0d9488"   // 4.54:1
+            default:     return "#0d9488"   // 5.61:1 on black
+            }
+        case .violet:
+            switch theme {
+            case .light: return "#7c3aed"   // 5.46:1
+            case .sepia: return "#7c3aed"   // 4.84:1
+            case .dark:  return "#a78bfa"   // 6.25:1
+            default:     return "#8b5cf6"   // 4.96:1 on black
+            }
+        case .rust:
+            switch theme {
+            case .light: return "#c2410c"   // 4.96:1
+            case .sepia: return "#9a3412"   // 6.21:1
+            case .dark:  return "#ea580c"   // 4.78:1
+            default:     return "#ea580c"   // 5.9:1 on black
+            }
+        case .moss:
+            switch theme {
+            case .light: return "#15803d"   // 4.81:1
+            case .sepia: return "#166534"   // 6.06:1
+            case .dark:  return "#16a34a"   // 5.16:1
+            default:     return "#16a34a"   // 6.37:1 on black
+            }
         }
     }
 
