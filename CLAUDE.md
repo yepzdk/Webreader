@@ -15,7 +15,8 @@ already ships (`Sources/ReaderKit/Sync`), with iCloud Drive as the practical fol
 
 ## Architecture
 
-Two SwiftPM targets, no dependencies:
+Three SwiftPM targets on a Mac, three on Linux, two more built only by Xcode, no
+dependencies:
 
 - **`Sources/ReaderKit`** — Foundation-only. Must stay free of AppKit/WebKit/UIKit so the
   future iOS target can depend on it unchanged. Everything here is pure string/JSON work
@@ -58,14 +59,42 @@ Two SwiftPM targets, no dependencies:
   - `FileStore.swift` — `KeyValueStore` over one atomically-written JSON file. `DefaultsStore`
     is right on macOS, but corelibs-Foundation's `UserDefaults` location is not a stable
     contract, so the Linux host uses this instead. Missing or corrupt file reads as empty.
-- **`Sources/WebReader`** — the AppKit host. `AppDelegate.swift` owns the window, `WKWebView`,
-  menu, URL handling (`application(_:open:)` + the GetURL Apple Event), the reader state
-  machine, offline fallback, and the script-message handlers. `ProgressLine.swift` is the
-  native load-progress hairline and `LoadingCover.swift` the plain "Loading" screen that
-  stands in for a site while it loads. `LegacyImport.swift` is the one-time import from the
-  webwrap-generated app's defaults domain (`dk.yepz.webwrap.webreader`).
-  `SyncController.swift` drives sync cycles (triggers, folder bookmark, applying results)
-  and `SyncSheet.swift` is the Sync… sheet — the only native window in the app.
+- **`Sources/ReaderWebKit`** — the WKWebView half of a host: `ReaderWebController` owns the
+  web view, the page-state machine, the extraction flow, the seventeen script-message
+  handlers and the `window.reader*` pushes. Foundation + WebKit only, so the AppKit shell and
+  the iOS one (#6) run the same code rather than two copies of it — the GTK host necessarily
+  reimplements it and has already drifted (`isShowingFallback`). What has no cross-platform
+  spelling reaches the shell through `ReaderHostServices` (reject, open externally, bring to
+  front, present sync setup), `ReaderLoadingCover` and `ReaderSyncBridge`.
+  `ReaderSyncController.swift` runs the sync cycles for both Apple hosts; the four things
+  that differ — device name, the "sync is off" sentence, how a folder is remembered, and
+  whether it has to be claimed — are a `ReaderSyncPlatform` the shell supplies. Its tests
+  drive a real `WKWebView` off screen and click the real generated pages.
+- **`Sources/WebReader`** — the AppKit shell. `AppDelegate.swift` owns the window, the menu,
+  URL handling (`application(_:open:)` + the GetURL Apple Event), page zoom, the clipboard,
+  and answers `ReaderHostServices` with `NSSound.beep()`/`NSWorkspace`. `ProgressLine.swift`
+  is the native load-progress hairline and `LoadingCover.swift` the plain "Loading" screen
+  that stands in for a site while it loads. `LegacyImport.swift` is the one-time import from
+  the webwrap-generated app's defaults domain (`dk.yepz.webwrap.webreader`).
+  `MacSyncPlatform.swift` is the Mac's answer to `ReaderSyncPlatform` (unsandboxed: nothing
+  to claim, plain bookmarks) and `SyncSheet.swift` is the Sync… sheet — the only native
+  window in the app.
+- **`Sources/WebReaderiOS`** — the UIKit shell (#6), built by `WebReader.xcodeproj` rather
+  than SwiftPM, since only Xcode produces an `.app` for iOS. `ReaderViewController` is the
+  whole app: it owns the store, the cache and sync, answers `ReaderHostServices` with a
+  haptic and `UIApplication.open`, and pins the web view to the screen edges with
+  `contentInsetAdjustmentBehavior = .never` — the pages are drawn edge to edge and place
+  themselves with `env(safe-area-inset-*)`, so letting UIKit inset as well counts the notch
+  twice. `SceneDelegate` routes the three ways a link arrives (cold launch, `openURLContexts`,
+  and the share extension's hand-off on activation). `IOSSyncPlatform` is the sandboxed
+  `ReaderSyncPlatform`: a document-picker folder is claimed with
+  `startAccessingSecurityScopedResource` for as long as sync uses it, and its bookmark is
+  made while that claim is held. There is no page zoom — `WKWebView` has none on iOS.
+- **`Sources/WebReaderShare`** — the "Read in WebReader" share extension. No interface: it
+  normalises the shared link with `WebURL.clipboardURL`, leaves it in the App Group store
+  under `reader.pendingOpen`, and asks the system to open `webreader://open`. The store is
+  what carries the link — `NSExtensionContext.open` may be declined, and then the app picks
+  the link up the next time it comes forward instead of losing it.
 - **`Sources/CWebKitGTK`** — a header-only C shim, `shim.h` plus a module map. It exists
   because Swift's ClangImporter cannot see function-like C macros (`g_signal_connect`,
   `G_CALLBACK`, the `GTK_WIDGET()`/`WEBKIT_WEB_VIEW()` casts) or C varargs (`g_object_new`).
@@ -326,39 +355,62 @@ Two SwiftPM targets, no dependencies:
 - A merge updates the visible page in place — `window.readerApplySettings(json)` and
   `window.readerSetRecents(rows)` — instead of re-rendering it. The start page holds a URL
   field, and re-rendering under someone mid-sentence throws their typing away.
-- Sync is **macOS-only for now**: `ReaderKit/Sync` is portable (file coordination is behind
-  `canImport(Darwin)`), but only the AppKit host has a folder picker and a sheet, so
-  `SettingsPage` renders its Sync section for `Platform.macOS` only. A dead control on Linux
-  would be worse than none.
+- Sync is **not on Linux yet** (#35): `ReaderKit/Sync` is portable and both Apple hosts run
+  it through the same `ReaderSyncController`, but the GTK host has no folder chooser, so
+  `SettingsPage` renders its Sync section only where the host passes a summary. A dead
+  control would be worse than none.
 
 ## Build & test
 
 ```sh
 swift build
-swift test                       # XCTest; ReaderKit only — host wiring is verified by hand
+swift test                       # XCTest; ReaderKit, plus ReaderWebKit's wiring on a Mac
 Scripts/build-app.sh             # macOS: build/WebReader.app, ad-hoc signed
 Scripts/build-app.sh --install   # …and replace /Applications/WebReader.app
 open -a build/WebReader.app https://example.com/article
 Linux/install-local.sh           # Linux: release build into ~/.local, registers the handler
 .build/debug/webreader https://example.com/article
+
+# iOS: build, install on a booted simulator, run
+xcodebuild -project WebReader.xcodeproj -scheme WebReaderiOS -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build/DerivedData \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="" build
+xcrun simctl install booted build/DerivedData/Build/Products/Debug-iphonesimulator/WebReader.app
+xcrun simctl launch booted dk.yepz.webreader
+xcrun simctl io booted screenshot /tmp/shot.png
+# Hand it a link the way the share extension does — `simctl openurl` needs a tap to confirm:
+group=$(xcrun simctl get_app_container booted dk.yepz.webreader groups | cut -f2)
+xcrun simctl spawn booted defaults write \
+  "$group/Library/Preferences/group.dk.yepz.webreader" reader.pendingOpen -string https://…
 ```
 
-`Package.swift` guards the AppKit host behind `#if os(macOS)` and the `CWebKitGTK` +
-`WebReaderGTK` targets behind the `#else`, so `swift build`/`swift test` do the right thing on
-either OS and neither branch can break the other. On Linux, `Suggestions.swift` and
-`FeedFetcher.swift` need `FoundationXML`/`FoundationNetworking` — corelibs splits `XMLParser`
-and `URLSession` out of Foundation proper. Linux needs `gtk4` and `webkitgtk-6.0` (both in
-Arch `extra`) and a Swift toolchain, which on Arch is the AUR `swift-bin`.
+`Package.swift` guards the AppKit host and `ReaderWebKit` behind `#if os(macOS)` and the
+`CWebKitGTK` + `WebReaderGTK` targets behind the `#else`, so `swift build`/`swift test` do the
+right thing on either OS and neither branch can break the other. On Linux, `Suggestions.swift`
+and `FeedFetcher.swift` need `FoundationXML`/`FoundationNetworking` — corelibs splits
+`XMLParser` and `URLSession` out of Foundation proper. Linux needs `gtk4` and `webkitgtk-6.0`
+(both in Arch `extra`) and a Swift toolchain, which on Arch is the AUR `swift-bin`.
 
-The GTK host has no test target, same as the AppKit host. Verify it by running it: the
-`GtkApplication` exports its action map on D-Bus, so
+The GTK host has no test target; the AppKit shell has none either, but the WKWebView half it
+used to contain now does — `Tests/ReaderWebKitTests` drives a real off-screen `WKWebView`,
+clicks the real generated pages and asserts what lands in the store. What is left in
+`AppDelegate` (menu, window, clipboard, zoom) is still verified by hand. Verify the GTK host
+by running it: the `GtkApplication` exports its action map on D-Bus, so
 `gdbus call --session --dest dk.yepz.webreader --object-path /dk/yepz/webreader --method
 org.gtk.Actions.Activate "settings" "[]" "{}"` drives an accelerator without synthesising key
 events, and `hyprctl clients` reports the window title, which follows the document.
 
 Bundle metadata lives in `App/Info.plist` (bundle id `dk.yepz.webreader`, http/https handler)
-and `App/AppIcon.icns`. There is no Xcode project yet; it arrives with the iOS target, at
-which point `build-app.sh` retires.
+and `App/AppIcon.icns` for the Mac, and in `App/iOS/` for the phone: `Info.plist` (the
+`webreader` URL scheme), `Share-Info.plist` (the share extension's activation rule) and two
+`.entitlements` files carrying the App Group. `WebReader.xcodeproj` builds only the iOS app
+and its extension — it is objectVersion 77, so it needs Xcode 16 or newer, and its sources
+arrive through synchronized folder groups rather than per-file build entries. The Mac keeps
+`build-app.sh` and the notarized release path it feeds; that pipeline never sees Xcode.
+
+Two version numbers now exist: `App/Info.plist`'s `CFBundleShortVersionString`, which
+`Scripts/release.sh` treats as the source of truth, and the project's `MARKETING_VERSION`,
+which the iOS plists interpolate. Nothing keeps them in step automatically — bump both.
 
 Test pattern: keep logic pure and test it; keep WebKit/AppKit orchestration thin. New
 non-trivial logic gets one small XCTest, not a suite. Design: no emoji in the UI, inline SVG

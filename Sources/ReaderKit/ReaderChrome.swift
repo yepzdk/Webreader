@@ -26,7 +26,7 @@ enum ReaderChrome {
             .joined(separator: "\n")
     }
 
-    /// One chrome offset from a window edge, grown by the device's safe-area inset there.
+    /// One offset from a viewport edge, grown by the device's safe-area inset there.
     ///
     /// Every `position: fixed` piece of chrome goes through this so a notch, a rounded
     /// corner or a home indicator cannot land on top of a control. On a desktop every
@@ -35,7 +35,11 @@ enum ReaderChrome {
     /// The two-argument `env()` is deliberate. With no fallback the declaration is invalid
     /// in an engine that does not implement `env()`, and an invalid declaration is dropped
     /// — so the chrome would lose its offset altogether rather than fall back to it.
-    private static func inset(_ px: Int, _ edge: String) -> String {
+    ///
+    /// Not private, and not only for chrome: a page's own content has to clear the top inset
+    /// too. The start page's title sat under an iPhone's Dynamic Island until it did, and a
+    /// second spelling of the same calc is how one page gets fixed and the others don't.
+    static func inset(_ px: Int, _ edge: String) -> String {
         "calc(\(px)px + env(safe-area-inset-\(edge), 0px))"
     }
 
@@ -634,6 +638,17 @@ enum ReaderChrome {
     /// How far the backdrop keeps fading after the chrome it backs has ended. Enough that
     /// the band reads as a fade rather than a toolbar edge, and no more.
     private static let backdropFade = 24
+
+    /// The headroom a page's own content needs while the chrome is at the top *and* sized
+    /// for a finger — a roomy touch viewport, which in practice means a tablet.
+    ///
+    /// The cluster ends `chromeEdge + touchTarget` below the safe area (58px, since a
+    /// coarse pointer grows the buttons to the touch floor) and the backdrop's solid stop
+    /// sits exactly there. The 16px on top is the same breathing room the start page's 56px
+    /// gives the 45px pointer cluster. Without it an iPad drew the article's first line ten
+    /// pixels inside the fade — the desktop number survived the touch work because a mouse
+    /// gets 31px buttons, and nobody looked at the case in between.
+    static let touchTopHeadroom = chromeEdge + touchTarget + 16
 
     /// The buttons that live in the collapsing stack, by id — everything the column holds
     /// except the toggle, which is the one control that never hides.

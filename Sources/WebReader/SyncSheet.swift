@@ -1,5 +1,6 @@
 import Cocoa
 import ReaderKit
+import ReaderWebKit
 
 /// The Sync sheet: off, or a folder that WebReader exchanges its settings and recents
 /// through. No server address, no username, no password — the folder's own sync client
@@ -10,10 +11,10 @@ import ReaderKit
 /// to work when the folder has gone missing — a moment the page chrome shouldn't have to
 /// have an opinion about.
 ///
-/// Main-thread only, like the rest of the AppKit host — see `SyncController` on why this
-/// isn't spelled `@MainActor`.
+/// Main-thread only, like the rest of the AppKit host — see `ReaderSyncController` on why
+/// this isn't spelled `@MainActor`.
 final class SyncSheet: NSObject {
-    private let controller: SyncController
+    private let controller: ReaderSyncController
     private let panel: NSPanel
     private let offButton = NSButton()
     private let folderButton = NSButton()
@@ -21,7 +22,7 @@ final class SyncSheet: NSObject {
     private let chooseButton = NSButton()
     private let statusLabel = NSTextField(labelWithString: "")
 
-    init(controller: SyncController) {
+    init(controller: ReaderSyncController) {
         self.controller = controller
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 208),
                         styleMask: [.titled, .closable], backing: .buffered, defer: false)

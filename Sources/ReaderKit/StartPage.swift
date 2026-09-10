@@ -162,13 +162,14 @@ public enum StartPage {
           }
           /* Last, so it wins at every width. On a compact viewport the chrome is a floating
              column in the bottom-right corner: nothing sits at the top but the progress
-             hairline, so the headroom goes back to what the content wants — and the foot has
-             to clear the toggle, which ends 58px up. Keyed on the same condition the chrome
-             is, because it is the same fact about the layout. */
+             hairline, so the headroom goes back to what the content wants — plus whatever a
+             notch or a Dynamic Island takes, since the page is drawn edge to edge. The foot
+             has to clear the toggle, which ends 58px up. Keyed on the same condition the
+             chrome is, because it is the same fact about the layout. */
           @media \(ReaderChrome.compactViewport) {
             main {
-              padding-top: 32px;
-              padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+              padding-top: \(ReaderChrome.inset(32, "top"));
+              padding-bottom: \(ReaderChrome.inset(78, "bottom"));
             }
           }
           /* The front door — title and URL field — stays narrow and centred whatever the

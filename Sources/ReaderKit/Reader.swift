@@ -427,15 +427,27 @@ public enum ReaderPage {
           }
           main {
             max-width: var(--reader-width); margin: 0 auto;
-            padding-top: 48px;
-            padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+            padding-top: \(ReaderChrome.inset(48, "top"));
+            padding-bottom: \(ReaderChrome.inset(96, "bottom"));
             padding-left: max(24px, env(safe-area-inset-left, 0px));
             padding-right: max(24px, env(safe-area-inset-right, 0px));
           }
-          /* No coarse-pointer override of the top padding: the chrome has moved to the
-             bottom-right corner, so nothing but the progress hairline is up there and 48px
-             is simply the article's own headroom. The 96px foot is what clears the toggle,
-             which ends 58px up. */
+          /* Two overrides of the head, for the two things that can be up there.
+
+             A coarse pointer with room for the chrome at the top — a tablet — grows the
+             buttons to the touch floor, so the cluster reaches further down than the
+             article's own 48px of headroom and the first line would start inside it.
+
+             A compact viewport has moved the chrome to the bottom-right corner, so nothing
+             is up there but the progress hairline and the headroom goes back to being the
+             article's own. Last, so it wins where both match. The 96px foot is what clears
+             the toggle, which ends 58px up. */
+          @media (pointer: coarse) {
+            main { padding-top: \(ReaderChrome.inset(ReaderChrome.touchTopHeadroom, "top")); }
+          }
+          @media \(ReaderChrome.compactViewport) {
+            main { padding-top: \(ReaderChrome.inset(48, "top")); }
+          }
           header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
           h1 { font-size: 1.65em; line-height: 1.25; letter-spacing: -0.01em; margin: 0; }
           .meta {

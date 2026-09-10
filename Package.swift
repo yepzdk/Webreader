@@ -5,13 +5,25 @@ import PackageDescription
 // `platforms:` list, which SwiftPM only consults for Apple platforms) is what lets
 // `swift build` / `swift test` run ReaderKit and its tests on Linux, where the GTK host
 // for issue #16 lives.
+//
+// `ReaderWebKit` sits in the same branch because WebKit is an Apple framework: WebKitGTK is
+// a different API with a different name. The manifest is compiled on the *build* machine, so
+// a Mac building for iOS takes this branch too — which is what lets the Xcode iOS target
+// depend on the same library the AppKit host uses.
 #if os(macOS)
 let hostProducts: [Product] = [
     // The macOS app's executable; Scripts/build-app.sh wraps it in WebReader.app.
-    .executable(name: "WebReader", targets: ["WebReader"])
+    .executable(name: "WebReader", targets: ["WebReader"]),
+    // The WKWebView half of a host, shared by the AppKit shell and the iOS one (#6).
+    .library(name: "ReaderWebKit", targets: ["ReaderWebKit"]),
 ]
 let hostTargets: [Target] = [
-    .executableTarget(name: "WebReader", dependencies: ["ReaderKit"])
+    .target(name: "ReaderWebKit", dependencies: ["ReaderKit"]),
+    // Drives the controller through a real WKWebView and the real generated pages; the
+    // wiring it covers (message registration, page-state gates, the shell's services) is
+    // exactly what a second host is most likely to get wrong.
+    .testTarget(name: "ReaderWebKitTests", dependencies: ["ReaderWebKit", "ReaderKit"]),
+    .executableTarget(name: "WebReader", dependencies: ["ReaderKit", "ReaderWebKit"]),
 ]
 #else
 let hostProducts: [Product] = [

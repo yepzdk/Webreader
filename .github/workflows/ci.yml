@@ -21,6 +21,24 @@ jobs:
           plutil -lint build/WebReader.app/Contents/Info.plist
           codesign --verify build/WebReader.app
 
+  # Its own job, and its own runner: the project is objectVersion 77 (synchronized source
+  # folders), which Xcode 15 on macos-14 cannot parse. The Mac app stays where it is so the
+  # toolchain its notarized release is built with does not move for the sake of iOS.
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the iOS app and its share extension
+        # Simulator SDK and ad-hoc signing: the App Group entitlement is applied (and its
+        # container really created) without a team or a provisioning profile, which is what
+        # a CI runner has. A device build would need both.
+        run: |
+          xcodebuild -project WebReader.xcodeproj -scheme WebReaderiOS \
+            -sdk iphonesimulator -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="" build
+
   linux:
     runs-on: ubuntu-latest
     container: swift:6.3-noble
