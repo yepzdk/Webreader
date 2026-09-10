@@ -149,6 +149,79 @@ enum ReaderChrome {
         """
     }
 
+    /// The one control the reader leaves on a page it has been told not to touch (#44).
+    ///
+    /// Someone else's page has none of our stylesheet and none of our markup, and a login
+    /// flow is several of its pages long — so the way back has to travel with it, injected
+    /// on every load rather than rendered once. Two answers, which are the only two anyone
+    /// needs from here: read this page after all, or go home.
+    ///
+    /// Built in a shadow root with inline styles, for two reasons that are not the same:
+    /// the shadow root stops the site's CSS reaching in (a `button { display: none }` on a
+    /// news site would otherwise take our only way out with it), and inline styles rather
+    /// than a `<style>` element survive a strict `style-src` policy, which several
+    /// paywalled sites have.
+    ///
+    /// Idempotent by construction: the host injects it on every finished navigation, and a
+    /// second injection finds the first and returns.
+    static func guestChromeScript(host: String, platform: Platform = .macOS) -> String {
+        let post: String
+        switch platform {
+        case .macOS, .linux, .iOS:
+            post = "window.webkit.messageHandlers[name].postMessage(body || '')"
+        case .android:
+            post = "window.\(androidBridge).postMessage(JSON.stringify({ name: name, body: body || '' }))"
+        }
+        return """
+        (function () {
+          if (document.getElementById('__readerGuest')) { return; }
+          var post = function (name, body) { try { \(post); } catch (err) {} };
+          var mount = document.createElement('div');
+          mount.id = '__readerGuest';
+          var root = mount.attachShadow ? mount.attachShadow({ mode: 'closed' }) : mount;
+          var bar = document.createElement('div');
+          bar.setAttribute('style', [
+            'position: fixed',
+            'z-index: 2147483647',
+            'right: calc(14px + env(safe-area-inset-right, 0px))',
+            'bottom: calc(14px + env(safe-area-inset-bottom, 0px))',
+            'display: flex',
+            'gap: 8px',
+            'font: 500 14px/1 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif'
+          ].join(';'));
+          var button = function (label, name) {
+            var b = document.createElement('button');
+            b.textContent = label;
+            b.setAttribute('style', [
+              'all: unset',
+              'box-sizing: border-box',
+              'min-height: \(touchTarget)px',
+              'display: inline-flex',
+              'align-items: center',
+              'padding: 0 14px',
+              'border-radius: 6px',
+              'cursor: pointer',
+              'color: #fff',
+              'background: rgba(28, 28, 30, 0.92)',
+              'box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3)'
+            ].join(';'));
+            b.addEventListener('click', function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              post(name, '');
+            });
+            return b;
+          };
+          // Named for the site, because the answer is about the site and not this page: the
+          // reader stays out of the way on \(host) until this is pressed.
+          bar.appendChild(button('Read this page', 'readerOriginal'));
+          bar.appendChild(button('Home', 'readerHome'));
+          root.appendChild(bar);
+          (document.body || document.documentElement).appendChild(mount);
+        })();
+        """
+    }
+
     /// The `data-theme`, `data-quotes`, `data-thumbs`, `data-order` and `data-controls`
     /// attributes for `<html>`. Each is absent at its default (`auto` follows the system;
     /// bordered quotes are the stylesheet's baseline; thumbnails are on; recents lead the
@@ -1409,6 +1482,22 @@ enum ReaderChrome {
           \(ratingControls)
           \(recentsControl)
           \(hiddenControl)
+          <div class="reader-control">
+            <!-- The way out of the reader, and the only control here that is about the site
+                 rather than the text. A paywall's login lives on the site's own page, so
+                 this goes and gets it — and stays out of the way on that host until the
+                 chrome injected over it says otherwise (#44). -->
+            <button id="readerOriginalBtn" aria-label="Show the original page"
+                    title="Show the original page"
+                    onclick="readerPost('readerOriginal', '')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 3h6v6"/>
+                <path d="M10 14 21 3"/>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              </svg>
+            </button>
+          </div>
           <div class="reader-control">
             <button id="readerAa" aria-label="Reader appearance"
                     title="Text &amp; appearance" aria-haspopup="true"

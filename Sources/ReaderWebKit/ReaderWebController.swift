@@ -57,7 +57,7 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
         "readerAddSource", "readerRemoveSource", "readerSetLanguages",
         "readerBlockHost", "readerUnblockHost", "readerTopicFeedback",
-        "readerRate", "readerOpenSync",
+        "readerRate", "readerOpenSync", "readerOriginal",
     ]
 
     /// Set by `loadOwnPage` and consumed by the next `didStartProvisionalNavigation`: one of
