@@ -136,6 +136,11 @@ The package has three SwiftPM targets on a Mac: **ReaderKit** — Foundation-onl
 
 WebReader is free and open source. If it saves you from a few cookie banners a day, you can [buy me a coffee](https://buymeacoffee.com/yepzdk).
 
+## Privacy
+
+Nothing is collected. No account, no analytics, no tracking, no third-party SDKs — see
+[PRIVACY.md](PRIVACY.md).
+
 ## License
 
 MIT. Readability is vendored under the Apache License 2.0 (see `Sources/ReaderKit/ReadabilityJS.swift`).
