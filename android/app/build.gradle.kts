@@ -36,8 +36,8 @@ android {
         // (`aarch64-unknown-linux-android28`), so it is the floor of the app too.
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.11.0"
+        versionCode = 2
+        versionName = "0.12.0"
     }
 
     // One APK per ABI, and no universal one. The Swift runtime is around 74 MB of stripped

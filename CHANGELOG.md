@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-10
+
 ### Added
 - Sync appearance settings and recents between devices through a folder you pick — your
   Nextcloud folder, iCloud Drive, anything that already syncs. Set it up in Settings (⌘,);
@@ -210,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/yepzdk/webreader/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/yepzdk/webreader/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/yepzdk/webreader/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yepzdk/webreader/compare/v0.9.0...v0.10.0
