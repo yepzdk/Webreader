@@ -493,6 +493,38 @@ final class ReaderOffPerSiteTests: XCTestCase {
                       settings.json)
     }
 
+    /// A site must not be able to opt itself out of being read.
+    ///
+    /// Android's `addJavascriptInterface` bridge is attached to the web view, so every page
+    /// loaded in it can call `postMessage` — including a publisher's own. Turning the reader
+    /// off is durable and syncs, so a page that could ask for it would be disabling the
+    /// reader for that domain on every device the user owns. Every other handler was already
+    /// gated on one of our pages showing; this one was not.
+    func testASiteCannotTurnTheReaderOffForItself() {
+        let article = URL(string: "https://www.example.test/news/paywalled")!
+        _ = session.openIncoming(article)
+        _ = session.navigationFinished(url: article, generator: "")
+        // A site is on screen, so nothing here is one of our pages.
+        let commands = session.message("readerOriginal", body: .text(""))
+        XCTAssertEqual(commands, [])
+        XCTAssertTrue(ReaderStore.settings(store: store).originalHosts.isEmpty,
+                      "a page we did not write disabled the reader for its own host")
+    }
+
+    /// The injected chrome's direction stays open, because it cannot be abused: the worst a
+    /// hostile page achieves by pressing its own "Read this page" is being read.
+    func testASiteCanOnlyEverTurnItBackOn() {
+        var settings = ReaderStore.settings(store: store)
+        settings.originalHosts = ["example.test"]
+        ReaderStore.setSettings(settings, store: store)
+        let article = URL(string: "https://www.example.test/news/paywalled")!
+        _ = session.navigationFinished(url: article, generator: "")
+
+        let commands = session.message("readerOriginal", body: .text(""))
+        XCTAssertTrue(commands.contains { if case .extract = $0 { return true } else { return false } })
+        XCTAssertTrue(ReaderStore.settings(store: store).originalHosts.isEmpty)
+    }
+
     private static let extracted =
         #"{"title":"Paywalled","content":"<p>Half of it.</p>","byline":null,"#
         + #""siteName":null,"image":null,"hidden":{}}"#

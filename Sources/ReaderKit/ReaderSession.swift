@@ -313,10 +313,17 @@ public final class ReaderSession {
     /// it, and the copy is what is on screen when this is pressed from the reader's menu.
     /// On means the site is already up — pressed from the chrome injected over it — so
     /// there is nothing to load and the page under the finger is the one to read.
-    public func toggleOriginal() -> [ReaderCommand] {
-        guard let url = readerSourceURL else { return [.reject] }
+    /// `fromOwnPage` gates the destructive direction only. A native menu passes `true`,
+    /// because a menu bar is not a web page; a script message passes what the session knows
+    /// about the document that sent it.
+    public func toggleOriginal(fromOwnPage: Bool = true) -> [ReaderCommand] {
+        // A refusal is audible — `.reject` is the error haptic — and a page we did not
+        // write must not be able to buzz the phone by asking repeatedly. Our own chrome
+        // still gets the feedback, because there the refusal means something went wrong.
+        let refuse: [ReaderCommand] = fromOwnPage ? [.reject] : []
+        guard let url = readerSourceURL else { return refuse }
         let host = Suggestions.normalizedHost(url.host ?? "")
-        guard !host.isEmpty else { return [.reject] }
+        guard !host.isEmpty else { return refuse }
         var settings = ReaderStore.settings(store: store)
         if settings.originalHosts.contains(host) {
             settings.originalHosts.remove(host)
@@ -324,6 +331,7 @@ public final class ReaderSession {
             onLocalStateChanged?()
             return [extractCommand(for: url)]
         }
+        guard fromOwnPage else { return [] }
         settings.originalHosts.insert(host)
         ReaderStore.setSettings(settings, store: store)
         onLocalStateChanged?()
