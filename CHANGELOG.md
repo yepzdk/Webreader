@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   blue measured 4.39:1 against its background, under the 4.5:1 a link needs, and now
   clears it.
 
+### Fixed
+- **A site could turn the reader off for itself.** On Android the page bridge is reachable
+  from any document, so a publisher could have disabled the reader for its own domain —
+  durably, and on every device the settings reach. That decision now has to come from the
+  app's own chrome, and a page can only ever decide about its own host.
+
 ## [0.12.0] - 2026-09-10
 
 ### Added
