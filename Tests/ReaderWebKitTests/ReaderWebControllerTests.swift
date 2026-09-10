@@ -328,3 +328,179 @@ final class SilentServer {
         close(socketFD)
     }
 }
+
+/// A site with a door: the article is only served to a request that carries the cookie.
+///
+/// The point of #44 is that a login is possible at all, and a login is a cookie the site
+/// sets on its own page and expects back on the next one. Nothing about that can be proved
+/// against a mock — it needs a real web view keeping a real cookie jar across two loads —
+/// so this is the smallest site that can tell the difference.
+final class GatedServer {
+    private let socketFD: Int32
+    let port: UInt16
+    /// Only ever served to a request that arrives with the cookie, so finding this string in
+    /// the reader is proof the extraction happened on the signed-in page.
+    static let secret = "Kun for abonnenter med et gyldigt medlemskab"
+
+    init?() {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = 0
+        let bound = withUnsafePointer(to: &address) {
+            bind(fd, UnsafeRawPointer($0).assumingMemoryBound(to: sockaddr.self),
+                 socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+        guard bound == 0, listen(fd, 8) == 0 else { close(fd); return nil }
+        var actual = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &actual) {
+            getsockname(fd, UnsafeMutableRawPointer($0).assumingMemoryBound(to: sockaddr.self),
+                        &length)
+        }
+        guard named == 0 else { close(fd); return nil }
+        socketFD = fd
+        port = UInt16(bigEndian: actual.sin_port)
+        // Every member is set: the accept loop can have the object now.
+        DispatchQueue(label: "gated-server").async { while GatedServer.serveOne(fd) {} }
+    }
+
+    private static func serveOne(_ fd: Int32) -> Bool {
+        let client = accept(fd, nil, nil)
+        guard client >= 0 else { return false }
+        defer { close(client) }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let count = read(client, &buffer, buffer.count)
+        guard count > 0 else { return true }
+        let request = String(decoding: buffer[0..<count], as: UTF8.self)
+        let signedIn = request.contains("Cookie:") && request.contains("session=in")
+        let body: String
+        var extra = ""
+        if request.hasPrefix("GET /login") {
+            // The site's own sign-in, which is the whole reason the reader steps aside.
+            extra = "Set-Cookie: session=in; Path=/\r\n"
+            body = "<html><head><title>Signed in</title></head><body><p>Velkommen tilbage."
+                + "</p><p><a id='back' href='/'>Videre</a></p></body></html>"
+        } else if signedIn {
+            body = "<html><head><title>Artiklen</title></head><body><article><h1>"
+                + "Landmænd skal til at så deres marker nu</h1>"
+                + String(repeating: "<p>\(GatedServer.secret). "
+                    + "Læsbar tekst her, nok til at Readability kan se en rigtig artikel "
+                    + "og ikke bare en side med lidt tekst på. Endnu en sætning, så "
+                    + "scoringen kommer over tærsklen og teksten bliver hentet ud. </p>",
+                                count: 20)
+                + "</article></body></html>"
+        } else {
+            body = "<html><head><title>Log ind</title></head><body><h1>Log ind</h1>"
+                + "<form><p>Denne artikel er for abonnenter.</p>"
+                + "<a id='signin' href='/login'>Log ind</a></form></body></html>"
+        }
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+            + extra + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+        _ = response.withCString { write(client, $0, strlen($0)) }
+        return true
+    }
+
+    func stop() { close(socketFD) }
+}
+
+/// #44 end to end, in a real web view: the reader steps aside, a login happens on the
+/// site's own pages, and what the reader finally extracts is the signed-in article.
+final class ReaderOffLoginTests: XCTestCase {
+    private var controller: ReaderWebController!
+    private var store: MemoryStore!
+    private var server: GatedServer!
+    /// Held, not passed inline: the controller does not own its services, so a temporary
+    /// is destroyed the moment the initialiser returns.
+    private var services: StubServices!
+
+    override func setUp() {
+        super.setUp()
+        store = MemoryStore()
+        services = StubServices()
+        controller = ReaderWebController(
+            store: store,
+            cache: ArticleCache(directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("ReaderOffLogin-\(UUID().uuidString)")),
+            appName: "WebReader", platform: .macOS,
+            userAgentApplicationName: "Version/26.0 Safari/605.1.15",
+            services: services)
+        server = GatedServer()
+    }
+
+    override func tearDown() {
+        server?.stop()
+        super.tearDown()
+    }
+
+    func testASignInOnTheSitesOwnPagesSurvivesIntoTheReader() throws {
+        let server = try XCTUnwrap(self.server, "could not listen on the loopback interface")
+        let article = URL(string: "http://127.0.0.1:\(server.port)/")!
+        var settings = ReaderStore.settings(store: store)
+        settings.originalHosts = ["127.0.0.1"]
+        ReaderStore.setSettings(settings, store: store)
+
+        // 1. The reader steps aside: the site's own page is what is on screen, paywall and
+        //    all, and no extracted copy has been put over it.
+        XCTAssertTrue(controller.openIncoming(article))
+        waitFor("the site's own login page") { self.probe("document.title === 'Log ind'") }
+        XCTAssertFalse(controller.session.isShowingReader)
+        // 2. …with our way back injected into it, since the site provides none.
+        waitFor("the injected chrome") { self.probe("document.getElementById('__readerGuest')") }
+
+        // 3. The login happens on the site, across two of its pages, as a real one does.
+        //    The cookie is the web view's to keep between them — which is the whole claim
+        //    this test exists to check.
+        XCTAssertTrue(controller.openIncoming(URL(string: "http://127.0.0.1:\(server.port)/login")!))
+        waitFor("the site's signed-in page") { self.probe("document.title === 'Signed in'") }
+        XCTAssertTrue(controller.openIncoming(article))
+        waitFor("the article, served because the cookie came back") {
+            self.probe("document.title === 'Artiklen'")
+        }
+
+        // 4. Read this page. The exception goes, and the extraction runs against what the
+        //    signed-in session can see.
+        controller.toggleOriginal()
+        waitForGenerator("WebReader")
+        XCTAssertTrue(probe("document.body.textContent.includes('\(GatedServer.secret)')"),
+                      "the reader extracted the paywall notice, not the article")
+        XCTAssertTrue(ReaderStore.settings(store: store).originalHosts.isEmpty)
+    }
+
+    private func evaluate(_ script: String) {
+        let done = expectation(description: script)
+        controller.webView.evaluateJavaScript(script) { _, _ in done.fulfill() }
+        wait(for: [done], timeout: 5)
+    }
+
+    private func probe(_ expression: String) -> Bool {
+        var value = false
+        let done = expectation(description: expression)
+        controller.webView.evaluateJavaScript("(function(){ return !!(\(expression)) })()") { result, _ in
+            value = (result as? Bool) ?? false
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        return value
+    }
+
+    private func waitForGenerator(_ generator: String) {
+        waitFor("the \(generator) page") {
+            self.probe("document.readyState === 'complete' && "
+                + "((document.querySelector('meta[name=\"generator\"]')||{}).content === '\(generator)')")
+        }
+    }
+
+    private func waitFor(_ what: String, timeout: TimeInterval = 20, until condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTFail("timed out waiting for \(what)")
+    }
+}

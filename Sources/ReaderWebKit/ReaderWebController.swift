@@ -371,6 +371,10 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     public func showStartPage() { run(session.home()) }
     public func showSettingsPage() { run(session.showSettingsPage()) }
     public func toggleReader() { run(session.toggleReader(currentURL: webView.url)) }
+    /// Hands the site back and stays out of the way on that host, or takes it up again
+    /// (#44). The reader's own menu posts this too; a Mac has a menu bar, so it also asks
+    /// from there.
+    public func toggleOriginal() { run(session.toggleOriginal()) }
     public func resetAppearance() { run(session.resetAppearance()) }
 
     /// In the reader, reloading fetches the source page again — which re-extracts and
