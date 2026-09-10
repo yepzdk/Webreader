@@ -511,6 +511,28 @@ final class ReaderOffPerSiteTests: XCTestCase {
                       "a page we did not write disabled the reader for its own host")
     }
 
+    /// A page may only reach a decision about its own host.
+    ///
+    /// Found on a device: the reader had been turned off for dr.dk, then example.com was
+    /// opened and its own script posted the toggle five times. The host came from
+    /// `readerSourceURL` — what the reader was last made from — so example.com re-enabled
+    /// the reader on dr.dk. Harmless in that direction, wrong in every other.
+    func testASiteCannotReachADecisionAboutAnotherSite() {
+        var settings = ReaderStore.settings(store: store)
+        settings.originalHosts = ["excepted.test"]
+        ReaderStore.setSettings(settings, store: store)
+        // The reader was last made from the excepted site…
+        let excepted = URL(string: "https://excepted.test/article")!
+        _ = session.navigationFinished(url: excepted, generator: "")
+        // …and now somebody else's page is on screen.
+        let other = URL(string: "https://elsewhere.test/anything")!
+        _ = session.navigationFinished(url: other, generator: "")
+
+        XCTAssertEqual(session.message("readerOriginal", body: .text("")), [])
+        XCTAssertEqual(ReaderStore.settings(store: store).originalHosts, ["excepted.test"],
+                       "one site changed the reader's mind about another")
+    }
+
     /// The injected chrome's direction stays open, because it cannot be abused: the worst a
     /// hostile page achieves by pressing its own "Read this page" is being read.
     func testASiteCanOnlyEverTurnItBackOn() {
