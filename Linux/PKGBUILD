@@ -30,7 +30,7 @@
 
 pkgname=webreader
 # First release containing the Linux host; the tag does not exist yet.
-pkgver=0.12.0
+pkgver=0.13.0
 pkgrel=1
 pkgdesc='Distraction-free reader view for the web (GTK4 / WebKitGTK)'
 arch=('x86_64')

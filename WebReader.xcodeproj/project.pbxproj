@@ -387,7 +387,7 @@
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
 				<string>16.0</string>
 				<key>MARKETING_VERSION</key>
-				<string>0.12.0</string>
+				<string>0.13.0</string>
 				<key>MTL_ENABLE_DEBUG_INFO</key>
 				<string>INCLUDE_SOURCE</string>
 				<key>ONLY_ACTIVE_ARCH</key>
@@ -433,7 +433,7 @@
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
 				<string>16.0</string>
 				<key>MARKETING_VERSION</key>
-				<string>0.12.0</string>
+				<string>0.13.0</string>
 				<key>MTL_ENABLE_DEBUG_INFO</key>
 				<string>NO</string>
 				<key>SDKROOT</key>
