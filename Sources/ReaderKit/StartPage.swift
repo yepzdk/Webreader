@@ -150,14 +150,14 @@ public enum StartPage {
                the top: a pointer in a window narrower than the breakpoint. */
             padding-top: 56px;
             padding-bottom: 48px;
-            padding-left: max(16px, env(safe-area-inset-left, 0px));
-            padding-right: max(16px, env(safe-area-inset-right, 0px));
+            padding-left: max(16px, var(--safe-left));
+            padding-right: max(16px, var(--safe-right));
           }
           @media (min-width: 34rem) {
             main {
               padding-top: 18vh; padding-bottom: 64px;
-              padding-left: max(24px, env(safe-area-inset-left, 0px));
-              padding-right: max(24px, env(safe-area-inset-right, 0px));
+              padding-left: max(24px, var(--safe-left));
+              padding-right: max(24px, var(--safe-right));
             }
           }
           /* Last, so it wins at every width. On a compact viewport the chrome is a floating
@@ -179,11 +179,21 @@ public enum StartPage {
           /* Grid children default to min-width:auto, which refuses to shrink and breaks the
              ellipsis on long titles. */
           .lists > * { min-width: 0; }
+          /* The reader's chosen order (`startPageOrder`). `order` rather than rearranging the
+             nodes: the suggestions arrive from the host long after this document is written
+             and the recents column rebuilds itself when it is cleared, so a DOM order the two
+             had to agree on would be one more thing for either of them to get wrong. Both
+             layouts honour it — the stack below 60rem and the two columns above it. */
+          :root[data-order="suggestionsFirst"] #suggested { order: -1; }
           @media (min-width: 60rem) {
             main { max-width: 62rem; padding-top: 12vh; }
             .lists { grid-template-columns: 1fr 1fr; }
             /* Both columns start level: the recents heading has no top margin to fight. */
             .lists > *:first-child .section { margin-top: 28px; }
+            /* `order` moves the columns and `:first-child` cannot follow it, so the leading
+               column's tighter heading is moved by hand when the order is reversed. */
+            :root[data-order="suggestionsFirst"] .recents-column .section { margin-top: 36px; }
+            :root[data-order="suggestionsFirst"] #suggested .section { margin-top: 28px; }
           }
           h1 {
             font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
@@ -253,22 +263,23 @@ public enum StartPage {
           .suggestion:hover { background: var(--surface); }
           .suggestion .recent { flex: 1; min-width: 0; }
           .suggestion .recent:hover { background: transparent; }
-          /* More/Less/Block on a suggested row. Visible by default and *hidden* only where
-             a pointer can hover — the inverse of how this was written, and the reason it
-             was written that way is the reason it had to change: on a touch screen there is
-             no hover, so `opacity: 0` made three working controls permanently invisible and
-             unreachable. `:focus-within` already covered the keyboard; nothing covered a
-             finger. Where hover does exist the behaviour is unchanged. */
+          /* More/Less/Block/Hide on a suggested row, and the one button that stands in for
+             them.
+
+             Behind the button on every viewport, which is the third and last position this
+             took. They were revealed on hover, which made them invisible and unreachable on
+             a touch screen; then visible by default and collapsed on a narrow one, which
+             fixed the phone and left a desktop row carrying four controls it was not asked
+             for. Four icons beside every title is a toolbar per row: it reads as clutter,
+             it competes with the headline it belongs to, and it spends the width the
+             headline wanted. One quiet button per row asks nothing until it is pressed.
+
+             Tapping it swaps it for the controls rather than adding them beside it, so an
+             open row is exactly as wide as every other row and only one row at a time
+             spends its title on buttons. */
           .row-actions {
-            flex: none; display: flex; gap: 2px; padding-right: 4px;
-            transition: opacity 120ms ease;
+            flex: none; display: none; gap: 2px; padding-right: 4px;
           }
-          @media (hover: hover) {
-            .row-actions { opacity: 0; }
-            .suggestion:hover .row-actions,
-            .row-actions:focus-within { opacity: 1; }
-          }
-          @media (prefers-reduced-motion: reduce) { .row-actions { transition: none; } }
           .row-action {
             display: flex; padding: 4px; border: 0; border-radius: 4px;
             background: transparent; color: var(--muted); cursor: pointer;
@@ -285,6 +296,22 @@ public enum StartPage {
               align-items: center; justify-content: center;
             }
           }
+          .row-menu {
+            display: flex; flex: none; padding: 4px; margin-right: 4px;
+            border: 0; border-radius: 4px;
+            background: transparent; color: var(--muted); cursor: pointer;
+          }
+          .row-menu:hover { color: var(--fg); background: var(--border); }
+          .row-menu svg { display: block; }
+          @media (pointer: coarse) {
+            .row-menu {
+              min-height: \(touchTarget)px; min-width: \(touchTarget)px;
+              align-items: center; justify-content: center;
+            }
+          }
+          /* Open swaps the two: the menu goes, the controls arrive in its place. */
+          .suggestion[data-actions="open"] .row-menu { display: none; }
+          .suggestion[data-actions="open"] .row-actions { display: flex; }
           .link {
             padding: 0; border: 0; background: none; cursor: pointer;
             font: inherit; color: var(--accent); text-decoration: underline;
@@ -405,6 +432,28 @@ public enum StartPage {
                 if (empty) { empty.tabIndex = -1; empty.focus(); }
                 return;
               }
+              // The row's own menu, where the three controls do not fit beside a title.
+              var menu = e.target.closest('.row-menu');
+              if (menu) {
+                var open = menu.closest('.suggestion');
+                // One row at a time: two open menus in a column read as one row with six
+                // controls, and the second tap would land on the wrong article's opinion.
+                open.parentElement.querySelectorAll('.suggestion[data-actions="open"]').forEach(function (other) {
+                  if (other !== open) { closeRowMenu(other); }
+                });
+                var wasOpen = open.getAttribute('data-actions') === 'open';
+                if (wasOpen) {
+                  closeRowMenu(open);
+                } else {
+                  open.setAttribute('data-actions', 'open');
+                  menu.setAttribute('aria-expanded', 'true');
+                  // Focus follows the controls the tap revealed, so a keyboard reaches them
+                  // without tabbing back through the row.
+                  var first = open.querySelector('.row-action');
+                  if (first) { first.focus(); }
+                }
+                return;
+              }
               // Row controls come first: they sit inside the row, and clicking one must not
               // also open the article.
               var control = e.target.closest('.row-action');
@@ -412,6 +461,15 @@ public enum StartPage {
                 var suggestion = control.closest('.suggestion');
                 var host = suggestion.dataset.host;
                 var kind = control.dataset.action;
+                // Closing is the X's only job now. It used to be the block control's glyph,
+                // where it read as "dismiss this menu" and did something rather harder to
+                // undo — one tap from an outlet you never see again.
+                if (kind === 'close') {
+                  closeRowMenu(suggestion);
+                  var reopen = suggestion.querySelector('.row-menu');
+                  if (reopen) { reopen.focus(); }
+                  return;
+                }
                 if (kind === 'block') {
                   suggestion.remove();
                   post('readerBlockHost', host);
@@ -422,17 +480,26 @@ public enum StartPage {
                 window.readerToast(kind === 'more'
                   ? 'More articles like this from now on.'
                   : 'Fewer articles like this from now on.');
+                // The opinion is registered and the row keeps its place; the menu has nothing
+                // left to say, so it closes behind the answer.
+                closeRowMenu(suggestion);
                 return;
               }
               var row = e.target.closest('.recents-inline button[data-url], .suggestions button[data-url]');
               if (!row) { return; }
               post('readerOpen', row.dataset.url);
             });
-            // Lucide-style line icons: thumbs-up, thumbs-down, and the same X the other
-            // remove controls use. Markup is ours, never feed text.
+            // Lucide-style line icons. Markup is ours, never feed text.
             var ICON_MORE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';
             var ICON_LESS = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>';
-            var ICON_BLOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+            // ban, not an X: blocking an outlet is a decision about the list, and an X beside
+            // two opinions reads as "close this" — which is now what the X actually does.
+            var ICON_BLOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';
+            var ICON_CLOSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+            // The vertical ellipsis is this menu's alone — the reader's own chrome toggle took
+            // the three-line mark, so "this row's options" and "the app's controls" cannot be
+            // mistaken for each other.
+            var ICON_MENU = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>';
 
             function action(kind, label, icon) {
               var button = document.createElement('button');
@@ -442,6 +509,28 @@ public enum StartPage {
               button.setAttribute('aria-label', label);
               button.setAttribute('title', label);
               button.innerHTML = icon;
+              return button;
+            }
+
+            // Closes a row's menu and puts its own button back in charge of the state. One
+            // routine because three paths close a menu — the X, an opinion that has been
+            // registered, and opening a different row — and a half-closed menu is an
+            // `aria-expanded` that lies to a screen reader.
+            function closeRowMenu(suggestion) {
+              suggestion.removeAttribute('data-actions');
+              var toggle = suggestion.querySelector('.row-menu');
+              if (toggle) { toggle.setAttribute('aria-expanded', 'false'); }
+            }
+
+            // The row's menu button. Only ever visible where the three controls would not
+            // fit beside a title — see `.row-menu` in the stylesheet.
+            function rowMenu(title) {
+              var button = document.createElement('button');
+              button.className = 'row-menu';
+              button.type = 'button';
+              button.setAttribute('aria-expanded', 'false');
+              button.setAttribute('aria-label', 'Options for ' + title);
+              button.innerHTML = ICON_MENU;
               return button;
             }
 
@@ -494,6 +583,7 @@ public enum StartPage {
                 row.appendChild(title);
                 row.appendChild(source);
                 wrap.appendChild(row);
+                wrap.appendChild(rowMenu(item.title));
 
                 var actions = document.createElement('div');
                 actions.className = 'row-actions';
@@ -502,6 +592,8 @@ public enum StartPage {
                 if (item.source) {
                   actions.appendChild(action('block', 'Block ' + item.source, ICON_BLOCK));
                 }
+                // Last, so the way out sits where the X sat before — and now means it.
+                actions.appendChild(action('close', 'Hide options', ICON_CLOSE));
                 wrap.appendChild(actions);
                 list.appendChild(wrap);
               });

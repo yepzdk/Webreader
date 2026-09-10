@@ -10,6 +10,10 @@ public enum OfflineFallback {
         case cannotReach   // DNS / host lookup failed
         case timedOut      // connection timed out
         case generic       // other load failure
+        /// The load succeeded and answered with something that is not a web page — a feed, a
+        /// PDF, a download. Distinct from the four above because nothing failed and trying
+        /// again would answer exactly the same way.
+        case notAPage
 
         public var headline: String {
             switch self {
@@ -17,6 +21,7 @@ public enum OfflineFallback {
             case .cannotReach: return "Can't reach the site"
             case .timedOut: return "The connection timed out"
             case .generic: return "This page didn't load"
+            case .notAPage: return "There's nothing to read here"
             }
         }
 
@@ -32,7 +37,16 @@ public enum OfflineFallback {
                 return "\(site) took too long to respond. Check your connection and try again."
             case .generic:
                 return "Something went wrong loading \(site). Try again in a moment."
+            case .notAPage:
+                return "\(site) answered with a file rather than a web page — a feed, or something to download."
             }
+        }
+
+        /// Whether asking again could plausibly answer differently. It could not for a file
+        /// the reader cannot display, and a button that is certain to fail is worse than no
+        /// button: the way out of this page is Home, which its chrome carries.
+        public var retryable: Bool {
+            self != .notAPage
         }
     }
 
@@ -44,6 +58,7 @@ public enum OfflineFallback {
         case -1001: return .timedOut     // NSURLErrorTimedOut
         case -1003, // NSURLErrorCannotFindHost
              -1006: return .cannotReach  // NSURLErrorDNSLookupFailed
+        case 100: return .notAPage       // WebKitErrorCannotShowMIMEType
         default: return .generic
         }
     }
@@ -74,18 +89,25 @@ public enum OfflineFallback {
         // The button label stays white on the accent in every palette: `ReaderPalette` has
         // no foreground-on-accent role, and inventing one from a colour literal the host
         // may have written as anything is guesswork the stock themes don't do either.
+        // This page spells its own palette rather than taking `ReaderChrome.themeCSS`, so it
+        // has to define the safe-area variables its chrome offsets read. Left out, every
+        // `var(--safe-*)` here resolves to nothing, the declaration around it is invalid, and
+        // the page loses the insets that keep Home clear of a notch.
+        let safeArea = ReaderChrome.safeAreaCSS(platform: platform)
         let theme = palette.map {
             """
             :root {
               --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
               --accent-fg: #ffffff; --border: \($0.border);
               color-scheme: \($0.isDark ? "dark" : "light");
+            \(safeArea)
             }
             """
         } ?? """
         :root {
           --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
           --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+        \(safeArea)
         }
         @media (prefers-color-scheme: dark) {
           :root {
@@ -94,6 +116,12 @@ public enum OfflineFallback {
           }
         }
         """
+        // Only `.notAPage` can be a feed — the other four kinds mean the address never
+        // answered at all — so only that page carries the offer, script included. The
+        // gate is the kind itself rather than `retryable`, because what decides this is
+        // whether the response could be a feed, not whether asking again is worthwhile.
+        let offerButton = kind == .notAPage ? feedOfferButton : ""
+        let offerScript = kind == .notAPage ? feedOfferScript : ""
         return """
         <!doctype html>
         <html lang="en">
@@ -118,8 +146,8 @@ public enum OfflineFallback {
             text-align: center; max-width: 30rem;
             /* The card is centred in the viewport, so it needs no safe-area padding of its
                own on the block axis — but a landscape notch does eat into the inline one. */
-            padding: 24px max(24px, env(safe-area-inset-left, 0px)) 24px
-                        max(24px, env(safe-area-inset-right, 0px));
+            padding: 24px max(24px, var(--safe-left)) 24px
+                        max(24px, var(--safe-right));
           }
           .icon { color: var(--muted); margin-bottom: 16px; }
           .icon svg { width: 44px; height: 44px; }
@@ -148,8 +176,21 @@ public enum OfflineFallback {
           \(ReaderChrome.indent(ReaderChrome.chrome(nav: ReaderChrome.navHome()), by: 2))
           <div class="card">
             <div class="icon" aria-hidden="true">
-              <!-- wifi-off, Lucide-style line icon, inherits currentColor -->
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+              \(kind.retryable ? wifiOffIcon : notAPageIcon)
+            </div>
+            <h1>\(headline)</h1>
+            <p>\(message)</p>
+        \(kind.retryable
+            ? "    <button onclick=\"readerPost('readerRetry', 'retry')\">Try Again</button>\n"
+            : offerButton)  </div>
+        \(offerScript)</body>
+        </html>
+        """
+    }
+
+    /// wifi-off, Lucide-style line icon, inherits currentColor.
+    private static let wifiOffIcon = """
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                    stroke-linecap="round" stroke-linejoin="round">
                 <path d="M2 2l20 20"/>
                 <path d="M8.5 16.5a5 5 0 0 1 7 0"/>
@@ -159,15 +200,52 @@ public enum OfflineFallback {
                 <path d="M22 8.8a16 16 0 0 0-9.4-2.7"/>
                 <path d="M12 20h.01"/>
               </svg>
-            </div>
-            <h1>\(headline)</h1>
-            <p>\(message)</p>
-            <button onclick="readerPost('readerRetry', 'retry')">Try Again</button>
-          </div>
-        </body>
-        </html>
-        """
-    }
+    """
+
+    /// file-x, from the same set: a document the reader cannot open, not a lost connection.
+    private static let notAPageIcon = """
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3v5a1 1 0 0 0 1 1h5"/>
+                <path d="M18 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2z"/>
+                <path d="M9.5 13.5l5 5"/>
+                <path d="M14.5 13.5l-5 5"/>
+              </svg>
+    """
+
+    /// The offer's button, which ships hidden and empty because the host may never make the
+    /// offer: confirming an address is a feed means fetching and parsing it, and it may turn
+    /// out to be a PDF or a download instead. It sits in the markup rather than being built
+    /// by the script so that there is exactly one of it — a second offer relabels this
+    /// button instead of stacking another beside it — and it wears no class of its own
+    /// because `.card button` is already the page's primary action, which this is.
+    private static let feedOfferButton =
+        "    <button id=\"readerFeedOffer\" hidden></button>\n"
+
+    /// Reveals the offer when the host calls `readerOfferFeed({title, url})`, and posts the
+    /// same `readerAddSource` message the settings page's add-source form posts, so a feed
+    /// accepted here arrives through the one path that already knows what to do with it.
+    ///
+    /// The label is assembled as text, never markup — the same rule the suggestion rows
+    /// follow, and for the same reason: the title comes from a stranger's feed. A payload
+    /// missing either field is dropped rather than shown as a half-written offer.
+    private static let feedOfferScript = """
+      <script>
+      (function () {
+        var offer = document.getElementById('readerFeedOffer');
+        offer.addEventListener('click', function () {
+          window.readerPost('readerAddSource', offer.dataset.url);
+        });
+        window.readerOfferFeed = function (feed) {
+          if (!feed || !feed.title || !feed.url) { return; }
+          offer.dataset.url = feed.url;
+          offer.textContent = 'Add “' + feed.title + '” to suggested articles';
+          offer.hidden = false;
+        };
+      })();
+      </script>
+
+    """
 
 }
 

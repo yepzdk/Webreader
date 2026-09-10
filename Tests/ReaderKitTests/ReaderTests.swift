@@ -192,6 +192,83 @@ final class ThumbnailSettingTests: XCTestCase {
     }
 }
 
+final class StartPageOrderSettingTests: XCTestCase {
+    func testRecentsLeadByDefaultAndTheChoiceRoundTrips() {
+        var settings = ReaderSettings()
+        XCTAssertEqual(settings.startPageOrder, .recentsFirst,
+                       "an upgrade must not reorder a start page nobody asked to reorder")
+        settings.startPageOrder = .suggestionsFirst
+        let decoded = ReaderSettings.fromJSON(settings.json)
+        XCTAssertEqual(decoded.startPageOrder, .suggestionsFirst)
+        XCTAssertEqual(decoded.json, settings.json)
+    }
+
+    func testAStoredBlobFromBeforeTheSettingLeadsWithRecents() {
+        XCTAssertEqual(ReaderSettings.fromJSON("{\"fontSize\":17}").startPageOrder, .recentsFirst)
+    }
+
+    func testAnUnrecognisedValueKeepsTheDefault() {
+        // A hand-edited blob, or one written by a later version that spells the order
+        // differently, must leave the page in the order it was already in.
+        XCTAssertEqual(ReaderSettings.decode(["startPageOrder": "sideways"]).startPageOrder,
+                       .recentsFirst)
+        XCTAssertEqual(ReaderSettings.decode(["startPageOrder": "suggestionsFirst"]).startPageOrder,
+                       .suggestionsFirst)
+    }
+
+    func testTheSettingsPagesOneKeyPostLeavesTheRestAlone() {
+        // The checkbox posts this key by itself, so the merge is the whole reason the page
+        // can afford to send one field.
+        var stored = ReaderSettings()
+        stored.theme = .dark
+        stored.fontSize = 22
+        let merged = ReaderSettings.decode(["startPageOrder": "suggestionsFirst"], onto: stored)
+        XCTAssertEqual(merged.startPageOrder, .suggestionsFirst)
+        XCTAssertEqual(merged.theme, .dark)
+        XCTAssertEqual(merged.fontSize, 22)
+    }
+}
+
+final class ControlSideSettingTests: XCTestCase {
+    func testTheRightEdgeIsTheDefaultAndTheChoiceRoundTrips() {
+        var settings = ReaderSettings()
+        XCTAssertEqual(settings.controlSide, .right,
+                       "an upgrade must not move controls nobody asked to move")
+        settings.controlSide = .left
+        let decoded = ReaderSettings.fromJSON(settings.json)
+        XCTAssertEqual(decoded.controlSide, .left)
+        XCTAssertEqual(decoded.json, settings.json)
+    }
+
+    func testAStoredBlobFromBeforeTheSettingKeepsTheRightEdge() {
+        XCTAssertEqual(ReaderSettings.fromJSON("{\"fontSize\":17}").controlSide, .right)
+        XCTAssertEqual(ReaderSettings.decode(["controlSide": "sideways"]).controlSide, .right)
+    }
+
+    func testTheSettingsPageOffersTheChoiceAndPostsTheSide() {
+        let page = SettingsPage.html(appName: "R")
+        XCTAssertTrue(page.contains("id=\"controlSide\" type=\"checkbox\""),
+                      "no way to pick the side")
+        XCTAssertTrue(page.contains("controlSide: side.checked ? 'left' : 'right'"),
+                      "the choice is not posted, or is posted as a boolean")
+        // Ticked when the setting is already left, or reopening Settings would misreport it.
+        var settings = ReaderSettings()
+        settings.controlSide = .left
+        XCTAssertTrue(SettingsPage.html(appName: "R", settings: settings)
+            .contains("id=\"controlSide\" type=\"checkbox\" aria-describedby=\"sideHelp\" checked"))
+    }
+
+    func testTheReaderKeepsTheAttributeInStepLive() {
+        // A change made in Settings reaches an article already on screen: the same field
+        // drives the attribute the stylesheet reads.
+        let script = ReaderChrome.controlsScript(settings: ReaderSettings(),
+                                                 thumbnails: .reader,
+                                                 platform: .iOS)
+        XCTAssertTrue(script.contains("root.setAttribute('data-controls', 'left')"))
+        XCTAssertTrue(script.contains("root.removeAttribute('data-controls')"))
+    }
+}
+
 final class ReaderExtractionScriptTests: XCTestCase {
     func testContainsVendoredSourcesAndGate() {
         let script = Reader.extractionScript()
@@ -463,7 +540,12 @@ final class ReaderPageTests: XCTestCase {
 
     func testTheSuggestedGroupIsCappedAndCarriesNoRowControls() {
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains(".slice(0, \(ReaderChrome.popoverSuggestions))"))
+        // Two lists, one filler, two caps: the popover is a list you went looking for, the
+        // end-of-article block is an offer to someone who just finished reading.
+        XCTAssertTrue(html.contains(
+            "fillSuggestions(suggested, suggestedList, items, \(ReaderChrome.popoverSuggestions));"))
+        XCTAssertTrue(html.contains(
+            "fillSuggestions(readNext, readNextList, items, \(ReaderChrome.readNextSuggestions));"))
         // More/Less/Block are the start page's; their handlers are gated to it, and three
         // icon buttons do not fit a 280px row.
         XCTAssertFalse(html.contains("readerTopicFeedback"))
@@ -472,11 +554,46 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("readerPost('readerOpen'"))
     }
 
+    func testTheArticleEndsWithSomethingToReadNext() {
+        let html = ReaderPage.html(article: article)
+        // Inside `main`, after the article: it belongs to the reading column, and it is only
+        // reached by finishing what is above it.
+        guard let content = html.range(of: "</article>"),
+              let section = html.range(of: "<section id=\"readNext\"",
+                                       range: content.upperBound..<html.endIndex),
+              let main = html.range(of: "</main>", range: section.upperBound..<html.endIndex) else {
+            return XCTFail("the offer must sit after the article and inside its column")
+        }
+        XCTAssertLessThan(section.lowerBound, main.lowerBound)
+        // Hidden and empty until a ranking arrives, which on a device with no network or no
+        // sources is never — an empty "Read next" would be a promise the page cannot keep.
+        XCTAssertTrue(html.contains("<section id=\"readNext\" hidden"))
+        XCTAssertTrue(html.contains("<div id=\"readNextList\"></div>"))
+        // Its own click handler: the popover's covers only what is inside the popover.
+        XCTAssertTrue(html.contains("readNextList.addEventListener('click'"))
+        // Named for a screen reader by the heading it already shows.
+        XCTAssertTrue(html.contains("aria-labelledby=\"readNextLabel\""))
+        // Chrome type, not the reading settings: `.recent` says `font-family: inherit`, and
+        // inside an article that is the reading serif at 12px.
+        XCTAssertTrue(html.contains("#readNext {"))
+        XCTAssertTrue(html.contains("#readNext .recent { font-size: 14px;"))
+    }
+
+    func testOnlyTheReaderCarriesTheEndOfArticleOffer() {
+        // The start page is a list of things to read already; a second list at the bottom of
+        // it would be the same offer twice.
+        XCTAssertFalse(StartPage.html(appName: "R").contains("id=\"readNext\""))
+        XCTAssertFalse(SettingsPage.html(appName: "R").contains("id=\"readNext\""))
+        XCTAssertFalse(OfflineFallback.html(appName: "R", host: nil, kind: .offline)
+            .contains("id=\"readNext\""))
+    }
+
     func testTheStartPageKeepsItsOwnRicherSuggestionRows() {
         // Both pages implement the same host call; the popover's version installs only where
         // its container exists, so neither can shadow the other.
         let html = StartPage.html(appName: "Reader")
-        XCTAssertTrue(html.contains("if (suggested && suggestedList) {"))
+        XCTAssertTrue(html.contains(
+            "if ((suggested && suggestedList) || (readNext && readNextList)) {"))
         XCTAssertTrue(html.contains("readerTopicFeedback"))
         XCTAssertEqual(html.components(separatedBy: "window.readerSetSuggestions = function").count - 1, 2)
     }
@@ -662,7 +779,7 @@ final class ChromeBackdropTests: XCTestCase {
         let solid = 14 + ReaderChrome.touchTarget
         let css = ReaderChrome.backdropCSS()
         XCTAssertTrue(css.contains(
-            "var(--bg) calc(\(solid)px + env(safe-area-inset-top, 0px)),"))
+            "var(--bg) calc(\(solid)px + var(--safe-top)),"))
         // And the element runs past that stop, or there is no room left to fade in.
         XCTAssertTrue(css.contains("height: calc(\(solid + 24)px"))
     }

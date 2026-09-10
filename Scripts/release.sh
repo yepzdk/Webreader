@@ -57,10 +57,53 @@ cp "$ZIP" build/WebReader.zip
 (cd build && shasum -a 256 "WebReader-$VERSION.zip" > "WebReader-$VERSION.zip.sha256")
 SHA="$(cut -d' ' -f1 "$ZIP.sha256")"
 
+# --- Android APK (optional) ---------------------------------------------------------------
+# Opt-in, because it needs two things a Mac has no reason to carry: the Swift SDK for Android
+# and a signing keystore. Absent either, the release is the Mac's alone and says so — a
+# release that failed because a phone toolchain was missing would be a worse trade.
+#
+# Set ANDROID_KEYSTORE to a keystore path to include them, and ANDROID_BUILD_TOOLS if the
+# build-tools are not the newest under ANDROID_HOME.
+#
+# A plain string rather than an array, because this script is `#!/bin/sh`: the paths are
+# generated here, so word splitting on them is safe, and it is why `$APKS` goes unquoted at
+# the `gh release create` below.
+APKS=""
+if [ -n "${ANDROID_KEYSTORE:-}" ] && [ -f "${ANDROID_KEYSTORE}" ]; then
+  SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+  if [ -z "${ANDROID_BUILD_TOOLS:-}" ]; then
+    # Newest by version sort, which is what `ls` gives in the layout the SDK manager writes.
+    ANDROID_BUILD_TOOLS="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"
+  fi
+  [ -x "$ANDROID_BUILD_TOOLS/apksigner" ] \
+    || die "no apksigner at $ANDROID_BUILD_TOOLS; set ANDROID_BUILD_TOOLS"
+  echo "Building the Android APKs…"
+  ABIS="aarch64-unknown-linux-android28 x86_64-unknown-linux-android28" Scripts/build-android.sh
+  (cd android && ./gradlew --quiet :app:assembleRelease)
+  for abi in arm64-v8a x86_64; do
+    unsigned="android/app/build/outputs/apk/release/app-$abi-release-unsigned.apk"
+    [ -f "$unsigned" ] || die "expected $unsigned"
+    signed="build/WebReader-$VERSION-$abi.apk"
+    # zipalign before apksigner: the aligner cannot fix a signed archive, and an unaligned
+    # APK is rejected on install. `-P 16`, not `-p`: every `.so` here has a PT_LOAD p_align
+    # of 16384 and `useLegacyPackaging = false` maps them straight from the archive, so the
+    # 4 KB alignment `-p` gives leaves the loader nothing to map on a 16 KB-page device.
+    # The two flags are mutually exclusive; `4` is still the zip entry alignment.
+    "$ANDROID_BUILD_TOOLS/zipalign" -f -P 16 4 "$unsigned" "$signed.aligned"
+    "$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$ANDROID_KEYSTORE" \
+      --out "$signed" "$signed.aligned"
+    rm -f "$signed.aligned"
+    "$ANDROID_BUILD_TOOLS/apksigner" verify "$signed" || die "apksigner rejected $signed"
+    APKS="$APKS $signed"
+  done
+else
+  echo "Skipping the Android APKs: set ANDROID_KEYSTORE to include them."
+fi
+
 # --- Publish -----------------------------------------------------------------------------
 # Release notes: this version's CHANGELOG section, minus its heading.
 awk -v v="$VERSION" '/^## \[/{p=($0 ~ "^## \\[" v "\\]")} p' CHANGELOG.md | tail -n +2 > build/notes.md
-gh release create "v$VERSION" build/WebReader.zip "$ZIP" "$ZIP.sha256" \
+gh release create "v$VERSION" build/WebReader.zip "$ZIP" "$ZIP.sha256" $APKS \
   --title "WebReader $VERSION" --notes-file build/notes.md
 echo "Released: https://github.com/yepzdk/webreader/releases/tag/v$VERSION"
 echo "Stable download: https://github.com/yepzdk/webreader/releases/latest/download/WebReader.zip"

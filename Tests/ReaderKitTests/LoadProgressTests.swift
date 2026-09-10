@@ -42,13 +42,14 @@ final class CoverLabelTests: XCTestCase {
         }
     }
 
-    func testTheCoverMeasuresSilenceNotElapsedTime() {
-        // A fixed cap from the moment the cover went up fired mid-load on a slow connection
-        // and revealed the site the cover exists to hide (#24). The window is now idle time,
-        // re-armed by every progress notification, so it must be short enough to catch a real
-        // stall without being so short that a normal gap between packets trips it.
-        XCTAssertGreaterThanOrEqual(LoadProgress.coverStallPatience, 3)
-        XCTAssertLessThanOrEqual(LoadProgress.coverStallPatience, 10)
+    func testAStalledLoadIsMeasuredInSilenceAndEndedGenerously() {
+        // Idle time, not total time: a fixed cap from the moment the load began fired
+        // mid-load on a slow connection (#24). Re-armed by every scrap of progress, so it
+        // must be long enough that a normal gap between packets cannot trip it — this
+        // threshold replaces the page with an error, and doing that to a site that was
+        // still going to arrive is the worse failure.
+        XCTAssertGreaterThanOrEqual(LoadProgress.stallPatience, 15)
+        XCTAssertLessThanOrEqual(LoadProgress.stallPatience, 45)
     }
 
     func testTheShimmerIsOneSlowPass() {

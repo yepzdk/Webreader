@@ -2,16 +2,18 @@ import Foundation
 import WebKit
 import ReaderKit
 
-/// The reader, as a `WKWebView` and the state around it: it receives links, loads them, and
-/// swaps articles for the reader rendering. Reader logic is `ReaderKit`; this is the WebKit
-/// orchestration, shared by the AppKit and UIKit shells because WebKit is the same framework
-/// on both. What differs between them — a menu bar, a beep, a folder picker — is the shell's,
-/// and reaches this class through `ReaderHostServices`.
+/// The reader as a `WKWebView`: it receives links, loads them, and swaps articles for the
+/// reader rendering.
 ///
-/// One copy rather than two: the seventeen script messages, the page-state gates and the
-/// extraction flow are subtle enough that the GTK host, which necessarily reimplements them,
-/// has already drifted on `isShowingFallback`. A third and fourth copy would drift the same
-/// way, silently, since none of it is reachable from the test target.
+/// What the reader *decides* is `ReaderKit.ReaderSession` — the page-state machine, the
+/// extraction flow, the seventeen script messages — and this class runs the commands it
+/// hands back. The split is what lets three hosts share one implementation: WebKit is an
+/// Apple framework, so the AppKit and UIKit shells share this adapter, and Android's Kotlin
+/// host runs the same session over JNI with an adapter of its own.
+///
+/// What is left here is genuinely WebKit's: configuration, the delegate callbacks, the one
+/// funnel through which our own documents are loaded, and the loading cover that has to come
+/// down when the screen settles.
 public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDelegate,
                                         WKScriptMessageHandler {
     /// The view the shell puts on screen. Own pages must be loaded through this class (see
@@ -19,11 +21,11 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// directly to a site is fine, and is what `openIncoming` does.
     public let webView: WKWebView
 
-    let store: KeyValueStore
-    let cache: ArticleCache
-    let appName: String
-    let platform: Platform
-    unowned let services: ReaderHostServices
+    /// Everything the reader decides. Public so a shell can read what is on screen — the
+    /// Mac's menu asks whether the reader toggle has anything to act on.
+    public let session: ReaderSession
+
+    private unowned let services: ReaderHostServices
 
     /// The plain "Loading" screen. Set by the shell once the view hierarchy exists, so it is
     /// a var rather than an init argument; a host without one still works.
@@ -31,7 +33,21 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
 
     /// Sync (issue #7), or nil on a host that has none yet — in which case the settings page
     /// leaves the section out, exactly as it does on Linux.
-    public var sync: ReaderSyncBridge?
+    public var sync: ReaderSyncBridge? {
+        didSet {
+            session.onLocalStateChanged = { [weak self] in self?.sync?.localStateChanged() }
+            session.onStartPageShown = { [weak self] in self?.sync?.startPageShown() }
+            // Read at render time, not cached: the summary is relative to now, so a settings
+            // page opened an hour after the last cycle would otherwise still say "a few
+            // seconds ago".
+            session.syncStatusProvider = { [weak self] in
+                (self?.sync?.folderDisplayPath, self?.sync?.summary ?? "")
+            }
+            // Seeds the settings page's Sync section before anything is on screen: without
+            // it the first render would carry an empty summary and leave the section out.
+            _ = session.syncStatus(folder: sync?.folderDisplayPath, summary: sync?.summary ?? "")
+        }
+    }
 
     /// Our generated pages post here: the offline page's Try Again, the reader's Aa, recents
     /// and hidden-text popovers, its floating Hide-text button, and the start page's URL
@@ -44,58 +60,34 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         "readerRate", "readerOpenSync",
     ]
 
-    /// Which of our own documents is on screen. Tracked explicitly rather than inferred
-    /// from `webView.url` (whose value after `loadHTMLString` isn't something to depend
-    /// on); the flags also gate the script message handlers, so only our pages — never a
-    /// live site — can post to them.
-    /// The generated-page state machine (`ReaderKit.PageState`), which owns the transition
-    /// rules — they are subtle enough to have shipped a bug in 0.10.0, and living in
-    /// ReaderKit is what makes them testable. These two stay as computed flags so the many
-    /// gates reading them are unchanged.
-    var pageState = PageState()
-    var isShowingStartPage: Bool { pageState.isShowingStartPage }
-    var isShowingSettings: Bool { pageState.isShowingSettings }
-    var isShowingFallback = false
     /// Set by `loadOwnPage` and consumed by the next `didStartProvisionalNavigation`: one of
     /// our own documents is already the answer, so its load must not raise the cover again.
-    /// A one-shot rather than a test over the page flags — the flags differ per own page
-    /// (the offline page sets none of them), and enumerating them is how a page gets stuck
-    /// behind "Loading".
-    var coverSuppressedOnce = false
-    /// The URL whose load produced the offline page, so Try Again retries *that*
-    /// navigation rather than going home.
-    var failedURL: URL?
+    /// A one-shot rather than a test over the page flags — the flags differ per own page (the
+    /// offline page sets none of them), and enumerating them is how a page gets stuck behind
+    /// "Loading".
+    private var coverSuppressedOnce = false
 
-    /// Reader state. `isShowingReader`: the reader rendering is on screen (the swap is a
-    /// `loadHTMLString`, not a navigation). `suppressReaderOnce`: set when toggling back to
-    /// the original page so its load isn't immediately re-extracted. `enterReaderForURL`:
-    /// the URL a recents row asked for — a URL rather than a bool so the request can't leak
-    /// onto an unrelated page. `pendingReaderRender`: set between `loadHTMLString`-ing the
-    /// reader document and its `didFinish`, so that load is marked as the reader instead
-    /// of being re-extracted. `readerSourceURL`: what the current rendering was extracted
-    /// from; the reader toggle loads it to get back to the original page.
-    var isShowingReader = false
-    var suppressReaderOnce = false
-    var enterReaderForURL: URL?
-    var pendingReaderRender = false
-    /// Set when the render about to happen is the offline fallback's saved copy, so its
-    /// `didFinish` skips the suggestion fetch. The network just failed, the fetch would fail
-    /// too, and `FeedFetcher` caches an empty result for its whole TTL — one offline article
-    /// would otherwise leave every list empty for ten minutes.
-    var suggestionsSuppressedOnce = false
-    var readerSourceURL: URL?
-    /// The title of the article currently rendered, so a like/dislike learns terms from the
-    /// headline rather than from the URL. Set when the reader renders, and cleared when
-    /// back/forward restores a reader document until that page's own title is read back —
-    /// rating with a stale title would file one article's terms under another's URL.
-    /// Only ever consulted while `isShowingReader`.
-    var readerArticleTitle: String?
+    /// The in-flight feed ranking. Suggestions are strictly best-effort: the page renders
+    /// without them and the task is cancelled the moment the page goes away.
+    private var suggestionTask: Task<Void, Never>?
 
-    /// The suggestion sources' fetcher, and the in-flight ranking for the start page.
-    /// Suggestions are strictly best-effort: the start page renders without them and the
-    /// task is cancelled the moment the page goes away.
-    let feeds = FeedFetcher()
-    var suggestionTask: Task<Void, Never>?
+    /// The stall watch, and what it is watching. A load that commits and then goes silent
+    /// produces no callback at all — no finish, no failure — so without this the app waits
+    /// behind the cover for as long as it is open. Owned here rather than by the cover
+    /// because the answer is a command sequence (the offline page), not a change of view.
+    private var stallWatchdog: Timer?
+    private var progressObserver: NSKeyValueObservation?
+    /// What `.load` asked for. `webView.url` is nil for a provisional load that never
+    /// committed, which is exactly the case being reported.
+    private var loadingURL: URL?
+
+    /// The reveal waiting for a paint, and which navigation it is waiting for.
+    private var paintTimer: Timer?
+    private var paintGeneration = 0
+
+    /// Silence before a load is called over. The app's is `LoadProgress.stallPatience`;
+    /// tests shorten it, since the point of the number is that it is longer than a test.
+    var stallPatience: Double = LoadProgress.stallPatience
 
     /// `userAgentApplicationName` is the shell's, because the string is a claim about the
     /// system: WKWebView's stock UA lacks the "Version/x Safari/x" suffix, which UA-sniffing
@@ -106,10 +98,7 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
                 platform: Platform,
                 userAgentApplicationName: String,
                 services: ReaderHostServices) {
-        self.store = store
-        self.cache = cache
-        self.appName = appName
-        self.platform = platform
+        session = ReaderSession(store: store, cache: cache, appName: appName, platform: platform)
         self.services = services
 
         let config = WKWebViewConfiguration()
@@ -135,12 +124,11 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
-        // Debug builds only, so Safari's Develop menu can inspect the running app. Every
-        // page in this app is generated Swift string, which means a layout question about a
-        // real window ("is this rule applying?") otherwise has no answer short of rebuilding
-        // with a guess in it. `Scripts/build-app.sh` builds *release* by default, so this
-        // is off in the bundle you normally run: `CONFIG=debug Scripts/build-app.sh` is what
-        // produces an inspectable one.
+        // Debug builds only, so Safari's Develop menu can inspect the running app. Every page
+        // in this app is a generated Swift string, which means a layout question about a real
+        // window ("is this rule applying?") otherwise has no answer short of rebuilding with a
+        // guess in it. `Scripts/build-app.sh` builds *release* by default, so this is off in
+        // the bundle you normally run.
         #if DEBUG
         if #available(macOS 13.3, iOS 16.4, *) { webView.isInspectable = true }
         #endif
@@ -152,39 +140,245 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         }
     }
 
+    // MARK: - Commands
+
+    /// Runs what the session asked for.
+    ///
+    /// `settled` is the cover's rule, and the only piece of judgement in here: what is on
+    /// screen has stopped changing unless a command started a new navigation, and a page
+    /// that never comes out from behind "Loading" is the failure this prevents.
+    @discardableResult
+    private func run(_ commands: [ReaderCommand], settled: Bool = false) -> Bool {
+        var navigating = false
+        for command in commands {
+            switch command {
+            case let .load(url):
+                navigating = true
+                // Covered here rather than in `didStartProvisionalNavigation`: everything
+                // between issuing a load and WebKit reporting it is a window with the old
+                // page, or the first paint of the new one, uncovered.
+                loadingCover?.show(theme: ReaderStore.settings(store: session.store).theme)
+                loadingURL = url
+                paintGeneration += 1
+                watchForStall()
+                webView.load(URLRequest(url: url))
+            case let .show(html, baseURL):
+                navigating = true
+                loadOwnPage(html, baseURL: baseURL)
+            case let .evaluate(script):
+                guard !script.isEmpty else { continue }
+                webView.evaluateJavaScript(script)
+            case let .extract(url, script):
+                // Extraction is the rest of this navigation, not the end of it: hiding the
+                // cover here would show the raw site for as long as Readability takes, which
+                // is the flash the cover exists to prevent (#24). `extract` settles instead.
+                navigating = true
+                extract(url: url, script: script)
+            case .reject:
+                services.reject()
+            case let .openExternally(url):
+                services.openExternally(url)
+            case .presentSyncSetup:
+                services.presentSyncSetup()
+            case .fetchSuggestions:
+                fetchSuggestions()
+            case let .resolveSource(url):
+                Task { [weak self] in
+                    guard let self else { return }
+                    // Only the lookup happens off the main actor; what it found is applied
+                    // back on it, because that half touches the session's state.
+                    let source = await self.session.resolveSource(url)
+                    await MainActor.run { _ = self.run(self.session.sourceResolved(source)) }
+                }
+            }
+        }
+        if settled, !navigating {
+            stopWatchingForStall()
+            revealWhenPainted()
+        }
+        return navigating
+    }
+
+    /// Takes the cover down once the document now loaded has actually painted.
+    ///
+    /// `didFinish` is the document loaded, which is not the same as it being on screen: until
+    /// the new one paints, the web view is still showing the page it replaces. Measured on
+    /// Android as two frames of the site between the two, and WKWebView is composited the
+    /// same way — the same defect, closed by the same rule.
+    ///
+    /// WebKit has no first-paint delegate callback, so the page is asked instead:
+    /// `requestAnimationFrame` resolves after the frame that drew this document. On its own
+    /// that is not enough — a web view with no frames renders none, so an offscreen view or
+    /// a backgrounded app never answers, and the cover would be terminal. A short timer runs
+    /// beside it and the first of the two wins: the paint, within a frame, whenever there is
+    /// one to wait for.
+    private func revealWhenPainted() {
+        paintTimer?.invalidate()
+        let generation = paintGeneration
+        paintTimer = Timer.scheduledTimer(withTimeInterval: Self.paintPatience, repeats: false) {
+            [weak self] _ in MainActor.assumeIsolated { self?.reveal(generation) }
+        }
+        let script = "await new Promise(resolve => requestAnimationFrame(resolve)); return true"
+        webView.callAsyncJavaScript(script, in: nil, in: .page) { @MainActor [weak self] _ in
+            self?.reveal(generation)
+        }
+    }
+
+    /// Reveals, unless a navigation started after the reveal was asked for — that cover
+    /// belongs to the new load, and a late answer about the old one must not take it down.
+    private func reveal(_ generation: Int) {
+        guard generation == paintGeneration else { return }
+        paintTimer?.invalidate()
+        paintTimer = nil
+        loadingCover?.hide()
+    }
+
+    /// Long enough that a view which does render frames always wins the race, short enough
+    /// that one which never will is not a wait anybody notices.
+    private static let paintPatience: Double = 0.5
+
+    // MARK: - A load that never lands
+
+    /// Starts the silence over. Armed when a load is issued and re-armed on every scrap of
+    /// progress, so a slow load that is still moving is never interrupted.
+    private func watchForStall() {
+        if progressObserver == nil {
+            progressObserver = webView.observe(\.estimatedProgress, options: [.new]) {
+                [weak self] _, _ in
+                // The load moved, so it is not stuck.
+                guard let self, self.stallWatchdog != nil else { return }
+                self.watchForStall()
+            }
+        }
+        stallWatchdog?.invalidate()
+        stallWatchdog = Timer.scheduledTimer(withTimeInterval: stallPatience,
+                                             repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.giveUpOnTheLoad() }
+        }
+    }
+
+    /// For the paths that ended the load one way or another; the watch has nothing left to
+    /// answer for.
+    private func stopWatchingForStall() {
+        stallWatchdog?.invalidate()
+        stallWatchdog = nil
+    }
+
+    /// Nothing was ever going to end this load. Stops it and reports the timeout it is, so
+    /// the session answers with the page that says so — an ending, rather than a cover with
+    /// no way past it.
+    private func giveUpOnTheLoad() {
+        stopWatchingForStall()
+        webView.stopLoading()
+        let url = loadingURL ?? webView.url
+        run(session.loadFailed(url: url, code: NSURLErrorTimedOut), settled: true)
+    }
+
+    /// Runs the extraction script and hands the answer back with the document's title. The
+    /// title travels with it because a restored reader document's baked-in title belongs to
+    /// whatever was rendered last, and reading it here costs one round trip instead of two.
+    private func extract(url: URL, script: String) {
+        // WebKit delivers this on the main thread, but its signature does not say so, and
+        // the branches below push state into the page. Spelled out rather than left to
+        // Swift 5's leniency, which downgrades it to a warning that Swift 6 will not.
+        webView.evaluateJavaScript(script) { @MainActor [weak self] result, _ in
+            guard let self else { return }
+            // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
+            // already the new (provisional) URL and this result belongs to a page nobody
+            // wants any more — rendering it would file page A's body under page B's key.
+            guard self.webView.url == url else { return }
+            self.webView.evaluateJavaScript("document.title") { @MainActor title, _ in
+                guard self.webView.url == url else { return }
+                self.run(self.session.extractionResult(url: url, result: result as? String,
+                                                       title: title as? String),
+                         settled: true)
+            }
+        }
+    }
+
+    private func fetchSuggestions() {
+        suggestionTask?.cancel()
+        // Snapshotted here, on the main actor: the ranking runs while the session keeps being
+        // driven, so what it reads has to be taken before it leaves.
+        let request = session.suggestionRequest()
+        suggestionTask = Task { [weak self] in
+            guard let self else { return }
+            let items = await self.session.suggestions(for: request)
+            guard !Task.isCancelled else { return }
+            // The session decides whether the page these were ranked for is still up.
+            await MainActor.run { _ = self.run(self.session.showSuggestions(items)) }
+        }
+    }
+
+    /// Loads one of our own generated documents. The single place `loadHTMLString` is called
+    /// (mirroring the GTK host's `loadHTML`), which is what gives the loading cover one place
+    /// to come down: every own page — reader, start, settings, offline — settles here.
+    ///
+    /// The cover is deliberately left up. Our document is the answer but it is not on screen
+    /// yet — `loadHTMLString` has to parse and paint first — and taking the cover down here
+    /// showed a frame or two of the page about to be replaced, which is the flash the cover
+    /// exists to prevent (#24). It comes down when this document's own load settles.
+    private func loadOwnPage(_ html: String, baseURL: URL?) {
+        coverSuppressedOnce = true
+        paintGeneration += 1
+        webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    // MARK: - Commands the shell issues
+
     /// First page. A URL means the app was launched by a link; otherwise — or if that link
     /// turns out not to be one the app can open — the start page.
     public func start(initialURL: URL?) {
-        if let initialURL, openIncoming(initialURL) { return }
-        showStartPage()
+        run(session.start(initialURL: initialURL))
     }
 
-    // MARK: - Commands
+    /// Routes an incoming URL, cleaning it first. Returns whether it was accepted.
+    @discardableResult
+    public func openIncoming(_ url: URL) -> Bool {
+        let opened = session.openIncoming(url)
+        guard opened.accepted else { return false }
+        run(opened.commands)
+        // Only an incoming link brings the app forward: a recents row or the reader toggle
+        // is someone already looking at the window.
+        services.bringToFront()
+        return true
+    }
 
-    /// In the reader, Reload fetches the source page again — which re-extracts and refreshes
-    /// the cached copy. Reloading the rendered document itself would change nothing.
+
+    /// Back, as the reader means it: the previous article, or the page it came from.
+    ///
+    /// The session is asked first because the web view's history also holds every article
+    /// page that was extracted on the way, and going back through one of those re-extracts it
+    /// and returns you to the article you were leaving (#42). When the session has nothing of
+    /// its own — a site's own pages — the web view's history is exactly right, so it answers.
+    public func back() {
+        let commands = session.back()
+        guard commands.isEmpty else {
+            run(commands)
+            return
+        }
+        // Only someone else's page defers to the web view. From one of ours there is nowhere
+        // left to go, and its history still holds our own documents — going back into one puts
+        // an article on screen that the reader already left.
+        if session.backFallback == .webViewHistory { webView.goBack() }
+    }
+
+    /// Whether Back has anywhere to go, from either half of the answer.
+    public var canGoBack: Bool {
+        session.canGoBack || (session.backFallback == .webViewHistory && webView.canGoBack)
+    }
+
+    public func showStartPage() { run(session.home()) }
+    public func showSettingsPage() { run(session.showSettingsPage()) }
+    public func toggleReader() { run(session.toggleReader(currentURL: webView.url)) }
+    public func resetAppearance() { run(session.resetAppearance()) }
+
+    /// In the reader, reloading fetches the source page again — which re-extracts and
+    /// refreshes the cached copy. Reloading the rendered document would change nothing, so
+    /// with no source to go back to this is WebKit's own reload.
     public func reload() {
-        if isShowingReader, let source = readerSourceURL {
-            webView.load(URLRequest(url: source))
-        } else {
-            webView.reload()
-        }
-    }
-
-    public func toggleReader() {
-        if isShowingReader {
-            // Back to the original page; its load must not immediately re-enter.
-            suppressReaderOnce = true
-            isShowingReader = false
-            if let source = readerSourceURL {
-                webView.load(URLRequest(url: source))
-            } else {
-                webView.reload()
-            }
-        } else {
-            guard let url = webView.url else { services.reject(); return }
-            enterReader(from: url, manual: true)
-        }
+        let commands = session.reload()
+        if commands.isEmpty { webView.reload() } else { run(commands) }
     }
 
     /// Whether the reader toggle has anything to act on: a real web page, since the start
@@ -194,262 +388,149 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
         return WebURL.isWebURL(url)
     }
 
-    /// Stock appearance; history is left alone, and so is zoom, which is the shell's (it has
-    /// no cross-platform API). Whatever generated page is up is redrawn with the defaults —
-    /// the reader by reloading its source, which auto-enters.
-    public func resetAppearance() {
-        ReaderStore.resetAppearance(store: store)
-        sync?.localStateChanged()
-        if isShowingStartPage {
-            showStartPage()
-        } else if isShowingSettings {
-            showSettingsPage()
-        } else if isShowingReader, let source = readerSourceURL {
-            webView.load(URLRequest(url: source))
-        }
-    }
-
-    // MARK: - Reader
-
-    /// Runs the Readability extraction on the page at `url` (the one that just finished
-    /// loading) and, on success, caches the article and loads the reader rendering as its
-    /// OWN document (baseURL = the article, so relative image URLs resolve). A new document
-    /// rather than an in-place DOM swap, because the article page's still-running JS must
-    /// die with its page — hydrating sites were reverting in-place swaps within a second.
-    /// Failure leaves the page untouched: a rejection for a manual request, silence for the
-    /// automatic path — never an error page.
-    func enterReader(from url: URL, manual: Bool) {
-        let hidden = ReaderStore.hiddenPhrases(store: store)
-        // WebKit delivers this on the main thread, but its signature does not say so, and the
-        // branches below push state into the page. Spelled out rather than left to Swift 5's
-        // leniency, which downgrades it to a warning that Swift 6 will not.
-        webView.evaluateJavaScript(Reader.extractionScript(hiding: hidden)) { @MainActor [weak self] result, _ in
-            guard let self else { return }
-            // Back/forward landed on one of our own reader documents: it IS the reader, so
-            // just say so. Nothing to extract, record, or cache.
-            if result as? String == Reader.ownPageSentinel {
-                self.loadingCover?.hide()
-                self.isShowingReader = true
-                self.readerSourceURL = url
-                // Back/forward landed here rather than `renderReader`, so the title from the
-                // last rendering belongs to a different article. Drop it immediately — a
-                // rating clicked before the lookup returns must learn nothing rather than
-                // learn the previous headline's terms — then fill it in for THIS page only,
-                // since a newer navigation may land while the lookup is in flight.
-                self.readerArticleTitle = nil
-                self.webView.evaluateJavaScript("document.title") { title, _ in
-                    guard self.readerSourceURL == url else { return }
-                    self.readerArticleTitle = (title as? String)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                // The restored document still shows the rating baked in when it was first
-                // rendered; it may have changed since.
-                self.pushRating(for: url)
-                // Reused bytes, not a fresh render: its settings are as old as the document,
-                // and its popover's suggested group was filled by a script call on the way in
-                // that this navigation did not repeat (#33).
-                self.pushSettings()
-                self.loadSuggestions()
-                return
-            }
-            // Extraction takes a moment; if a navigation started meanwhile, `webView.url` is
-            // already the new (provisional) URL and this result belongs to a page nobody
-            // wants any more — rendering it would file page A's body under page B's key.
-            guard self.webView.url == url else { return }
-            guard let article = Reader.decode(result) else {
-                // Not an article. The site itself is the honest answer, so reveal it.
-                self.loadingCover?.hide()
-                if manual { self.services.reject() }
-                return
-            }
-            // Only a live extraction has something new to write; cache hits re-render as-is.
-            self.cache.store(article, for: URLCleaner.clean(url))
-            self.renderReader(article, source: url)
-        }
-    }
-
-    /// Shows `article` as the reader document and records it in recents. `source` is the
-    /// article page (the baseURL, so relative images resolve). The single funnel for live
-    /// extractions and cache hits, so page state is reset here and nowhere else; the cache
-    /// is pruned here too, because recents — which it mirrors — change here.
-    func renderReader(_ article: Article, source: URL) {
-        isShowingFallback = false
-        pageState.clear()
-        failedURL = nil
-        readerSourceURL = source
-        readerArticleTitle = article.title
-        // Record before rendering so the article being opened is the panel's top row.
-        // The cleaned URL, because opening a row routes through `openIncoming`, which
-        // cleans — recording the raw one would make the replay look like a new article.
-        var history = ReaderStore.history(store: store)
-        let key = URLCleaner.clean(source).absoluteString
-        history.record(title: article.title, url: key, image: article.image)
-        ReaderStore.setHistory(history, store: store)
-        sync?.localStateChanged()
-        cache.prune(keeping: history.entries.map(\.url))
-        let html = ReaderPage.html(article: article,
-                                   settings: ReaderStore.settings(store: store),
-                                   history: history,
-                                   hidden: ReaderStore.hiddenPhrases(store: store),
-                                   rating: ReaderStore.topics(store: store).rating(for: key),
-                                   currentURL: key,
-                                   platform: platform)
-        pendingReaderRender = true
-        loadOwnPage(html, baseURL: source)
-    }
-
-    // MARK: - Incoming URLs
-
-    /// Routes an incoming URL: cleans it (tracking redirects unwrapped, tracking params
-    /// stripped — so the app never contacts a tracking host, which may be blocked), ignores
-    /// non-web URLs, and loads the rest. Returns whether it was accepted.
-    @discardableResult
-    public func openIncoming(_ url: URL) -> Bool {
-        let url = URLCleaner.clean(url)
-        guard WebURL.isWebURL(url) else { return false }
-        isShowingFallback = false
-        pageState.clear()
-        failedURL = nil
-        webView.load(URLRequest(url: url))
-        services.bringToFront()
-        return true
-    }
-
-    /// Loads one of our own generated documents. The single place `loadHTMLString` is called
-    /// (mirroring the GTK host's `loadHTML`), which is what gives the loading cover one place
-    /// to come down: every own page — reader, start, settings, offline — settles here.
-    func loadOwnPage(_ html: String, baseURL: URL?) {
-        loadingCover?.hide()
-        coverSuppressedOnce = true
-        webView.loadHTMLString(html, baseURL: baseURL)
-    }
-
-    /// The start page: URL field, recents, and the appearance controls — reading the same
-    /// persisted settings as the reader page.
-    public func showStartPage() {
-        isShowingFallback = false
-        failedURL = nil
-        pageState.willShow(.startPage)
-        sync?.startPageShown()
-        loadOwnPage(StartPage.html(appName: appName,
-                                   settings: ReaderStore.settings(store: store),
-                                   history: ReaderStore.history(store: store),
-                                   platform: platform),
-                    baseURL: nil)
-    }
-
-    /// The settings page: the suggestion sources and their language filter.
-    public func showSettingsPage() {
-        suggestionTask?.cancel()
-        isShowingFallback = false
-        failedURL = nil
-        pageState.willShow(.settings)
-        loadOwnPage(SettingsPage.html(appName: appName,
-                                      settings: ReaderStore.settings(store: store),
-                                      suggestions: ReaderStore.suggestions(store: store),
-                                      hidden: ReaderStore.hiddenPhrases(store: store),
-                                      platform: platform,
-                                      syncFolder: sync?.folderDisplayPath,
-                                      syncSummary: sync?.summary ?? ""),
-                    baseURL: nil)
-    }
-
-    // MARK: - Suggestions
-
-    /// Fetches the sources, ranks them against what's been read, and hands the result to
-    /// whichever of our pages shows suggestions — the start page's list, or the reader's
-    /// recents popover (#33). Everything here is best-effort: the fetch and ranking run off
-    /// the main actor inside the task, and the page is already on screen and stays usable
-    /// whatever happens. Main-actor isolated because it reads the page flags and hands off to
-    /// the web view; every caller is already on the main thread.
-    @MainActor
-    func loadSuggestions() {
-        suggestionTask?.cancel()
-        let settings = ReaderStore.suggestions(store: store)
-        // No sources is precisely when the page's "add a source" empty state should show,
-        // so tell the page that rather than leaving the section hidden.
-        guard !settings.sources.isEmpty else {
-            showSuggestions([])
-            return
-        }
-        let history = ReaderStore.history(store: store)
-        let topics = ReaderStore.topics(store: store)
-        let cache = cache
-        suggestionTask = Task { [weak self] in
-            guard let self else { return }
-            let items = await self.feeds.items(for: settings.sources)
-            guard !Task.isCancelled else { return }
-            // The profile is the recent articles' own text, straight from the cache. A row
-            // whose body has fallen out of the cache (it's a Caches folder, and history
-            // predating the cache has none) still contributes its title — a weaker signal
-            // than the full text, but far better than dropping the article from the profile.
-            let read = history.entries.map { entry in
-                URL(string: entry.url).flatMap { cache.article(for: $0) }
-                    ?? Article(title: entry.title, byline: nil, siteName: nil, content: "")
-            }
-            let ranked = Suggestions.rank(items, read: read,
-                                          readURLs: Set(history.entries.map(\.url)),
-                                          languages: settings.languages,
-                                          blockedHosts: settings.blockedHosts,
-                                          topics: topics)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { self.showSuggestions(ranked) }
-        }
-    }
-
-    @MainActor
-    func showSuggestions(_ items: [FeedItem]) {
-        // The page may have been replaced while the feeds were in flight. Both surfaces
-        // implement `readerSetSuggestions`; each renders the shape that fits it.
-        guard isShowingStartPage || isShowingReader else { return }
-        let rows: [[String: String]] = items.map { item in
-            var row = ["title": item.title, "url": item.url, "source": item.host]
-            if let image = item.image { row["image"] = image }
-            return row
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: []) else { return }
-        webView.evaluateJavaScript(
-            "window.readerSetSuggestions && window.readerSetSuggestions(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
-    }
 
     // MARK: - Sync
 
-    /// Applies what a sync cycle merged in. Both halves update the page in place rather
-    /// than re-rendering it: the start page holds a URL field, and re-rendering under
-    /// someone mid-sentence throws their typing away.
-    @MainActor
+    /// Applies what a sync cycle merged in. The session decides what the pages need told;
+    /// this only runs it.
     public func applySync(_ result: SyncEngine.Result) {
-        guard isShowingReader || isShowingStartPage || isShowingSettings else { return }
-        if result.changedSettings {
-            let settings = ReaderStore.settings(store: store)
-            webView.evaluateJavaScript(
-                "window.readerApplySettings && window.readerApplySettings(\(HTML.jsLiteral(settings.json)))")
-        }
-        guard result.changedHistory else { return }
-        let history = ReaderStore.history(store: store)
-        // The cache mirrors recents: a merge that dropped rows (a clear on another device)
-        // has to drop their saved copies too.
-        cache.prune(keeping: history.entries.map(\.url))
-        let rows = history.entries.map { ["title": $0.title, "url": $0.url] }
-        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [])
-        else { return }
-        webView.evaluateJavaScript(
-            "window.readerSetRecents && window.readerSetRecents(\(HTML.jsLiteral(String(decoding: data, as: UTF8.self))))")
+        run(session.applySync(result))
     }
 
-    /// Sync's state changed (a folder chosen, a cycle landed, an error): redraw whatever is
-    /// showing it. Pushed, not re-rendered — the settings page holds a half-typed feed
-    /// address that has to survive someone setting sync up.
-    @MainActor
+    /// Sync's state changed: a folder chosen, a cycle landed, an error.
     public func syncStatusChanged() {
-        guard isShowingSettings, let sync else { return }
-        // A folder path is whatever the user named their folders; it takes the same escaping
-        // route as feed titles rather than being spliced into the script by hand.
-        let arguments: [Any] = [sync.folderDisplayPath ?? NSNull(), sync.summary]
-        guard let data = try? JSONSerialization.data(withJSONObject: arguments, options: [])
-        else { return }
-        webView.evaluateJavaScript(
-            "window.readerSetSyncStatus && window.readerSetSyncStatus.apply(null, "
-                + HTML.jsLiteral(String(decoding: data, as: UTF8.self)) + ")")
+        run(session.syncStatus(folder: sync?.folderDisplayPath, summary: sync?.summary ?? ""))
+    }
+
+    // MARK: - Navigation
+
+    // Web content and our own about:/data: pages load in the window; other schemes (mailto:,
+    // msteams:, …) can't render here and go to their owning app.
+    public func webView(_ webView: WKWebView,
+                        decidePolicyFor navigationAction: WKNavigationAction,
+                        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url, !WebURL.loadsInApp(url) {
+            services.openExternally(url)
+            decisionHandler(.cancel)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+
+    /// The response arrived and is not a web page — a feed, a PDF, a zip.
+    ///
+    /// Without this, WebKit decides on its own: it cancels the navigation with
+    /// `WebKitErrorFrameLoadInterruptedByPolicyChange` (102), which `isIgnorable` deliberately
+    /// swallows because that code is also what our own policy cancellations raise. Nothing
+    /// renders, so whatever the window was showing stays — with no chrome of ours on it and no
+    /// way back. Pasting a feed address into "Open URL from Clipboard" landed exactly there.
+    ///
+    /// Cancelled and answered with our own page instead, which carries Home. The code is
+    /// WebKit's own `WebKitErrorCannotShowMIMEType`; `OfflineFallback.classify` turns it into
+    /// the one kind that offers no Try Again, since asking again cannot answer differently.
+    @MainActor
+    public func webView(_ webView: WKWebView,
+                        decidePolicyFor navigationResponse: WKNavigationResponse,
+                        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard navigationResponse.isForMainFrame, !navigationResponse.canShowMIMEType else {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        run(session.loadFailed(url: navigationResponse.response.url, code: 100), settled: true)
+    }
+
+    // target=_blank / window.open: load in the same view rather than dropping it.
+    public func webView(_ webView: WKWebView,
+                        createWebViewWith configuration: WKWebViewConfiguration,
+                        for navigationAction: WKNavigationAction,
+                        windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url {
+            if WebURL.loadsInApp(url) {
+                webView.load(URLRequest(url: url))
+            } else {
+                services.openExternally(url)
+            }
+        }
+        return nil
+    }
+
+    @MainActor
+    public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        session.navigationStarted()
+        // Someone else's page is on its way: cover it rather than let the site paint itself
+        // only to be replaced by the reader a moment later (#24).
+        if coverSuppressedOnce {
+            coverSuppressedOnce = false
+        } else {
+            loadingCover?.show(theme: ReaderStore.settings(store: session.store).theme)
+        }
+        // Whatever is loading isn't the start page any more; a late result must not land on it.
+        suggestionTask?.cancel()
+    }
+
+    @MainActor
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // The generator marker is read for every finished load, including our own. It is how
+        // a back/forward restore of a `loadHTMLString` document says which page it is — those
+        // carry no URL of their own — and asking unconditionally keeps one path instead of a
+        // fast lane that has to know which finishes can skip it.
+        let url = webView.url
+        webView.evaluateJavaScript(ReaderSession.generatorScript) { @MainActor [weak self] result, _ in
+            guard let self else { return }
+            // A navigation that started inside this round trip owns the page now, and it has
+            // already told the session so. Committing this finish over it would mark a live
+            // site as one of our own documents, with every message handler open to it.
+            guard self.webView.url == url else { return }
+            self.run(self.session.navigationFinished(url: url,
+                                                     generator: (result as? String) ?? ""),
+                     settled: true)
+        }
+    }
+
+    @MainActor
+    public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                        withError error: Error) {
+        fail(error)
+    }
+
+    @MainActor
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        fail(error)
+    }
+
+    private func fail(_ error: Error) {
+        let nsError = error as NSError
+        let failed = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
+            ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
+        run(session.loadFailed(url: failed, code: nsError.code), settled: true)
+    }
+
+    // MARK: - Messages from our pages
+
+    // WebKit delivers these on the main thread, but the protocol requirement isn't annotated,
+    // so the isolation has to be spelled out for the main-actor work the commands do.
+    @MainActor
+    public func userContentController(_ userContentController: WKUserContentController,
+                                      didReceive message: WKScriptMessage) {
+        guard let body = Self.body(of: message) else { return }
+        run(session.message(message.name, body: body))
+    }
+
+    /// WebKit bridges a posted value to `String`, `[String]` or `[String: Any]` before it
+    /// arrives. Narrowing it here rather than passing `Any` into ReaderKit is what lets the
+    /// session be `Sendable` and lets a host that receives JSON text — WebKitGTK, Android —
+    /// arrive at exactly the same three shapes.
+    private static func body(of message: WKScriptMessage) -> ReaderSession.MessageBody? {
+        if let text = message.body as? String { return .text(text) }
+        if let list = message.body as? [String] { return .list(list) }
+        if let fields = message.body as? [String: Any] {
+            return .object(fields.compactMapValues { value in
+                if let text = value as? String { return .text(text) }
+                if let number = value as? Int { return .number(number) }
+                return nil
+            })
+        }
+        return nil
     }
 }

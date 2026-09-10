@@ -15,12 +15,24 @@ already ships (`Sources/ReaderKit/Sync`), with iCloud Drive as the practical fol
 
 ## Architecture
 
-Three SwiftPM targets on a Mac, three on Linux, two more built only by Xcode, no
-dependencies:
+Three SwiftPM targets on a Mac, three on Linux, three for Android behind an environment
+switch, two more built only by Xcode, no dependencies:
 
-- **`Sources/ReaderKit`** — Foundation-only. Must stay free of AppKit/WebKit/UIKit so the
-  future iOS target can depend on it unchanged. Everything here is pure string/JSON work
-  and unit-tested:
+- **`Sources/ReaderKit`** — Foundation-only. Must stay free of AppKit/WebKit/UIKit so every
+  host depends on it unchanged — including the Android one, which compiles it for
+  `aarch64-unknown-linux-android28`. Everything here is pure string/JSON work and
+  unit-tested:
+  - `ReaderSession.swift` + `+Messages.swift` + `+Sync.swift` — **the reader itself**: which
+    of our pages is on screen, when a page is offered to Readability, what each of the
+    seventeen script messages means, and what to draw next. It touches no web view: every
+    answer is a `[ReaderCommand]` the host runs (`.load`, `.show`, `.evaluate`, `.extract`,
+    `.reject`, `.openExternally`, `.presentSyncSetup`, `.fetchSuggestions`, `.resolveSource`).
+    All three hosts drive this one implementation — which is the point, since the fourth
+    cannot even be written in Swift.
+  - `ReaderCommand+JSON.swift` — the same commands and the posted-message shapes as JSON, for
+    a host that is not written in Swift. It lives here rather than beside the JNI facade
+    because `ReaderKitAndroid` is only in the package while cross-compiling, so nothing there
+    is reachable from a test; `ReaderCommandJSONTests` pins every `kind` string Kotlin matches.
   - `Reader.swift` — `Article`, `ReaderSettings` (appearance, tolerant JSON codec),
     `Reader.extractionScript` (Readability over a cloned document), `ReaderPage.html`.
   - `ReaderChrome.swift` — the Aa popover, recents popover, theme palette, and scroll-progress
@@ -111,6 +123,22 @@ dependencies:
   `OmarchyTheme.swift` and `XDG.swift`
   are the platform services. There is **no menu bar**: the WM owns quit and the window verbs,
   WebKitGTK owns the edit verbs, and the web shell already carries the rest.
+- **`Sources/ReaderKitAndroid`** — the reader as two C functions, `readerkit_call(name, json)`
+  and `readerkit_free`, built into `libReaderKitAndroid.so` by the Swift SDK for Android. One
+  dispatcher rather than a function per operation: JNI is at its least troublesome when it
+  carries only strings, and adding a call touches the switch and the Kotlin side that names
+  it, never the C shim or the build. The session it holds owns its own persistence
+  (`FileStore` + `ArticleCache` in the app's own directories, like the Linux host), so Kotlin
+  has no preference keys and no state schema.
+- **`Sources/CReaderKitJNI`** — the `Java_dk_yepz_webreader_ReaderBridge_call` entry point in
+  C, because the symbol name and the `JNIEnv` calling convention are `jni.h`'s to define. It
+  transcodes UTF-16 to UTF-8 by hand rather than using `GetStringUTFChars`: JNI's "UTF-8" is
+  Modified UTF-8, which would turn any astral character in an article into `U+FFFD`.
+- **`android/`** — the Kotlin host (issue #9). One Activity over a `WebView`, the `readerHost`
+  JavaScript interface, `ACTION_VIEW` + `ACTION_SEND` intent filters, and the Storage Access
+  Framework for sync's folder. `Scripts/build-android.sh` must run first: it fills
+  `app/src/main/jniLibs/` with the `.so` and the Swift runtime, ~104 MB per ABI of build
+  output that is gitignored. See `android/README.md`.
 
 ### Rules that aren't obvious from the code
 
@@ -119,6 +147,13 @@ dependencies:
 - Page state (`isShowingStartPage`, `isShowingFallback`, `isShowingReader`,
   `pendingReaderRender`) is tracked with explicit flags, not inferred from `webView.url`. The
   flags also gate every script message handler so a live site can't post to them.
+- `ReaderSession` is **single-threaded, and says so**. A host either drives it from one thread
+  (the Apple hosts, from the main actor) or serialises its calls (the Android facade, under
+  `Bridge`'s lock for the whole of a call, not just the session lookup). The only methods that
+  may be awaited off that thread are `suggestions(for:)` and `resolveSource(_:)`: they take a
+  value, reach nothing session-owned, and hand back an answer the caller applies through
+  `showSuggestions(_:)` / `sourceResolved(_:)`. Anything that reads `store`, the cache or
+  `pageState` from a second thread is a race, however small the window looks.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
   `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
   `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
@@ -382,14 +417,28 @@ xcrun simctl io booted screenshot /tmp/shot.png
 group=$(xcrun simctl get_app_container booted dk.yepz.webreader groups | cut -f2)
 xcrun simctl spawn booted defaults write \
   "$group/Library/Preferences/group.dk.yepz.webreader" reader.pendingOpen -string https://…
+
+# Android: the .so and its runtime first, then the APK. The open-source Swift toolchain is
+# mandatory — Xcode's cannot cross-compile at all, and reports the same version number while
+# producing incompatible .swiftmodule files, so the failure reads as "rebuild Foundation".
+ABIS="aarch64-unknown-linux-android28 x86_64-unknown-linux-android28" Scripts/build-android.sh
+(cd android && ./gradlew :app:assembleDebug)
+adb install -r android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+adb shell am start -n dk.yepz.webreader/.MainActivity -a android.intent.action.SEND \
+  -t text/plain --es android.intent.extra.TEXT "https://example.com/article"
+adb exec-out screencap -p > /tmp/shot.png
 ```
 
 `Package.swift` guards the AppKit host and `ReaderWebKit` behind `#if os(macOS)` and the
 `CWebKitGTK` + `WebReaderGTK` targets behind the `#else`, so `swift build`/`swift test` do the
-right thing on either OS and neither branch can break the other. On Linux, `Suggestions.swift`
-and `FeedFetcher.swift` need `FoundationXML`/`FoundationNetworking` — corelibs splits
-`XMLParser` and `URLSession` out of Foundation proper. Linux needs `gtk4` and `webkitgtk-6.0`
-(both in Arch `extra`) and a Swift toolchain, which on Arch is the AUR `swift-bin`.
+right thing on either OS and neither branch can break the other. Android is `WEBREADER_ANDROID=1`
+in the environment instead of a third `#if`, because the manifest is compiled and *run on the
+build machine*: `os()` names the Mac or the Linux box driving the cross-compile, never the
+phone, so an `#if os(Android)` branch would be dead while the `#else` wrongly claimed the
+build and demanded GTK. On Linux, `Suggestions.swift` and `FeedFetcher.swift` need
+`FoundationXML`/`FoundationNetworking` — corelibs splits `XMLParser` and `URLSession` out of
+Foundation proper. Linux needs `gtk4` and `webkitgtk-6.0` (both in Arch `extra`) and a Swift
+toolchain, which on Arch is the AUR `swift-bin`.
 
 The GTK host has no test target; the AppKit shell has none either, but the WKWebView half it
 used to contain now does — `Tests/ReaderWebKitTests` drives a real off-screen `WKWebView`,

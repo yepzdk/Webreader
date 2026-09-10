@@ -40,20 +40,22 @@ final class TouchLayoutTests: XCTestCase {
 
     // MARK: - The reveal that hid working controls
 
-    func testRowActionsAreHiddenOnlyWhereAPointerCanHover() {
-        // The defect this pins: `.row-actions { opacity: 0 }` with a `:hover` reveal made
-        // More/Less/Block permanently invisible AND unreachable on a touch screen. The rule
-        // has to be inside a `hover: hover` query — visible by default, hidden only where
-        // hovering is possible.
+    func testRowActionsAreRevealedByTheMenuAndNotByProximity() {
+        // Two defects, one after the other, and this is where they both landed. First
+        // `.row-actions { opacity: 0 }` with a `:hover` reveal, which made More/Less/Block
+        // invisible *and* unreachable on a touch screen. Then visible by default, which
+        // fixed the finger and left four icons beside every headline on a desktop — a
+        // toolbar per row, competing with the thing it belongs to.
+        //
+        // So: no proximity rule of any kind. The row's own button is the only way in, at
+        // every width and with any pointer.
         let css = StartPage.html(appName: "R")
-        guard let query = css.range(of: "@media (hover: hover) {"),
-              let hide = css.range(of: ".row-actions { opacity: 0; }") else {
-            return XCTFail("the row-action reveal must be gated on hover capability")
-        }
-        XCTAssertGreaterThan(hide.lowerBound, query.lowerBound,
-                             "opacity: 0 must sit inside the hover query, not before it")
-        // The keyboard route survives alongside the pointer one.
-        XCTAssertTrue(css.contains(".row-actions:focus-within { opacity: 1; }"))
+        XCTAssertFalse(css.contains("@media (hover: hover)"),
+                       "a hover reveal is back, and a finger cannot hover")
+        XCTAssertFalse(css.contains(".suggestion:hover .row-actions"))
+        XCTAssertTrue(css.contains(".row-actions {\n    flex: none; display: none;"),
+                      "the controls must start hidden")
+        XCTAssertTrue(css.contains(".suggestion[data-actions=\"open\"] .row-actions { display: flex; }"))
     }
 
     func testTheRowActionsReachTheFloorRatherThanPaddingTowardsIt() {
@@ -80,9 +82,9 @@ final class TouchLayoutTests: XCTestCase {
         // Each of these is a `position: fixed` element pinned to a window edge.
         let reader = ReaderPage.html(article: article)
         for offset in [
-            "top: calc(14px + env(safe-area-inset-top, 0px))",       // nav + controls
-            "bottom: calc(20px + env(safe-area-inset-bottom, 0px))", // toast
-            "top: env(safe-area-inset-top, 0px)",                    // progress hairline
+            "top: calc(14px + var(--safe-top))",       // nav + controls
+            "bottom: calc(20px + var(--safe-bottom))", // toast
+            "top: var(--safe-top)",                    // progress hairline
         ] {
             XCTAssertTrue(reader.contains(offset), offset)
         }
@@ -105,17 +107,31 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertFalse(ReaderChrome.viewportMeta.contains("user-scalable"))
     }
 
-    func testSafeAreaInsetsAlwaysCarryAnExplicitFallback() {
-        // `env()` with no fallback makes the whole declaration invalid on an engine that
-        // does not implement it — and an invalid declaration is dropped, so the chrome would
-        // lose its offset entirely rather than fall back to it. Every use must pass 0px.
+    func testEveryPageDefinesItsSafeAreaAndAndroidNeverAsksTwice() {
         for platform in Platform.allCases {
             for (name, html) in pages(platform) {
+                let page = "\(name) on \(platform.rawValue)"
+                // A page that reads `var(--safe-top)` without defining it loses the whole
+                // declaration around it, so every page has to carry all four — the offline
+                // page spells its own palette and forgot them exactly once.
+                for edge in ["top", "bottom", "left", "right"] {
+                    XCTAssertTrue(html.contains("--safe-\(edge):"), "\(page) is missing --safe-\(edge)")
+                }
+                // `env()` with no fallback makes the whole declaration invalid on an engine
+                // that does not implement it — and an invalid declaration is dropped, so the
+                // chrome would lose its offset entirely rather than fall back to it.
                 let uses = html.components(separatedBy: "env(safe-area-inset-").count - 1
                 let guarded = html.components(separatedBy: ", 0px)").count - 1
-                XCTAssertGreaterThan(uses, 0, "\(name) on \(platform.rawValue)")
-                XCTAssertEqual(uses, guarded,
-                               "\(name) on \(platform.rawValue) has an unguarded env()")
+                XCTAssertEqual(uses, guarded, "\(page) has an unguarded env()")
+                if platform == .android {
+                    // The host insets the web view by the union of the system bars, the cutout
+                    // and the keyboard, so a page that added `env()` on top would be inset
+                    // twice — 52px of camera cutout counted by both. That is what left the
+                    // reading-progress hairline hanging in an empty strip in full screen.
+                    XCTAssertEqual(uses, 0, "\(page) asks for an inset the host already applied")
+                } else {
+                    XCTAssertGreaterThan(uses, 0, "\(page) never asks for the safe area")
+                }
             }
         }
     }
@@ -139,10 +155,13 @@ final class TouchLayoutTests: XCTestCase {
         }
         let touch = String(css[coarse.lowerBound...])
         XCTAssertTrue(touch.contains("top: auto;"))
-        XCTAssertTrue(touch.contains("left: max(14px, env(safe-area-inset-left, 0px));"))
-        XCTAssertTrue(touch.contains("right: max(14px, env(safe-area-inset-right, 0px));"))
-        // Clear of the toggle: the 14px inset, the 44px button and the 10px column gap.
-        XCTAssertTrue(touch.contains("bottom: calc(68px"))
+        XCTAssertTrue(touch.contains("left: max(14px, var(--safe-left));"))
+        XCTAssertTrue(touch.contains("right: max(14px, var(--safe-right));"))
+        // Clear of the toggle: the 14px inset, the 48px toggle and the 10px column gap. The
+        // toggle is the larger target, so this is the number that has to move with it — a
+        // panel that cleared 44px would sit 4px inside the button it hangs from.
+        XCTAssertTrue(touch.contains("bottom: calc(72px"),
+                      "the panels must clear ReaderChrome.toggleTarget, not touchTarget")
         // And capped, so a landscape phone doesn't get an 816px band of 13px rows.
         XCTAssertTrue(touch.contains("max-width: 30rem; margin-left: auto;"))
     }
@@ -237,9 +256,9 @@ final class TouchLayoutTests: XCTestCase {
         // iPhone until these were insets rather than numbers.
         for html in [StartPage.html(appName: "R"), SettingsPage.html(appName: "R")] {
             XCTAssertTrue(html.contains(
-                "padding-top: calc(32px + env(safe-area-inset-top, 0px));"))
+                "padding-top: calc(32px + var(--safe-top));"))
             XCTAssertTrue(html.contains(
-                "padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));"))
+                "padding-bottom: calc(78px + var(--safe-bottom));"))
         }
         // The reader keeps its own 96px foot, and its head answers to whichever chrome is up
         // there: 48px of article headroom when the chrome has left for the bottom-right
@@ -248,13 +267,13 @@ final class TouchLayoutTests: XCTestCase {
         // second of those existed.
         let reader = ReaderPage.html(article: article)
         XCTAssertTrue(reader.contains(
-            "padding-top: calc(48px + env(safe-area-inset-top, 0px));"))
+            "padding-top: calc(48px + var(--safe-top));"))
         XCTAssertTrue(reader.contains(
-            "padding-top: calc(\(ReaderChrome.touchTopHeadroom)px + env(safe-area-inset-top, 0px));"))
+            "padding-top: calc(\(ReaderChrome.touchTopHeadroom)px + var(--safe-top));"))
         XCTAssertGreaterThan(ReaderChrome.touchTopHeadroom, ReaderChrome.touchTarget + 14,
                              "the article would start inside the chrome it is meant to clear")
         XCTAssertTrue(reader.contains(
-            "padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));"))
+            "padding-bottom: calc(96px + var(--safe-bottom));"))
     }
 
     func testANarrowPointerWindowStillClearsItsTopChrome() {
@@ -277,27 +296,31 @@ final class TouchLayoutTests: XCTestCase {
 
     // MARK: - The collapsing bottom-right chrome
 
-    func testHidingIsKeyedOnViewportSizeAndSizingOnThePointer() {
-        // The two questions are separate and were once conflated. *Whether* to hide the
-        // controls asks "is there room for them beside the article?" — a narrow desktop
-        // window answers that exactly as a phone does, and the distraction is the same
-        // whether a finger or a cursor put them there. *How big* to make them asks what is
-        // pointing at them, which a window width says nothing about.
+    func testCollapsingIsKeyedOnTheHandAndPlacementOnTheRoom() {
+        // Three questions, once conflated. *Whether* to collapse asks "is a hand doing the
+        // reaching?" — a tablet is roomy and still held, and the two top corners are the
+        // hardest places on a screen you are holding, so it collapses exactly as a phone
+        // does. *Where* the collapsed column sits asks how much room there is: the bottom
+        // corner on a phone, the middle of the edge on a tablet. *How big* the buttons are
+        // asks what is pointing at them.
         XCTAssertEqual(ReaderChrome.compactViewport, "(max-width: 48rem), (max-height: 30rem)")
         // Height as well as width: a phone in landscape is 844px wide and 390px tall, so a
         // width test alone would leave it with the top cluster eating a fifth of the screen.
         XCTAssertTrue(ReaderChrome.compactViewport.contains("max-height"))
-        // Sizing is the union: a tablet is roomy but touched, a narrow window is moused but
-        // cramped, and the floating column wants air around it in both.
+        // Collapsing and sizing ask the same question, so they are the same condition.
         XCTAssertEqual(ReaderChrome.comfortableChrome,
                        "(pointer: coarse), " + ReaderChrome.compactViewport)
-        // The layout follows the viewport…
+        XCTAssertEqual(ReaderChrome.collapsingChrome, ReaderChrome.comfortableChrome)
+        // The tablet case is the complement of the phone's, so the two can never both apply.
+        XCTAssertTrue(ReaderChrome.heldAndRoomy.contains("(pointer: coarse)"))
+        XCTAssertTrue(ReaderChrome.heldAndRoomy.contains("min-width: 48.01rem"))
+        XCTAssertTrue(ReaderChrome.heldAndRoomy.contains("min-height: 30.01rem"))
+        // The layout follows the hand…
         let chrome = ReaderChrome.chromeCSS()
-        XCTAssertTrue(chrome.contains("@media \(ReaderChrome.compactViewport) {"))
-        XCTAssertFalse(chrome.contains("@media (pointer: coarse) {"))
+        XCTAssertTrue(chrome.contains("@media \(ReaderChrome.collapsingChrome) {"))
         // …and the panel's position with it, while what is inside the panel does not.
         let controls = ReaderChrome.controlsCSS()
-        XCTAssertTrue(controls.contains("@media \(ReaderChrome.compactViewport) {"))
+        XCTAssertTrue(controls.contains("@media \(ReaderChrome.collapsingChrome) {"))
         XCTAssertTrue(controls.contains("@media (pointer: coarse) {"))
     }
 
@@ -306,8 +329,8 @@ final class TouchLayoutTests: XCTestCase {
         // phone to reach one-handed, and six always-visible buttons over prose compete with
         // the prose.
         let css = ReaderChrome.chromeCSS(collapsible: true)
-        XCTAssertTrue(css.contains("bottom: calc(14px + env(safe-area-inset-bottom, 0px));"))
-        XCTAssertTrue(css.contains("right: calc(14px + env(safe-area-inset-right, 0px));"))
+        XCTAssertTrue(css.contains("bottom: calc(14px + var(--safe-bottom));"))
+        XCTAssertTrue(css.contains("right: calc(14px + var(--safe-right));"))
         // Collapsed is the default, so the first paint is right without waiting for script.
         XCTAssertTrue(css.contains(collapseRule))
     }
@@ -322,18 +345,23 @@ final class TouchLayoutTests: XCTestCase {
         // property changed, and an earlier version of this test matched that comment.
         XCTAssertFalse(css.contains("visibility: hidden;"))
         XCTAssertFalse(css.contains("visibility: visible;"))
-        XCTAssertTrue(css.contains(collapseRule))
     }
 
-    func testTheRevealRuleDoesNotRestateADisplayTheButtonsDoNotShare() {
+    func testNoRevealRuleRestatesADisplayTheButtonsDoNotShare() {
         // These buttons do not compute one `display`: some are `flex`, some `inline-flex`.
-        // Written as a hidden rule plus a reveal rule, the reveal would have to name a
-        // single value and would quietly change half of them. `:not(...)` means a revealed
-        // button keeps whatever display it already had, so there is nothing to restate.
+        // A reveal rule naming a single value would quietly change half of them, which is why
+        // the collapse is written as `:not(...)`. Reveal rules may exist — the open column
+        // labels its buttons with one — they just may not touch `display`.
         let css = ReaderChrome.chromeCSS(collapsible: true)
         for id in ReaderChrome.stackButtonIDs {
-            XCTAssertFalse(css.contains("#\(id)[\(ReaderChrome.chromeOpenAttr)] {"),
-                           "\(id) has a reveal rule that restates its display")
+            var rest = Substring(css)
+            while let rule = rest.range(of: "#\(id)[\(ReaderChrome.chromeOpenAttr)] {") {
+                let body = rest[rule.upperBound...]
+                guard let close = body.range(of: "}") else { break }
+                XCTAssertFalse(body[..<close.lowerBound].contains("display:"),
+                               "\(id)'s reveal rule restates a display it does not share")
+                rest = body[close.upperBound...]
+            }
         }
     }
 
@@ -389,12 +417,113 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains("width: 44px; padding: 0;"))
         // And only in the column: a wider "Aa" beside narrower icons is right on a line.
         guard let square = css.range(of: "width: 44px; padding: 0;"),
-              let compact = css.range(of: "@media \(ReaderChrome.compactViewport) {",
-                                      options: .backwards,
-                                      range: css.startIndex..<square.lowerBound) else {
-            return XCTFail("the square must sit inside a compact-viewport block")
+              let collapsing = css.range(of: "@media \(ReaderChrome.collapsingChrome) {",
+                                         options: .backwards,
+                                         range: css.startIndex..<square.lowerBound) else {
+            return XCTFail("the square must sit inside a collapsing-chrome block")
         }
-        XCTAssertLessThan(compact.lowerBound, square.lowerBound)
+        XCTAssertLessThan(collapsing.lowerBound, square.lowerBound)
+    }
+
+    // MARK: - The held-and-roomy layout, and which edge it sits on
+
+    func testATabletPutsTheColumnInTheMiddleOfTheEdge() {
+        // The corners are the report: on a device you hold, the top two are the hardest
+        // places to reach and the bottom one is a stretch away from where the hand already
+        // is. The middle of the edge is neither.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        guard let tablet = css.range(of: "@media \(ReaderChrome.heldAndRoomy) {") else {
+            return XCTFail("no held-and-roomy block at all")
+        }
+        let rest = css[tablet.upperBound...]
+        XCTAssertTrue(rest.contains("top: 50%; bottom: auto; transform: translateY(-50%);"),
+                      "the column is not centred on the edge")
+        // The panels come with it, or a list opens at the far end of the screen from the
+        // button that opened it.
+        let panels = rest.components(separatedBy: "#readerPanel, #readerRecents, #readerHidden")
+        XCTAssertGreaterThan(panels.count, 1, "the panels stayed behind")
+        XCTAssertTrue(panels[1].contains("translateY(-50%)"))
+        // Beside the column rather than over it: 14px edge + 48px toggle + 10px gap.
+        XCTAssertTrue(panels[1].contains("right: calc(72px + var(--safe-right));"))
+    }
+
+    func testTheSideIsTheUsersAndOnlyTheSideMoves() {
+        let right = ReaderSettings()
+        var left = ReaderSettings()
+        left.controlSide = .left
+        // Absent at the default, like every other page attribute.
+        XCTAssertFalse(ReaderChrome.themeAttribute(right).contains("data-controls"))
+        XCTAssertTrue(ReaderChrome.themeAttribute(left).contains("data-controls=\"left\""))
+
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        // Every rule that names an edge has a mirror: the two fixed clusters, the column,
+        // the stack inside it, and the panels in both of the layouts that move them.
+        for mirrored in [":root[data-controls=\"left\"] .reader-nav { left: auto;",
+                         ":root[data-controls=\"left\"] .reader-controls { right: auto;",
+                         ":root[data-controls=\"left\"] .reader-chrome {",
+                         ":root[data-controls=\"left\"] .reader-chrome-stack { right: auto; left: 0; }"] {
+            XCTAssertTrue(css.contains(mirrored), "not mirrored: \(mirrored)")
+        }
+        // And nothing else does. A hand cannot change how big a button is, when the column
+        // collapses, or how tall a panel may be.
+        for untouched in ["min-height", "max-height", "width: 44px", "display: none"] {
+            let mirrors = css.components(separatedBy: ":root[data-controls=\"left\"]").dropFirst()
+            for mirror in mirrors {
+                let rule = mirror.prefix(while: { $0 != "}" })
+                XCTAssertFalse(rule.contains(untouched),
+                               "the side setting changes \(untouched), which is not its business")
+            }
+        }
+    }
+
+    func testEveryMirroredSelectorCarriesTheAttribute() {
+        // The bug this exists for: a qualifier written as a prefix on `a, b, c` lands on `a`
+        // alone, so `b` and `c` apply to every page. Two of the three panels took their
+        // left-handed position on a right-handed iPad and the recents list opened against
+        // the wrong edge — from one missing repetition, in valid CSS that nothing rejected.
+        let attribute = "[data-controls=\"left\"]"
+        for prelude in selectorLists(in: ReaderChrome.chromeCSS(collapsible: true))
+        where prelude.contains(attribute) {
+            for selector in prelude.components(separatedBy: ",")
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                .filter({ !$0.isEmpty })
+            where !selector.contains(attribute) {
+                XCTFail("`\(selector)` sits in a mirrored rule without the attribute, "
+                        + "so it applies to every page")
+            }
+        }
+    }
+
+    /// Every rule prelude in a stylesheet: the text before a `{` that is a selector list
+    /// rather than an at-rule condition, with comments taken out first so their prose cannot
+    /// be mistaken for a selector.
+    private func selectorLists(in css: String) -> [String] {
+        var stripped = ""
+        var rest = Substring(css)
+        while let start = rest.range(of: "/*") {
+            stripped += rest[rest.startIndex..<start.lowerBound]
+            guard let end = rest.range(of: "*/", range: start.upperBound..<rest.endIndex) else {
+                return []
+            }
+            rest = rest[end.upperBound...]
+        }
+        stripped += rest
+
+        var preludes: [String] = []
+        var buffer = ""
+        for character in stripped {
+            switch character {
+            case "{":
+                let prelude = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !prelude.isEmpty, !prelude.hasPrefix("@") { preludes.append(prelude) }
+                buffer = ""
+            case "}", ";":
+                buffer = ""
+            default:
+                buffer.append(character)
+            }
+        }
+        return preludes
     }
 
     func testTheStartPageSettingsButtonTradesItsWordForAnIconInTheColumn() {
@@ -508,5 +637,64 @@ final class TouchLayoutTests: XCTestCase {
         // And no route reaches a stack button's own focus() any more.
         XCTAssertFalse(html.contains("open.btn.focus()"))
         XCTAssertFalse(html.contains("recentsBtn.focus()"))
+    }
+
+    func testTheWidthSettingBecomesTheGutterOnACompactViewport() {
+        // A phone's viewport is about 26rem and the narrowest `max-width` is 36rem, so on a
+        // phone none of the three can ever bind and the control did nothing at all. What is
+        // left to vary is the gutter.
+        let widths = ReaderSettings.Width.allCases
+        XCTAssertEqual(Set(widths.map(\.compactGutter)).count, widths.count,
+                       "each width has to mean a different gutter, or the control still does nothing")
+        // `normal` stays where the 24px baseline was on a 411px screen, so the default reads
+        // exactly as it did before.
+        XCTAssertEqual(ReaderSettings.Width.normal.compactGutter, "6%")
+
+        // Emitted for the page, and read only inside the compact block: a desktop keeps its
+        // centred column.
+        var settings = ReaderSettings()
+        settings.width = .narrow
+        let reader = ReaderPage.html(article: article, settings: settings)
+        XCTAssertTrue(reader.contains("--reader-gutter: 12%;"))
+        guard let gutter = reader.range(of: "padding-left: max(var(--reader-gutter)"),
+              let compact = reader.range(of: "@media \(ReaderChrome.compactViewport) {",
+                                         options: String.CompareOptions.backwards,
+                                         range: reader.startIndex..<gutter.lowerBound) else {
+            return XCTFail("the gutter must sit inside a compact-viewport block")
+        }
+        XCTAssertLessThan(compact.lowerBound, gutter.lowerBound)
+        // And the Aa popover moves it live, or the setting only answers after a re-render.
+        XCTAssertTrue(reader.contains("root.style.setProperty('--reader-gutter', GUTTERS[s.width]);"))
+    }
+
+    func testASuggestedRowsControlsCollapseBehindOneButtonAtEveryWidth() {
+        let start = StartPage.html(appName: "R")
+        // Not a question of room any more. Three 44px targets beside a title leave a phone
+        // about 270px of headline, which is what started this — but four icons beside every
+        // headline in a roomy window is a toolbar per row, and the row's own menu answers
+        // both. So the collapse is unconditional: no media query may gate it.
+        XCTAssertTrue(start.contains(".row-menu"))
+        XCTAssertTrue(start.contains(".row-menu {\n    display: flex;"),
+                      "the menu must be present at every width")
+        for gate in ["@media \(ReaderChrome.compactViewport) {\n    .row-menu",
+                     "@media \(ReaderChrome.compactViewport) {\n    .suggestion"] {
+            XCTAssertFalse(start.contains(gate), "the collapse is gated on the viewport again")
+        }
+        // Opening one swaps the button out for the controls, so the row keeps its width.
+        XCTAssertTrue(start.contains(".suggestion[data-actions=\"open\"] .row-menu { display: none; }"))
+        XCTAssertTrue(start.contains(".suggestion[data-actions=\"open\"] .row-actions { display: flex; }"))
+        // And the button is a real disclosure, not a decoration: it starts closed, says so
+        // when it opens, and says so again on every path that closes it — the X, an opinion
+        // that has been registered, and opening a different row.
+        XCTAssertTrue(start.contains("setAttribute('aria-expanded', 'false')"))
+        XCTAssertTrue(start.contains("setAttribute('aria-expanded', 'true')"))
+        XCTAssertTrue(start.contains("function closeRowMenu(suggestion)"))
+        // The X closes the menu; blocking an outlet has its own mark, because an X beside two
+        // opinions read as "dismiss this" and did something much harder to undo.
+        XCTAssertTrue(start.contains("action('close', 'Hide options', ICON_CLOSE)"))
+        XCTAssertFalse(start.contains("var ICON_BLOCK = '<svg width=\"13\" height=\"13\" "
+            + "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" "
+            + "stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg>'"),
+            "the ban control must not be the same X the close control uses")
     }
 }

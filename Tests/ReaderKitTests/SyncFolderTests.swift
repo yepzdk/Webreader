@@ -184,4 +184,49 @@ final class SyncFolderTests: XCTestCase {
 
         XCTAssertEqual(store.values, before)
     }
+
+    // MARK: - A cycle with no filesystem
+
+    func testACycleRunsOnDeviceFilesHeldInMemory() throws {
+        // The shape Android needs: the host reads the document tree itself, hands the states
+        // over, and takes back what to write. No path, no `FileManager`, no callback into
+        // the host mid-cycle — the same fold, driven from memory.
+        let store = MemoryStore()
+        ReaderStore.setSettings(ReaderSettings(), store: store, at: 100)
+        var theirs = ReaderSettings()
+        theirs.theme = .black
+        let files = MemoryDeviceFiles(states: [
+            state(them, settings: theirs, settingsUpdatedAt: 200,
+                  titles: [("Theirs", "https://a.test/theirs", 210)], writtenAt: 220),
+        ])
+
+        let result = try SyncEngine(folder: files, store: store, device: me,
+                                    clock: { 500 }).sync()
+
+        XCTAssertTrue(result.changedSettings)
+        XCTAssertTrue(result.changedHistory)
+        XCTAssertEqual(result.peers, ["The iPad"])
+        XCTAssertEqual(ReaderStore.settings(store: store).theme, .black)
+        XCTAssertEqual(ReaderStore.history(store: store).entries.map(\.title), ["Theirs"])
+        // And it says what to publish rather than publishing it.
+        XCTAssertEqual(files.written?.device, me)
+        XCTAssertEqual(files.written?.settings.theme, .black)
+    }
+
+    func testAnInMemoryCycleThatLearnedNothingAsksForNoWrite() throws {
+        // The same restraint the folder has: a host that writes anyway hands its sync client
+        // an upload with no news in it, which on a metered phone is the whole cost of sync.
+        let store = MemoryStore()
+        ReaderStore.setSettings(ReaderSettings(), store: store, at: 100)
+        var history = ReaderHistory()
+        history.record(title: "Read", url: "https://a.test/read", at: 110)
+        ReaderStore.setHistory(history, store: store)
+        let published = DeviceState(device: me, writtenAt: 300, settingsUpdatedAt: 100,
+                                    settings: ReaderSettings(), history: history)
+        let files = MemoryDeviceFiles(states: [published])
+
+        _ = try SyncEngine(folder: files, store: store, device: me, clock: { 500 }).sync()
+
+        XCTAssertNil(files.written)
+    }
 }

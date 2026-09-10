@@ -198,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ReaderHostServices {
         case #selector(copyCurrentURL(_:)):
             return WebURL.urlToCopy(currentURL: controller?.webView.url) != nil
         case #selector(goBack(_:)):
-            return controller?.webView.canGoBack ?? false
+            return controller?.canGoBack ?? false
         case #selector(goForward(_:)):
             return controller?.webView.canGoForward ?? false
         case #selector(toggleReader(_:)):
@@ -221,7 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ReaderHostServices {
     }
 
     @objc private func reloadPage(_ sender: Any?) { controller.reload() }
-    @objc private func goBack(_ sender: Any?) { controller.webView.goBack() }
+    @objc private func goBack(_ sender: Any?) { controller.back() }
     @objc private func goForward(_ sender: Any?) { controller.webView.goForward() }
     @objc private func goHome(_ sender: Any?) { controller.showStartPage() }
     @objc private func showSettings(_ sender: Any?) { controller.showSettingsPage() }

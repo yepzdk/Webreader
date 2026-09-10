@@ -1,5 +1,6 @@
 // swift-tools-version:5.9
 import PackageDescription
+import Foundation
 
 // The AppKit host only exists on macOS. Guarding the target (rather than relying on the
 // `platforms:` list, which SwiftPM only consults for Apple platforms) is what lets
@@ -44,6 +45,29 @@ let hostTargets: [Target] = [
 ]
 #endif
 
+// Android is opt-in through the environment rather than `#if os(Android)` because this
+// manifest is compiled and *run on the build machine*: `os()` names the Mac or the Linux box
+// driving the cross-compile, never the phone. An `#if os(Android)` branch would be dead code
+// while the `#else` above wrongly claimed the build and asked for GTK. `WEBREADER_ANDROID=1`
+// (set by Scripts/build-android.sh) replaces whichever host was chosen above with the single
+// shared library Gradle packages into the APK.
+let androidHost = ProcessInfo.processInfo.environment["WEBREADER_ANDROID"] != nil
+
+// `.dynamic` because Java loads it by name: `System.loadLibrary("ReaderKitAndroid")` wants
+// libReaderKitAndroid.so. CReaderKitJNI is listed in the product rather than depended on,
+// because the dependency runs the other way — the shim calls Swift's `@_cdecl` exports and
+// nothing in Swift imports the shim, so being part of the product is what gets it linked.
+let androidProducts: [Product] = [
+    .library(name: "ReaderKitAndroid", type: .dynamic, targets: ["ReaderKitAndroid", "CReaderKitJNI"])
+]
+let androidTargets: [Target] = [
+    // The `Java_…` entry points, in C: the symbol names and the JNIEnv calling convention are
+    // jni.h's to define, and a C leaf keeps both out of Swift's name mangling.
+    .target(name: "CReaderKitJNI"),
+    // The `@_cdecl` surface over ReaderKit that CReaderKitJNI calls through.
+    .target(name: "ReaderKitAndroid", dependencies: ["ReaderKit"])
+]
+
 let package = Package(
     name: "webreader",
     platforms: [
@@ -51,11 +75,12 @@ let package = Package(
         .iOS(.v16),
     ],
     products: [
-        // Platform-neutral reader logic, shared by the macOS app and the future iOS app.
+        // Platform-neutral reader logic — the pages, the rules and the session every host
+        // drives. Shared by the Mac, the iPhone, Linux, and Android over JNI.
         .library(name: "ReaderKit", targets: ["ReaderKit"]),
-    ] + hostProducts,
+    ] + (androidHost ? androidProducts : hostProducts),
     targets: [
         .target(name: "ReaderKit"),
         .testTarget(name: "ReaderKitTests", dependencies: ["ReaderKit"]),
-    ] + hostTargets
+    ] + (androidHost ? androidTargets : hostTargets)
 )

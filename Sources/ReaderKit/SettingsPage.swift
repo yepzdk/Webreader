@@ -79,6 +79,31 @@ public enum SettingsPage {
                 </label>
               </div>
         """
+        // Which of the start page's two lists leads. A checkbox, not a pair of segmented
+        // buttons like the Aa popover's: the choice is two-way and every switch on this page
+        // is a checkbox. What it writes is still an enum (`StartPageOrder`), so the stored
+        // value says which order it means rather than which box happened to be ticked.
+        let suggestionsFirst = settings.startPageOrder == .suggestionsFirst ? " checked" : ""
+        let controlsLeft = settings.controlSide == .left ? " checked" : ""
+        let sideSection = """
+        <h2 class="section">Reader controls</h2>
+              <p class="help" id="sideHelp">On a touch screen the reader\'s buttons collapse
+              into one column against an edge, in reach of the hand holding the device. Pick
+              the edge.</p>
+              <label class="check">
+                <input id="controlSide" type="checkbox" aria-describedby="sideHelp"\(controlsLeft)>
+                <span>Put the reader\'s controls on the left</span>
+              </label>
+        """
+        let orderSection = """
+        <h2 class="section">Start page</h2>
+              <p class="help" id="orderHelp">Recent articles lead the page. Turn this on to
+              land on the suggestions instead, without scrolling past your own history.</p>
+              <label class="check">
+                <input id="startPageOrder" type="checkbox" aria-describedby="orderHelp"\(suggestionsFirst)>
+                <span>Show suggested articles before recent articles</span>
+              </label>
+        """
         // Only shown once something is blocked: an empty section on first run is noise, and
         // rows are added from the start page, not typed in here.
         let blocked = suggestions.blockedHosts.sorted()
@@ -160,14 +185,14 @@ public enum SettingsPage {
                breakpoint. */
             padding-top: 56px;
             padding-bottom: 48px;
-            padding-left: max(16px, env(safe-area-inset-left, 0px));
-            padding-right: max(16px, env(safe-area-inset-right, 0px));
+            padding-left: max(16px, var(--safe-left));
+            padding-right: max(16px, var(--safe-right));
           }
           @media (min-width: 34rem) and (pointer: fine) {
             main {
               padding-top: 10vh; padding-bottom: 64px;
-              padding-left: max(24px, env(safe-area-inset-left, 0px));
-              padding-right: max(24px, env(safe-area-inset-right, 0px));
+              padding-left: max(24px, var(--safe-left));
+              padding-right: max(24px, var(--safe-right));
             }
           }
           /* Last, so it wins at every width. On a compact viewport the chrome is a floating
@@ -331,6 +356,10 @@ public enum SettingsPage {
 
             \(imagesSection)
 
+            \(orderSection)
+
+            \(sideSection)
+
             \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
           </main>
           <script>
@@ -471,6 +500,28 @@ public enum SettingsPage {
                 post('readerSettings', change);
               });
             });
+
+            // The start page's section order, posted a key at a time for the same reason the
+            // switches above are. Ticked means suggestions first; the value spells the order
+            // out rather than sending a boolean, because that is what is stored.
+            var order = document.getElementById('startPageOrder');
+            if (order) {
+              order.addEventListener('change', function () {
+                post('readerSettings', {
+                  startPageOrder: order.checked ? 'suggestionsFirst' : 'recentsFirst'
+                });
+              });
+            }
+
+            // Which edge the reader's chrome sits against. Ticked means left; the value
+            // names the side rather than sending a boolean, for the same reason the order
+            // switch above spells its order out.
+            var side = document.getElementById('controlSide');
+            if (side) {
+              side.addEventListener('change', function () {
+                post('readerSettings', { controlSide: side.checked ? 'left' : 'right' });
+              });
+            }
 
             // Absent on a host that has no sync sheet to open (see `syncSection`), so both
             // halves check before touching it.

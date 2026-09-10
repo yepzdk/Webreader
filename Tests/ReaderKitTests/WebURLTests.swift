@@ -56,6 +56,56 @@ final class ClipboardURLTests: XCTestCase {
     }
 }
 
+/// Sharing is a different affordance from pasting, so it has a different rule — see
+/// `WebURL.sharedURL`. These pin the difference, because collapsing the two is the tempting
+/// simplification that would either break paste or break sharing.
+final class SharedURLTests: XCTestCase {
+    func testABareLinkIsTakenAsIs() {
+        XCTAssertEqual(WebURL.sharedURL(from: "https://example.com/a"),
+                       URL(string: "https://example.com/a"))
+        // And the paste rule's forgiveness still applies to a share of a bare host.
+        XCTAssertEqual(WebURL.sharedURL(from: "example.com/a"),
+                       URL(string: "https://example.com/a"))
+    }
+
+    func testALinkWrappedInAHeadlineIsFound() {
+        // What Chrome, Reddit and most Android apps actually put in an ACTION_SEND extra.
+        XCTAssertEqual(WebURL.sharedURL(from: "Worth reading: https://example.com/a"),
+                       URL(string: "https://example.com/a"))
+        XCTAssertEqual(WebURL.sharedURL(from: "https://example.com/a — via Someone"),
+                       URL(string: "https://example.com/a"))
+    }
+
+    func testTrailingSentencePunctuationIsNotPartOfTheLink() {
+        XCTAssertEqual(WebURL.sharedURL(from: "Read this: https://example.com/a."),
+                       URL(string: "https://example.com/a"))
+    }
+
+    func testABracketTheAddressOpenedItselfStaysInTheLink() {
+        // Wikipedia's disambiguated titles are the common case, and truncating one opens a
+        // different page that usually does not exist.
+        XCTAssertEqual(WebURL.sharedURL(from: "Read https://en.wikipedia.org/wiki/Foo_(bar)"),
+                       URL(string: "https://en.wikipedia.org/wiki/Foo_(bar)"))
+        // A bracket the sentence opened is the sentence's, wherever the link sits in it.
+        XCTAssertEqual(WebURL.sharedURL(from: "Read (https://example.com/a) today"),
+                       URL(string: "https://example.com/a"))
+        XCTAssertEqual(WebURL.sharedURL(from: "Read \"https://example.com/a\"."),
+                       URL(string: "https://example.com/a"))
+    }
+
+    func testProseWithNoSchemeIsStillRefused() {
+        // A word with a dot in it is a word. Requiring the scheme once there is surrounding
+        // text is what keeps "See you on tuesday. we agreed" from becoming a navigation.
+        XCTAssertNil(WebURL.sharedURL(from: "See you on tuesday. we agreed"))
+        XCTAssertNil(WebURL.sharedURL(from: "Have a look at example.com/a"))
+    }
+
+    func testNonWebSchemesNeverNavigate() {
+        XCTAssertNil(WebURL.sharedURL(from: "Try javascript:alert(1) here"))
+        XCTAssertNil(WebURL.sharedURL(from: "file:///etc/passwd is interesting"))
+    }
+}
+
 final class IsWebURLTests: XCTestCase {
     func testAcceptsHTTPAndHTTPS() {
         XCTAssertTrue(WebURL.isWebURL(URL(string: "https://x.test")!))

@@ -43,4 +43,63 @@ public enum WebURL {
         guard let url = URL(string: "https://" + trimmed), url.host != nil else { return nil }
         return url
     }
+
+    /// Parses what another app *shared* into an openable web URL.
+    ///
+    /// Deliberately more forgiving than `clipboardURL`, and deliberately a separate rule.
+    /// Pasting is ambiguous — someone who pasted prose into a URL field probably mis-pasted,
+    /// so guessing at a link inside it would be wrong, which is why `clipboardURL` refuses
+    /// anything with a space in it. Sharing is not ambiguous: an app that puts "Some headline
+    /// https://example.com/x" in an ACTION_SEND extra is handing over that link, and on
+    /// Android that shape is the common case rather than the exception.
+    ///
+    /// An explicit scheme is required when the text is more than the link alone. A bare host
+    /// found in the middle of a sentence is a word that happens to contain a dot far more
+    /// often than it is an address.
+    public static func sharedURL(from raw: String?) -> URL? {
+        if let url = clipboardURL(from: raw) { return url }
+        guard let raw else { return nil }
+        for token in raw.split(whereSeparator: { $0.isWhitespace }) {
+            // Leading punctuation comes off first: a link the sentence wrapped in brackets or
+            // quotes is still the link that was handed over, and the scheme test below has to
+            // be able to see the scheme.
+            let candidate = token.drop(while: { openingPunctuation.contains($0) })
+            let lowered = candidate.lowercased()
+            guard lowered.hasPrefix("http://") || lowered.hasPrefix("https://") else { continue }
+            if let url = clipboardURL(from: withoutSentencePunctuation(candidate)) { return url }
+        }
+        return nil
+    }
+
+    private static let openingPunctuation: Set<Character> = ["(", "[", "{", "\"", "'", "\u{201C}", "\u{2018}"]
+    private static let closingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", "\"", "'", "\u{201D}", "\u{2019}"]
+    private static let bracketPairs: [Character: Character] = [")": "(", "]": "[", "}": "{"]
+
+    /// Drops what a sentence leaves on a link it ends with, and nothing more.
+    ///
+    /// A closing bracket is the sentence's only when the URL did not open it itself.
+    /// "…/wiki/Foo_(bar)" is an ordinary address, and trimming its bracket quietly opens a
+    /// different page that usually does not exist.
+    private static func withoutSentencePunctuation(_ token: Substring) -> String {
+        var end = token.endIndex
+        while end > token.startIndex {
+            let last = token.index(before: end)
+            let character = token[last]
+            if let opener = bracketPairs[character] {
+                // One pass, counting both: `count(where:)` is Swift 6, and the Mac app is
+                // built on an older toolchain on purpose (see .github/workflows/ci.yml).
+                var openers = 0
+                var closers = 0
+                for scanned in token[token.startIndex..<last] {
+                    if scanned == opener { openers += 1 }
+                    else if scanned == character { closers += 1 }
+                }
+                guard openers <= closers else { break }
+            } else if !closingPunctuation.contains(character) {
+                break
+            }
+            end = last
+        }
+        return String(token[token.startIndex..<end])
+    }
 }

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Material 3, DayNight, no action bar: the generated pages carry Home, Settings, Aa and
+         recents themselves, exactly as they do on iOS, so the app has no chrome of its own to
+         theme. What is left is the window background behind a page that has not painted yet,
+         and the accent the progress line takes. -->
+    <style name="Theme.WebReader" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- The pages are `viewport-fit=cover` and draw edge to edge; the system bars are
+             transparent so the page's own background reaches the physical edges. Their icon
+             contrast follows the window's light/dark mode, which is the same signal the
+             pages' `prefers-color-scheme` fallback reads. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <!-- The system's own scrim behind the bars would sit on top of the page's background
+             and read as a band of the wrong colour along each edge. -->
+        <item name="android:enforceStatusBarContrast" tools:targetApi="29">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+        <!-- What is behind a page that has not painted yet. `colorSurface` follows the
+             DayNight mode, so a cold start into a dark page does not flash white. -->
+        <item name="android:windowBackground">?attr/colorSurface</item>
+    </style>
+
+</resources>

@@ -32,15 +32,40 @@ enum ReaderChrome {
     /// corner or a home indicator cannot land on top of a control. On a desktop every
     /// inset is 0 and this is the fixed offset it has always been.
     ///
-    /// The two-argument `env()` is deliberate. With no fallback the declaration is invalid
-    /// in an engine that does not implement `env()`, and an invalid declaration is dropped
-    /// — so the chrome would lose its offset altogether rather than fall back to it.
+    /// The two-argument `env()` behind `--safe-*` is deliberate. With no fallback the
+    /// declaration is invalid in an engine that does not implement `env()`, and an invalid
+    /// declaration is dropped — so the chrome would lose its offset altogether rather than
+    /// fall back to it.
     ///
     /// Not private, and not only for chrome: a page's own content has to clear the top inset
     /// too. The start page's title sat under an iPhone's Dynamic Island until it did, and a
     /// second spelling of the same calc is how one page gets fixed and the others don't.
+    ///
+    /// The safe area arrives as `--safe-*` rather than `env(safe-area-inset-*)` directly,
+    /// because on one host the page is the wrong place to ask. Android's WebView answers
+    /// `env()` from display cutouts only — not the status bar, not the gesture bar — so the
+    /// host insets the web view itself, and a page that then added `env()` on top would be
+    /// inset twice: 52px of camera cutout counted once by the host and once again here. That
+    /// went unnoticed while the status bar filled the doubled band and became obvious the
+    /// moment the reader went full screen, with the progress hairline hanging in an empty
+    /// strip (see `safeAreaCSS`).
     static func inset(_ px: Int, _ edge: String) -> String {
-        "calc(\(px)px + env(safe-area-inset-\(edge), 0px))"
+        "calc(\(px)px + var(--safe-\(edge)))"
+    }
+
+    /// What `--safe-*` means on this platform.
+    ///
+    /// Every host that lets its pages reach the physical edges answers with the real insets.
+    /// Android's answers zero, because its host has already inset the web view by the union
+    /// of the system bars, the cutout and the keyboard — the pages there are laid out inside
+    /// a box that is already clear of all of it.
+    static func safeAreaCSS(platform: Platform) -> String {
+        let edges = ["top", "bottom", "left", "right"]
+        let values = edges.map { edge in
+            platform == .android ? "  --safe-\(edge): 0px;"
+                                 : "  --safe-\(edge): env(safe-area-inset-\(edge), 0px);"
+        }
+        return values.joined(separator: "\n")
     }
 
     /// The touch-target floor, in px. 44 is Apple's HIG figure and clears the 24px WCAG
@@ -53,6 +78,17 @@ enum ReaderChrome {
     /// Not private: every page states the same floor for its own controls, and a second
     /// copy of the number is how a floor drifts one control at a time.
     static let touchTarget = 44
+
+    /// The size of the one button that opens the others, in px.
+    ///
+    /// Larger than `touchTarget` on purpose. It is the only control on screen when the stack
+    /// is closed, so nothing beside it explains it, and it is the one a thumb reaches for
+    /// without looking — Material's own 48dp floor, where the rest sit on Apple's 44.
+    ///
+    /// Anything positioned by clearing the collapsed chrome measures *this*, not
+    /// `touchTarget`: the popovers hang from just above the toggle, and a panel that cleared
+    /// 44px would sit 4px into a 48px button.
+    static let toggleTarget = 48
 
     /// The `<meta name="viewport">` every generated page carries.
     ///
@@ -67,10 +103,16 @@ enum ReaderChrome {
     static let viewportMeta = "<meta name=\"viewport\" "
         + "content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
 
-    /// The single JS object name an Android host injects with
-    /// `WebViewCompat.addWebMessageListener`. Named here so the host and the page cannot
-    /// disagree about it, the way the message names themselves are agreed by being
-    /// spelled once in `ReaderChrome` and once in each host's registration list.
+    /// The single JS object name an Android host injects with `addJavascriptInterface`. Named
+    /// here so the host and the page cannot disagree about it, the way the message names
+    /// themselves are agreed by being spelled once in `ReaderChrome` and once in each host's
+    /// registration list.
+    ///
+    /// Injected for every document the web view loads, which is no wider than the WebKit
+    /// hosts' own `window.webkit.messageHandlers`: on all three, `PageState` is what actually
+    /// decides whether a message is honoured. `addWebMessageListener` would take origin
+    /// rules, but they could not help here — a reader document is loaded with the article's
+    /// own base URL, so its origin is the site's.
     static let androidBridge = "readerHost"
 
     /// `window.readerPost(name, body)` — the one route a generated page has to its host,
@@ -81,7 +123,7 @@ enum ReaderChrome {
     /// `window.webkit.messageHandlers` reference at every post site. `WKWebView` and
     /// WebKitGTK both expose that object under the same name, which is why the two current
     /// hosts never needed a seam; Android's WebView exposes no such thing. Its
-    /// `addWebMessageListener` bridge injects one named object whose `postMessage` takes a
+    /// `addJavascriptInterface` bridge injects one named object whose `postMessage` takes a
     /// single string, so there the name has to travel *with* the body as JSON and the host
     /// demultiplexes on the far side.
     ///
@@ -107,9 +149,10 @@ enum ReaderChrome {
         """
     }
 
-    /// The `data-theme`, `data-quotes` and `data-thumbs` attributes for `<html>`. Each is
-    /// absent at its default (`auto` follows the system; bordered quotes are the
-    /// stylesheet's baseline; thumbnails are on), so the stock page is attribute-free.
+    /// The `data-theme`, `data-quotes`, `data-thumbs`, `data-order` and `data-controls`
+    /// attributes for `<html>`. Each is absent at its default (`auto` follows the system;
+    /// bordered quotes are the stylesheet's baseline; thumbnails are on; recents lead the
+    /// start page; the chrome sits on the right), so the stock page is attribute-free.
     ///
     /// `thumbnails` is the scope of *this page's* lists — `.startPage` or `.reader` — because
     /// each page renders only its own, and a page with no lists at all (settings, offline)
@@ -121,6 +164,10 @@ enum ReaderChrome {
         return (settings.theme == .auto ? "" : " data-theme=\"\(settings.theme.rawValue)\"")
             + (settings.quoteStyle == .bordered ? "" : " data-quotes=\"\(settings.quoteStyle.rawValue)\"")
             + (thumbnails == .on ? "" : " data-thumbs=\"off\"")
+            + (settings.startPageOrder == .recentsFirst
+                ? "" : " data-order=\"\(settings.startPageOrder.rawValue)\"")
+            + (settings.controlSide == .right
+                ? "" : " data-controls=\"\(settings.controlSide.rawValue)\"")
     }
 
     /// The palette custom properties: light defaults, the dark media query, and the four
@@ -150,7 +197,9 @@ enum ReaderChrome {
           --reader-size: \(settings.fontSize)px;
           --reader-leading: \(settings.lineHeight.css);
           --reader-width: \(settings.width.css);
+          --reader-gutter: \(settings.width.compactGutter);
           --reader-font: \(settings.fontFamily.css(on: platform));
+        \(indent(safeAreaCSS(platform: platform), by: 0))
         }
         """]
         if hosted == nil {
@@ -448,7 +497,7 @@ enum ReaderChrome {
            `.reader-control` containing block without changing DOM ancestry, so
            `controlsScript`'s outside-click dismissal keys off the same `.reader-controls`
            it always did. */
-        @media \(compactViewport) {
+        @media \(collapsingChrome) {
           #readerPanel, #readerRecents, #readerHidden {
             position: fixed;
             /* Anchored to the bottom now, not the top: the chrome that opens these sits in
@@ -457,19 +506,19 @@ enum ReaderChrome {
                entirely. It grows upward from just above the toggle — which is all that is
                left on screen, because opening a panel collapses the stack. */
             top: auto;
-            bottom: calc(\(chromeEdge + touchTarget + chromeGap)px
-                         + env(safe-area-inset-bottom, 0px));
-            left: max(\(chromeEdge)px, env(safe-area-inset-left, 0px));
-            right: max(\(chromeEdge)px, env(safe-area-inset-right, 0px));
+            bottom: calc(\(chromeEdge + toggleTarget + chromeGap)px
+                         + var(--safe-bottom));
+            left: max(\(chromeEdge)px, var(--safe-left));
+            right: max(\(chromeEdge)px, var(--safe-right));
             width: auto;
             /* Full width on a portrait phone, but a landscape one is 844px wide and a
                816px band of 13px rows is not a list anyone wants to read. Capped, and
                pushed back to the right so it still reads as hanging from the cluster that
                opened it. */
             max-width: 30rem; margin-left: auto;
-            max-height: calc(100vh - \(chromeEdge * 2 + touchTarget + chromeGap)px
-                             - env(safe-area-inset-top, 0px)
-                             - env(safe-area-inset-bottom, 0px));
+            max-height: calc(100vh - \(chromeEdge * 2 + toggleTarget + chromeGap)px
+                             - var(--safe-top)
+                             - var(--safe-bottom));
             overflow-y: auto;
           }
         }
@@ -529,6 +578,56 @@ enum ReaderChrome {
         "<div id=\"readerToast\" role=\"status\" aria-live=\"polite\"></div>"
     }
 
+    /// The offer at the end of an article: two or three things to read next, so finishing
+    /// one is not a dead end that has to be walked back out of.
+    ///
+    /// Ships hidden and empty. The ranking arrives from the host long after the page — or
+    /// never, on a device with no network or no sources — and an empty "Read next" under an
+    /// article would be a promise the page could not keep.
+    static func readNextMarkup() -> String {
+        """
+        <section id="readNext" hidden aria-labelledby="readNextLabel">
+              <h2 id="readNextLabel">Read next</h2>
+              <div id="readNextList"></div>
+            </section>
+        """
+    }
+
+    /// The end-of-article offer. Rows are the same `.recent` rows as everywhere else; what
+    /// this adds is where they sit and what they are set in.
+    static func readNextCSS(platform: Platform = .macOS) -> String {
+        """
+        /* Chrome, not content: these are other people's headlines, so they take the app's
+           sans face at a fixed size rather than the reading settings — the same rows, in the
+           same face, as the popover that offers the same list. `.recent` says
+           `font-family: inherit`, which inside an article would be the reading serif. */
+        #readNext {
+          margin: 44px 0 0; padding-top: 18px;
+          border-top: 1px solid var(--border);
+          font-family: \(platform.sansStack);
+        }
+        #readNext[hidden] { display: none; }
+        #readNextLabel {
+          margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+          text-transform: uppercase; color: var(--muted);
+        }
+        /* Pulled out by its own padding so the titles line up with the article's text and
+           only the hover background reaches past it. */
+        #readNextList { margin: 0 -8px; }
+        #readNext .recent { font-size: 14px; padding: 9px 8px; }
+        /* Two lines, clamped: a full-width row rarely needs the second, and a headline that
+           does should not push the next row down a line on a phone. */
+        #readNext .recent-title {
+          white-space: normal;
+          display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        }
+        #readNext .recent-host { font-size: 12px; }
+        @media (pointer: coarse) {
+          #readNext .recent { min-height: \(touchTarget)px; padding: 11px 8px; }
+        }
+        """
+    }
+
     /// Defines `window.readerToast(text)`. Text only — the message is set with `textContent`,
     /// so a host name from a feed can never become markup.
     static func toastScript() -> String {
@@ -558,7 +657,7 @@ enum ReaderChrome {
     static func progressCSS() -> String {
         """
         #readerProgress {
-          position: fixed; top: env(safe-area-inset-top, 0px); left: 0; width: 100%;
+          position: fixed; top: var(--safe-top); left: 0; width: 100%;
           height: \(LoadProgress.lineThickness)px; z-index: 9;
           /* Foreground, not accent: the native page-load line is accent-colored, and a
              blue hairline sitting still at 30% reads as a stuck load. */
@@ -612,10 +711,10 @@ enum ReaderChrome {
         #readerBackdrop {
           position: fixed; top: 0; left: 0; right: 0; z-index: 7;
           height: calc(\(chromeEdge + touchTarget + backdropFade)px
-                       + env(safe-area-inset-top, 0px));
+                       + var(--safe-top));
           pointer-events: none;
           background: linear-gradient(to bottom, var(--bg) 0%,
-            var(--bg) calc(\(chromeEdge + touchTarget)px + env(safe-area-inset-top, 0px)),
+            var(--bg) calc(\(chromeEdge + touchTarget)px + var(--safe-top)),
             transparent 100%);
         }
         @media \(compactViewport) {
@@ -709,6 +808,21 @@ enum ReaderChrome {
     /// the two top corners — keeps its original density.
     static let comfortableChrome = "(pointer: coarse), " + compactViewport
 
+    /// Where the chrome collapses into one column behind a single button.
+    ///
+    /// The same set as `comfortableChrome`, and deliberately the same: what makes the two
+    /// corners wrong is a hand, not a screen size. A tablet is roomy and still held, so the
+    /// corner a mouse reaches for nothing is the hardest place on it — and the phone's
+    /// answer, one column with everything behind one button, is the right answer there too.
+    /// `heldAndRoomy` then decides where that column sits.
+    static let collapsingChrome = comfortableChrome
+
+    /// A tablet: touched, but with room to spare — the one case that is neither the phone's
+    /// cramped screen nor a desk with a mouse on it. Written as the complement of
+    /// `compactViewport` so the two can never both apply, hence the hundredths.
+    static let heldAndRoomy =
+        "(pointer: coarse) and (min-width: 48.01rem) and (min-height: 30.01rem)"
+
     /// Wraps the nav slot and the control cluster in one element, plus — where a page has
     /// more than one control — the button that reveals them.
     ///
@@ -739,14 +853,18 @@ enum ReaderChrome {
         let toggle = !collapsible ? "" : """
         <button id="readerChromeToggle" type="button" aria-label="Show reader controls"
                   title="Reader controls" aria-expanded="false" aria-controls="readerChromeStack">
-            <!-- ellipsis-vertical, Lucide-style line icon; swapped for the X when open -->
-            <svg class="chrome-toggle-open" width="15" height="15" viewBox="0 0 24 24"
+            <!-- menu, Lucide-style line icon; swapped for the X when open.
+
+                 Three lines rather than three dots: a suggested row's own menu is the
+                 vertical ellipsis, and the two buttons sit on the same screen. Identical
+                 glyphs for "the app's controls" and "this row's options" read as the same
+                 control twice, so the one that opens everything takes the heavier mark. -->
+            <svg class="chrome-toggle-open" width="19" height="19" viewBox="0 0 24 24"
                  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                  aria-hidden="true">
-              <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/>
-              <circle cx="12" cy="19" r="1"/>
+              <path d="M4 7h16M4 12h16M4 17h16"/>
             </svg>
-            <svg class="chrome-toggle-close" width="15" height="15" viewBox="0 0 24 24"
+            <svg class="chrome-toggle-close" width="19" height="19" viewBox="0 0 24 24"
                  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                  aria-hidden="true">
               <path d="M18 6 6 18M6 6l12 12"/>
@@ -829,6 +947,42 @@ enum ReaderChrome {
             position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
           }
         """
+        // Which buttons are labelled, and when. A page whose chrome collapses labels what it
+        // reveals; a page with one button that is never hidden labels it outright, because a
+        // lone icon in a corner is the same question with no way to ask it.
+        let labelled = collapsible
+            ? selector(stackButtonIDs, suffix: "[\(chromeOpenAttr)]")
+            : selector(stackButtonIDs)
+        let labelledBefore = collapsible
+            ? selector(stackButtonIDs, suffix: "[\(chromeOpenAttr)]::before")
+            : selector(stackButtonIDs, suffix: "::before")
+        let labelling = """
+          /* The controls say what they are. Seven icons in a column is a quiz — and the answer
+             was already in the markup, since every one of them carries the `aria-label` a
+             screen reader reads. Taken from there rather than written a second time: a label
+             that can disagree with the one being announced is worse than no label.
+
+             Every one of them, including "Aa". Its two letters are a convention this app
+             cannot assume anyone knows, and the single unlabelled button in a column of
+             labelled ones reads as an oversight rather than as self-evident.
+
+             Only in this layout. On a roomy pointer these sit in two top corners with room to
+             hover, and each already carries a `title` — so the answer there is a tooltip,
+             which costs no space at all. A permanent word beside each would be a toolbar,
+             which is the thing this chrome exists not to be.
+
+             No `display` here, deliberately. These buttons do not share one — some compute
+             `flex`, some `inline-flex` — and a rule that named a single value would quietly
+             change half of them. */
+          \(labelled) {
+            width: auto; padding: 0 14px; gap: 10px;
+          }
+          \(labelledBefore) {
+            content: attr(aria-label);
+            font-family: inherit; font-size: 14px; font-weight: 500;
+            color: var(--fg); white-space: nowrap;
+          }
+        """
         return """
         /* A fixed layer in both layouts — never `display: contents`, see the note above.
            Roomy: the clusters are `position: fixed` to their own corners, so this holds
@@ -847,7 +1001,7 @@ enum ReaderChrome {
           display: flex; flex-direction: column-reverse; align-items: flex-end;
           gap: \(chromeGap)px;
         }
-        @media \(compactViewport) {
+        @media \(collapsingChrome) {
           /* The two clusters stop being fixed and become rows of the column. */
           .reader-nav, .reader-controls {
             position: static; top: auto; right: auto; left: auto;
@@ -866,7 +1020,7 @@ enum ReaderChrome {
         #readerChromeToggle { display: none; }
         /* The roomy slot says the word and hides the icon; the column reverses it below. */
         #startSettings .nav-icon { display: none; }
-        @media \(compactViewport) {
+        @media \(collapsingChrome) {
           #readerChromeToggle {
             display: inline-flex; align-items: center; justify-content: center;
           }
@@ -879,6 +1033,93 @@ enum ReaderChrome {
           }
           #startSettings .nav-label { display: none; }
           #startSettings .nav-icon { display: block; }
+          /* The button that opens everything is the one thing on screen with nothing beside
+             it to explain it, so it is deliberately larger than what it reveals. */
+          #readerChromeToggle {
+            width: \(toggleTarget)px; min-width: \(toggleTarget)px;
+            min-height: \(toggleTarget)px;
+          }
+        \(labelling)
+        }
+        \(sideCSS())
+        """
+    }
+
+    /// Where the collapsed column sits, and which edge it sits against.
+    ///
+    /// Last in the stylesheet on purpose: every rule here overrides one above it, and source
+    /// order settles that without a specificity fight.
+    static func sideCSS() -> String {
+        let panelIDs = ["#readerPanel", "#readerRecents", "#readerHidden"]
+        let panels = panelIDs.joined(separator: ", ")
+        let root = ":root[data-controls=\"left\"]"
+        /// A qualifier applies to one selector, not to a list: written as a prefix on
+        /// `a, b, c` it lands on `a` alone and the rest apply to every page. Measured — two
+        /// of the three panels took their mirrored position on a right-handed iPad, which
+        /// put the recents list against the wrong edge.
+        func onLeft(_ selectors: [String]) -> String {
+            selectors.map { "\(root) \($0)" }.joined(separator: ",\n")
+        }
+        let left = root
+        // Clear of the column, so a panel opens beside the buttons rather than over them.
+        let besideColumn = chromeEdge + toggleTarget + chromeGap
+        return """
+        /* A tablet, held. The column goes to the middle of the edge: the shortest reach for
+           the thumb of the hand holding it, and the one place on a tall screen that is
+           equally close whichever way up it is.
+
+           Anchored by its bottom edge, at half the viewport less half the toggle, and
+           deliberately *not* with `transform: translateY(-50%)`. Two reasons, both measured.
+           A transform makes the element a containing block for `position: fixed`
+           descendants, and the panels are exactly that — one resolved its `right` against a
+           48px button instead of the viewport and opened 10px off the far edge of an iPad.
+           And the toggle is the last child of a column that grows upward, so centring the
+           *box* would drop the toggle by half the column's height the moment it opened,
+           moving the button out from under the finger that just pressed it. Centring the
+           bottom edge instead leaves it still. */
+        @media \(heldAndRoomy) {
+          .reader-chrome {
+            top: auto; bottom: calc(50% - \(toggleTarget / 2)px);
+          }
+          /* The panels follow, and open beside the column rather than above it: a list
+             growing upward from mid-screen would end up back in the corner this layout
+             exists to leave. Their own transform is harmless — nothing inside them is
+             fixed. */
+          \(panels) {
+            top: 50%; bottom: auto; transform: translateY(-50%);
+            left: auto; right: calc(\(besideColumn)px + var(--safe-right));
+            width: min(30rem, calc(100vw - \(besideColumn + chromeEdge * 2)px));
+            max-width: none; margin-left: 0;
+            max-height: calc(100vh - \(chromeEdge * 2)px
+                             - var(--safe-top) - var(--safe-bottom));
+          }
+        }
+        /* The other edge, for the hand that holds the other side. Only the rules that name a
+           side are mirrored: how big the buttons are, when they collapse and where they sit
+           vertically are the layout's business, not the hand's. */
+        \(left) .reader-nav { left: auto; right: \(inset(14, "right")); }
+        \(left) .reader-controls { right: auto; left: \(inset(14, "left")); }
+        \(left) .reader-chrome {
+          right: auto; left: \(inset(chromeEdge, "left"));
+        }
+        /* Each panel hangs from a button anchored to the other edge now, so it grows the
+           other way. */
+        \(onLeft(panelIDs)) { right: auto; left: 0; }
+        @media \(collapsingChrome) {
+          \(left) .reader-chrome,
+          \(left) .reader-chrome-stack,
+          \(left) .reader-nav,
+          \(left) .reader-controls { align-items: flex-start; }
+          \(left) .reader-chrome-stack { right: auto; left: 0; }
+          /* Spanning both edges with the cap pushed to the near side, as before — the near
+             side is just the other one. */
+          \(onLeft(panelIDs)) { margin-left: 0; margin-right: auto; }
+        }
+        @media \(heldAndRoomy) {
+          \(onLeft(panelIDs)) {
+            right: auto; left: calc(\(besideColumn)px + var(--safe-left));
+            margin-right: 0;
+          }
         }
         """
     }
@@ -989,6 +1230,11 @@ enum ReaderChrome {
     static let popoverRecents = 5
     static let popoverSuggestions = 5
 
+    /// How many suggestions the end of an article carries. Fewer than the popover's, and
+    /// deliberately: the popover is a list you went looking for, and this is an offer made
+    /// to someone who has just finished reading. Three is a choice; five is a homepage.
+    static let readNextSuggestions = 3
+
     /// The recents popover's contents: the recents group — heading, rows, and the clear
     /// action — then the suggested group the host fills in later.
     ///
@@ -1066,7 +1312,7 @@ enum ReaderChrome {
         """
         <div class="reader-nav">
           <button id="startSettings" type="button" aria-label="Settings"
-                  onclick="readerPost('readerOpenSettings', '')">
+                  title="Settings" onclick="readerPost('readerOpenSettings', '')">
             <!-- settings-2 (sliders), Lucide-style line icon; shown only in the column -->
             <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -1239,6 +1485,7 @@ enum ReaderChrome {
           var MIN = \(ReaderSettings.fontSizeRange.lowerBound), MAX = \(ReaderSettings.fontSizeRange.upperBound);
           var FONTS = { serif: '\(serif)', sans: '\(sans)' };
           var WIDTHS = { narrow: '\(ReaderSettings.Width.narrow.css)', normal: '\(ReaderSettings.Width.normal.css)', wide: '\(ReaderSettings.Width.wide.css)' };
+          var GUTTERS = { narrow: '\(ReaderSettings.Width.narrow.compactGutter)', normal: '\(ReaderSettings.Width.normal.compactGutter)', wide: '\(ReaderSettings.Width.wide.compactGutter)' };
           var LEADINGS = { compact: '\(ReaderSettings.LineHeight.compact.css)', normal: '\(ReaderSettings.LineHeight.normal.css)', relaxed: '\(ReaderSettings.LineHeight.relaxed.css)' };
           var root = document.documentElement;
           var btn = document.getElementById('readerAa');
@@ -1300,6 +1547,9 @@ enum ReaderChrome {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
             root.style.setProperty('--reader-font', FONTS[s.fontFamily]);
             root.style.setProperty('--reader-width', WIDTHS[s.width]);
+            // The compact layout reads this instead; setting both is what makes the control
+            // answer on a phone as immediately as it does on a desktop.
+            root.style.setProperty('--reader-gutter', GUTTERS[s.width]);
             root.style.setProperty('--reader-leading', LEADINGS[s.lineHeight]);
             if (s.theme === 'auto') { root.removeAttribute('data-theme'); }
             else { root.setAttribute('data-theme', s.theme); }
@@ -1311,6 +1561,17 @@ enum ReaderChrome {
             if (s[THUMBS] === 'off') { root.setAttribute('data-thumbs', 'off'); }
             else { root.removeAttribute('data-thumbs'); }
             window.readerRevealThumbs();
+            // Only the start page has two sections to put in an order, but the attribute is
+            // set here for the reason `data-quotes` is set on pages that hold no quotations:
+            // one field, one attribute, on whichever page this is. The stylesheet that acts
+            // on it is the page-specific half.
+            if (s.startPageOrder === 'suggestionsFirst') { root.setAttribute('data-order', 'suggestionsFirst'); }
+            else { root.removeAttribute('data-order'); }
+            // The edge the chrome sits against, applied the same way and for the same
+            // reason: a change made in Settings reaches an article already on screen, and
+            // the buttons move under the hand rather than at the next render.
+            if (s.controlSide === 'left') { root.setAttribute('data-controls', 'left'); }
+            else { root.removeAttribute('data-controls'); }
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });
@@ -1552,62 +1813,81 @@ enum ReaderChrome {
               readerPost('readerOpen', row.dataset.url);
             });
           }
-          // The panel's second group: what to read next, so finishing an article doesn't
-          // mean going home first (#33). Delivered by the host long after the page — or
-          // never, which is why the group ships hidden.
+          // What to read next, in two places on this page: the popover's second group (#33)
+          // and the block at the end of the article, which is where finishing one leaves
+          // you. Both are the same host call, the same ranking and the same rows — the only
+          // difference is how many. Delivered long after the page, or never, which is why
+          // both ship hidden.
           //
           // Plain rows, unlike the start page's: More/Less/Block are gated to that page,
           // three icon buttons don't fit a 280px row, and this page already carries its own
-          // rating pair for the article on screen. Defined only where the container exists,
-          // so the start page's richer implementation of the same host call is never
-          // shadowed by this one, whatever order the scripts run in.
+          // rating pair for the article on screen. Defined only where a container exists, so
+          // the start page's richer implementation of the same host call is never shadowed by
+          // this one, whatever order the scripts run in.
           var suggested = document.getElementById('readerSuggested');
           var suggestedList = document.getElementById('readerSuggestedList');
-          if (suggested && suggestedList) {
-            window.readerSetSuggestions = function (items) {
-              var rows = (items || []).slice(0, \(popoverSuggestions));
-              suggestedList.textContent = '';
-              if (!rows.length) { suggested.hidden = true; return; }
+          var readNext = document.getElementById('readNext');
+          var readNextList = document.getElementById('readNextList');
+          if ((suggested && suggestedList) || (readNext && readNextList)) {
+            // One row, built once. Titles and outlet names come from other people's feeds:
+            // text, never markup.
+            var suggestionRow = function (item, thumbs) {
+              var row = document.createElement('button');
+              row.className = 'recent';
+              row.type = 'button';
+              row.dataset.url = item.url;
+              if (thumbs && item.image) {
+                var thumb = document.createElement('img');
+                thumb.className = 'recent-thumb';
+                thumb.alt = '';
+                thumb.loading = 'lazy';
+                thumb.referrerPolicy = 'no-referrer';
+                thumb.dataset.src = item.image;
+                thumb.onerror = function () {
+                  thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
+                  thumb.remove();
+                };
+                row.appendChild(thumb);
+              } else if (thumbs) {
+                row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
+              }
+              var title = document.createElement('span');
+              title.className = 'recent-title';
+              title.textContent = item.title;
+              var source = document.createElement('span');
+              source.className = 'recent-host';
+              source.textContent = item.source || '';
+              row.appendChild(title);
+              row.appendChild(source);
+              return row;
+            };
+            var fillSuggestions = function (section, list, items, limit) {
+              if (!section || !list) { return; }
+              var rows = (items || []).slice(0, limit);
+              list.textContent = '';
+              if (!rows.length) { section.hidden = true; return; }
               // Same rule as every other list: a column only where this one brought images.
               var thumbs = rows.some(function (item) { return !!item.image; });
-              rows.forEach(function (item) {
-                var row = document.createElement('button');
-                row.className = 'recent';
-                row.type = 'button';
-                row.dataset.url = item.url;
-                if (thumbs && item.image) {
-                  var thumb = document.createElement('img');
-                  thumb.className = 'recent-thumb';
-                  thumb.alt = '';
-                  thumb.loading = 'lazy';
-                  thumb.referrerPolicy = 'no-referrer';
-                  thumb.dataset.src = item.image;
-                  thumb.onerror = function () {
-                    thumb.insertAdjacentHTML('afterend', window.readerThumbPlaceholder);
-                    thumb.remove();
-                  };
-                  row.appendChild(thumb);
-                } else if (thumbs) {
-                  row.insertAdjacentHTML('afterbegin', window.readerThumbPlaceholder);
-                }
-                // Titles and outlet names come from other people's feeds: text, never markup.
-                var title = document.createElement('span');
-                title.className = 'recent-title';
-                title.textContent = item.title;
-                var source = document.createElement('span');
-                source.className = 'recent-host';
-                source.textContent = item.source || '';
-                row.appendChild(title);
-                row.appendChild(source);
-                suggestedList.appendChild(row);
-              });
-              suggestedList.classList.toggle('has-thumbs', thumbs);
+              rows.forEach(function (item) { list.appendChild(suggestionRow(item, thumbs)); });
+              list.classList.toggle('has-thumbs', thumbs);
               // Unhide first: the reveal withholds a src while the row is still behind a
-              // `hidden` ancestor. The panel itself may well be closed, in which case
-              // `setOpen` reveals these when it is opened.
-              suggested.hidden = false;
+              // `hidden` ancestor. The popover may well be closed, in which case `setOpen`
+              // reveals those when it is opened.
+              section.hidden = false;
+            };
+            window.readerSetSuggestions = function (items) {
+              fillSuggestions(suggested, suggestedList, items, \(popoverSuggestions));
+              fillSuggestions(readNext, readNextList, items, \(readNextSuggestions));
               if (window.readerRevealThumbs) { window.readerRevealThumbs(); }
             };
+            // The end-of-article rows are outside the popover, so they need their own
+            // handler: the panel's covers only what is inside it.
+            if (readNextList) {
+              readNextList.addEventListener('click', function (e) {
+                var row = e.target.closest('button[data-url]');
+                if (row) { readerPost('readerOpen', row.dataset.url); }
+              });
+            }
           }
           document.addEventListener('click', function (e) {
             if (!e.target.closest('.reader-controls')) { setOpen(null); }

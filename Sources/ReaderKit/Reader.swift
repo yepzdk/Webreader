@@ -6,7 +6,7 @@ import Foundation
 
 /// An article extracted by Readability, decoded from its `parse()` result. Codable both
 /// ways: the same shape is what `ArticleCache` keeps on disk.
-public struct Article: Codable, Equatable {
+public struct Article: Codable, Equatable, Sendable {
     public let title: String
     public let byline: String?
     public let siteName: String?
@@ -78,6 +78,22 @@ public struct ReaderSettings: Equatable, Sendable {
             case .wide: return "52rem"
             }
         }
+
+        /// What the setting means where `css` cannot mean anything.
+        ///
+        /// A phone's viewport is about 26rem, so every one of those three max-widths is wider
+        /// than the screen and the control does nothing at all there. The measure that is left
+        /// is the gutter, so on a compact viewport the setting picks that instead: `normal`
+        /// stays where the 24px baseline already was, and the other two are visibly narrower
+        /// and wider than it. A percentage rather than pixels, because a 320px phone and a
+        /// 480px one want the same proportion, not the same margin.
+        var compactGutter: String {
+            switch self {
+            case .narrow: return "12%"
+            case .normal: return "6%"
+            case .wide: return "2%"
+            }
+        }
     }
 
     public enum LineHeight: String, CaseIterable, Sendable {
@@ -111,6 +127,23 @@ public struct ReaderSettings: Equatable, Sendable {
         case on, off
     }
 
+    /// Which of the start page's two lists comes first. An enum rather than a Bool for the
+    /// same reason `ArticleImages` is one: it decodes, encodes and falls back to the default
+    /// exactly like every other setting.
+    public enum StartPageOrder: String, CaseIterable, Sendable {
+        case recentsFirst, suggestionsFirst
+    }
+
+    /// Which edge the reader's controls sit against.
+    ///
+    /// A handedness setting, and only a touch device can have one: a tablet is held, and the
+    /// hand holding it is the hand that reaches the chrome. Where a mouse does the reaching
+    /// the corner it starts from costs nothing, so the pointer layouts read this too but
+    /// nobody has to.
+    public enum ControlSide: String, CaseIterable, Sendable {
+        case right, left
+    }
+
     public var fontSize = 17
     public var fontFamily = FontFamily.serif
     public var width = Width.normal
@@ -126,6 +159,17 @@ public struct ReaderSettings: Equatable, Sendable {
     /// which is what the start page did before #25.
     public var startPageThumbnails = ArticleImages.on
     public var readerThumbnails = ArticleImages.on
+    /// Which list the start page leads with. Recents by default, which is where the page has
+    /// always started; someone who mostly comes here to find something new scrolls past
+    /// their own history to reach it, and on a phone that history is the whole first screen.
+    ///
+    /// Unconditional, with no viewport branch: the cramped screen is what makes the order
+    /// matter, but a reader who wants suggestions first wants them first in a window too,
+    /// and one order is one thing to explain rather than two that disagree at 60rem.
+    public var startPageOrder = StartPageOrder.recentsFirst
+    /// The edge the reader's chrome sits against. Right by default, which is where it has
+    /// always been and which suits the majority hand.
+    public var controlSide = ControlSide.right
 
     public init() {}
 
@@ -174,6 +218,12 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["readerThumbnails"] as? String, let value = ArticleImages(rawValue: raw) {
             settings.readerThumbnails = value
         }
+        if let raw = dict["startPageOrder"] as? String, let value = StartPageOrder(rawValue: raw) {
+            settings.startPageOrder = value
+        }
+        if let raw = dict["controlSide"] as? String, let value = ControlSide(rawValue: raw) {
+            settings.controlSide = value
+        }
         return settings
     }
 
@@ -189,6 +239,8 @@ public struct ReaderSettings: Equatable, Sendable {
             "quoteStyle": quoteStyle.rawValue,
             "startPageThumbnails": startPageThumbnails.rawValue,
             "readerThumbnails": readerThumbnails.rawValue,
+            "startPageOrder": startPageOrder.rawValue,
+            "controlSide": controlSide.rawValue,
         ]
     }
 
@@ -233,6 +285,16 @@ public enum Reader {
     /// generator `<meta>`), instead of extracting the rendering a second time. `decode`
     /// treats it as "no article"; the host treats it as "already the reader".
     public static let ownPageSentinel = "webreader-page"
+
+    /// What `extractionScript` returns for a document that is not a web page at all — a feed,
+    /// an XML file, anything an engine chose to render as markup rather than hand back.
+    ///
+    /// Distinct from "not an article", which leaves the site on screen as the honest answer:
+    /// there is no site here to leave, only a file — and the two engines disagree about what
+    /// to do with one. WebKit refuses to display it and cancels the response; Chromium renders
+    /// its own XML view, which Readability will happily extract into an article made of angle
+    /// brackets. This is the one answer that covers both.
+    public static let notAPageSentinel = "webreader-not-a-page"
 
     /// Wraps inline quotations in `<span class="q">` so the page can style them, and marks a
     /// paragraph that opens with a quote `qp` (quotation plus attribution — the common shape
@@ -321,6 +383,12 @@ public enum Reader {
         \(quoteScript)
         \(leadImageScript)
         if (document.querySelector('meta[name="generator"][content="WebReader"]')) { return "\(ownPageSentinel)"; }
+        // Readability is for HTML. An engine that renders XML in place hands this script a
+        // perfectly parseable document whose "article" would be the markup itself.
+        var type = (document.contentType || '').toLowerCase();
+        if (type && type !== 'text/html' && type !== 'application/xhtml+xml') {
+          return "\(notAPageSentinel)";
+        }
         if (!isProbablyReaderable(document)) { return null; }
         var article = new Readability(document.cloneNode(true)).parse();
         if (!article || !article.content) { return null; }
@@ -348,8 +416,6 @@ public enum Reader {
     }
 }
 
-/// Renders an extracted article as the reader page. Shares the `--bg` light/dark
-/// pattern with `StartPage`/`OfflineFallback`.
 public enum ReaderPage {
     /// The complete reader document, loaded by the host as its OWN document via
     /// `loadHTMLString(_:baseURL:)` with the article URL as base — so relative image
@@ -429,8 +495,8 @@ public enum ReaderPage {
             max-width: var(--reader-width); margin: 0 auto;
             padding-top: \(ReaderChrome.inset(48, "top"));
             padding-bottom: \(ReaderChrome.inset(96, "bottom"));
-            padding-left: max(24px, env(safe-area-inset-left, 0px));
-            padding-right: max(24px, env(safe-area-inset-right, 0px));
+            padding-left: max(24px, var(--safe-left));
+            padding-right: max(24px, var(--safe-right));
           }
           /* Two overrides of the head, for the two things that can be up there.
 
@@ -446,7 +512,13 @@ public enum ReaderPage {
             main { padding-top: \(ReaderChrome.inset(ReaderChrome.touchTopHeadroom, "top")); }
           }
           @media \(ReaderChrome.compactViewport) {
-            main { padding-top: \(ReaderChrome.inset(48, "top")); }
+            main {
+              padding-top: \(ReaderChrome.inset(48, "top"));
+              /* Here the width setting is the gutter: `max-width` is unreachable on a screen
+                 narrower than the narrowest of them, so without this all three read alike. */
+              padding-left: max(var(--reader-gutter), var(--safe-left));
+              padding-right: max(var(--reader-gutter), var(--safe-right));
+            }
           }
           header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
           h1 { font-size: 1.65em; line-height: 1.25; letter-spacing: -0.01em; margin: 0; }
@@ -492,6 +564,7 @@ public enum ReaderPage {
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(ReaderChrome.readNextCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform,
                                                        collapsible: true), by: 10))
         </style>
@@ -514,6 +587,7 @@ public enum ReaderPage {
               \(metaLine)
             </header>
             <article>\(article.content)</article>
+            \(ReaderChrome.readNextMarkup())
           </main>
           \(ReaderChrome.toastMarkup())
           <script>

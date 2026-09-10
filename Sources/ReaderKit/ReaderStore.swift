@@ -27,6 +27,37 @@ public final class DefaultsStore: KeyValueStore, @unchecked Sendable {
     public func set(_ value: String?, forKey key: String) { defaults.set(value, forKey: key) }
 }
 
+/// `KeyValueStore` in memory.
+///
+/// Not a test double any more, though the tests are still its heaviest user: the Android
+/// facade seeds one from the state Kotlin passes in, runs whatever was asked for, and hands
+/// the changed keys back. Nothing on that path has a `UserDefaults` or a file to write, and
+/// a store that keeps its own copy is what makes the call a pure function.
+///
+/// Locked because sync writes it from its own queue while the UI reads it, which is the
+/// whole reason `KeyValueStore` is `Sendable`. Unchecked, like `FileStore`: the lock is what
+/// makes it safe, and the compiler cannot see that from a mutable stored property.
+public final class MemoryStore: KeyValueStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: String]
+
+    public init(_ values: [String: String] = [:]) {
+        storage = values
+    }
+
+    /// A snapshot, for a caller that needs every key at once — the Android facade returning
+    /// what a call changed, or a test asserting that nothing did.
+    public var values: [String: String] { lock.withLock { storage } }
+
+    public func string(forKey key: String) -> String? { lock.withLock { storage[key] } }
+
+    public func set(_ value: String?, forKey key: String) {
+        lock.withLock {
+            if let value { storage[key] = value } else { storage.removeValue(forKey: key) }
+        }
+    }
+}
+
 /// Reads and writes the reader's persisted state: appearance settings, the recents list,
 /// and page zoom. (De)serialization lives in `ReaderSettings`/`ReaderHistory`; this layer
 /// only owns the keys and the zoom bounds. Pure — the store is injected.
@@ -78,10 +109,12 @@ public enum ReaderStore {
     /// a presentation default, and this action offers no undo — clearing it lives behind
     /// its own affordance in the recents panel.
     ///
-    /// The two thumbnail switches survive for the same reason. They stopped being appearance
-    /// when they left the Aa popover for the settings page's own "Article images" section
-    /// (#33): one of their states means "fetch no images from publishers", and a menu item
-    /// called Reset Reader Appearance has no business turning that back on.
+    /// The two thumbnail switches survive for the same reason, and so does the start page's
+    /// section order. Neither is appearance: the switches stopped being it when they left the
+    /// Aa popover for the settings page's own "Article images" section (#33), and the order
+    /// was never in the popover at all. One thumbnail state means "fetch no images from
+    /// publishers", and a menu item called Reset Reader Appearance has no business turning
+    /// that back on — or deciding which list somebody's start page opens with.
     ///
     /// The reset is stamped like any other settings write, so it propagates to the other
     /// devices instead of being overwritten by their older settings on the next sync.
@@ -91,6 +124,7 @@ public enum ReaderStore {
         var stock = ReaderSettings()
         stock.startPageThumbnails = kept.startPageThumbnails
         stock.readerThumbnails = kept.readerThumbnails
+        stock.startPageOrder = kept.startPageOrder
         setSettings(stock, store: store, at: now)
         store.set(nil, forKey: Key.zoom)
     }

@@ -170,8 +170,9 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("readerBlockHost"))
         XCTAssertTrue(html.contains("'More like this'"))
         XCTAssertTrue(html.contains("'Less like this'"))
-        // Controls are revealed on hover but must stay keyboard-reachable.
-        XCTAssertTrue(html.contains(".row-actions:focus-within"))
+        // The controls live behind the row's own menu at every width, so the keyboard route
+        // in is that button — a real disclosure, which `TouchLayoutTests` pins in full.
+        XCTAssertTrue(html.contains("className = 'row-menu'"))
     }
 
     func testActionsConfirmWithAToast() {
@@ -377,18 +378,27 @@ final class StartPageTests: XCTestCase {
                                                     content: "<p>x</p>"))
         XCTAssertTrue(html.contains("if (img.closest('[hidden]')) { return; }"))
         XCTAssertTrue(html.contains("if (which) { window.readerRevealThumbs(); }"))
-        // …which only holds if a list is unhidden before it is revealed. Scoped to each
-        // page's OWN filler: the chrome script emits its copy first, so an unscoped search
-        // finds those two lines on both pages and the start page's ordering goes untested.
-        for (page, unhideLine) in [(html, "suggested.hidden = false;"),
-                                   (StartPage.html(appName: "Reader"), "section.hidden = false;")] {
-            let filler = try XCTUnwrap(page.range(of: "window.readerSetSuggestions = function (items) {",
-                                                  options: .backwards))
-            let own = page[filler.upperBound...]
-            let unhide = try XCTUnwrap(own.range(of: unhideLine))
-            let reveal = try XCTUnwrap(own.range(of: "window.readerRevealThumbs()"))
-            XCTAssertTrue(unhide.lowerBound < reveal.lowerBound, unhideLine)
-        }
+        // …which only holds if a list is unhidden before it is revealed.
+        //
+        // The reader page factors its two lists — the popover's group and the block at the
+        // end of the article — through one `fillSuggestions`, which unhides inside itself
+        // and is defined above the filler that calls it twice. So the guarantee is that the
+        // reveal comes after the last unhide, in document order.
+        let unhide = try XCTUnwrap(html.range(of: "section.hidden = false;", options: .backwards))
+        let reveal = try XCTUnwrap(html.range(of: "window.readerRevealThumbs()",
+                                              range: unhide.upperBound..<html.endIndex))
+        XCTAssertTrue(unhide.lowerBound < reveal.lowerBound,
+                      "the reader's lists are revealed before they are unhidden")
+        // The start page keeps its own filler. Scoped to it, because the chrome script emits
+        // its copy first and an unscoped search would test that one twice.
+        let start = StartPage.html(appName: "Reader")
+        let own = start[try XCTUnwrap(
+            start.range(of: "window.readerSetSuggestions = function (items) {",
+                        options: .backwards)).upperBound...]
+        let startUnhide = try XCTUnwrap(own.range(of: "section.hidden = false;"))
+        let startReveal = try XCTUnwrap(own.range(of: "window.readerRevealThumbs()"))
+        XCTAssertTrue(startUnhide.lowerBound < startReveal.lowerBound,
+                      "the start page's list is revealed before it is unhidden")
     }
 
     func testSuggestionRowsGetTheSameThumbnailAsRecents() {
@@ -435,6 +445,52 @@ final class StartPageTests: XCTestCase {
         }
     }
 
+    // MARK: - Which section leads
+
+    func testRecentsLeadWithNothingBakedIntoTheDocument() {
+        // The default is the page as it has always been, down to the html tag: a reader who
+        // never opens the setting must not be able to tell it exists.
+        XCTAssertTrue(StartPage.html(appName: "Reader").contains("<html lang=\"en\">"))
+    }
+
+    func testSuggestionsFirstIsBakedInForTheFirstPaint() {
+        var settings = ReaderSettings()
+        settings.startPageOrder = .suggestionsFirst
+        let html = StartPage.html(appName: "Reader", settings: settings)
+        XCTAssertTrue(html.contains("<html lang=\"en\" data-order=\"suggestionsFirst\">"))
+        // Ordered by CSS, so the document itself is untouched: the suggestions still arrive
+        // from the host into the section it wrote in the same place.
+        let recents = html.range(of: "class=\"recents-column\"")
+        let suggested = html.range(of: "<section id=\"suggested\"")
+        XCTAssertNotNil(recents)
+        XCTAssertNotNil(suggested)
+        XCTAssertTrue(recents!.lowerBound < suggested!.lowerBound)
+    }
+
+    func testBothLayoutsHonourTheOrder() {
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains(":root[data-order=\"suggestionsFirst\"] #suggested { order: -1; }"))
+        // The two-column layout gives its leading column a tighter heading; `:first-child`
+        // cannot follow `order`, so the reversed case says so itself.
+        XCTAssertTrue(html.contains(
+            ":root[data-order=\"suggestionsFirst\"] .recents-column .section { margin-top: 36px; }"))
+        XCTAssertTrue(html.contains(
+            ":root[data-order=\"suggestionsFirst\"] #suggested .section { margin-top: 28px; }"))
+    }
+
+    func testTheOrderChangesLiveWithoutARerender() {
+        // The settings page posts the key, the host pushes the stored settings back
+        // (`pushSettings`), and the shared chrome script moves the attribute — the same path
+        // the theme and the thumbnails take, so an open start page never has to be rebuilt.
+        let html = StartPage.html(appName: "Reader")
+        XCTAssertTrue(html.contains("window.readerSetSettings = function (next)"))
+        XCTAssertTrue(html.contains(
+            "if (s.startPageOrder === 'suggestionsFirst') { root.setAttribute('data-order', 'suggestionsFirst'); }"))
+        XCTAssertTrue(html.contains("else { root.removeAttribute('data-order'); }"))
+        // …and the script is seeded with the field, so a pushed payload has one to replace.
+        XCTAssertTrue(html.contains("\"startPageOrder\":\"recentsFirst\""))
+    }
+
     // MARK: - Nav slot
 
     func testSettingsSitsInTheTopLeftNavSlot() {
@@ -466,7 +522,7 @@ final class StartPageTests: XCTestCase {
         XCTAssertEqual(nav, topOffset(ReaderChrome.controlsCSS()))
         // And the offset is safe-area aware, with the explicit 0px fallback that keeps the
         // declaration valid on an engine without `env()`.
-        XCTAssertEqual(nav, "calc(14px + env(safe-area-inset-top, 0px))")
+        XCTAssertEqual(nav, "calc(14px + var(--safe-top))")
     }
 
     func testTheNavSlotIsNotAControlCluster() {

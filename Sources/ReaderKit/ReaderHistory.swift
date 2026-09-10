@@ -116,9 +116,16 @@ public struct ReaderHistory: Equatable, Sendable {
     /// the same cleaned key `record` was given. Internal on purpose: this is a view for one
     /// caller in this module, and a five-row `ReaderHistory` must never reach `setHistory`.
     func recents(limit: Int, excluding url: String? = nil) -> ReaderHistory {
+        // By the same-article key: the row for the article on screen is excluded even when
+        // it was recorded under a different spelling of its address than the one that
+        // reached this page.
+        let excluded = url.flatMap { URL(string: $0) }.map(URLCleaner.identity)
         var trimmed = ReaderHistory()
         trimmed.entries = entries
-            .filter { $0.url != url }
+            .filter { entry in
+                guard let excluded else { return true }
+                return URL(string: entry.url).map(URLCleaner.identity) != excluded
+            }
             .prefix(max(0, limit))
             .map { $0 }
         return trimmed

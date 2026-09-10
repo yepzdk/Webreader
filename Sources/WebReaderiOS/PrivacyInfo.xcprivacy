@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Apple rejects an upload that uses a required-reason API without declaring why, and this app
+  uses one: `UserDefaults`. Two reasons, because the code does both things — the reader's own
+  settings and history are its own defaults (CA92.1), and the link the share extension hands
+  over travels through the app group's (1C8F.1).
+
+  Nothing is collected. Feeds and articles are fetched from the publishers the user chose, and
+  what the app keeps — settings, recents, a cache — stays on the device unless the user points
+  Sync at a folder of their own. No analytics, no tracking, no third-party SDKs, so the
+  collected-data and tracking-domain lists are empty rather than absent, which says the same
+  thing deliberately.
+
+  ReaderKit is linked statically into this executable, so its use of the same API is covered
+  by this file; the share extension is a bundle of its own and carries its own.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+				<string>1C8F.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

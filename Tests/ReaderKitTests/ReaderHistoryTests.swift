@@ -147,6 +147,17 @@ final class ReaderHistoryTests: XCTestCase {
         XCTAssertEqual(excluded.entries.map(\.title), ["A7", "A6", "A5", "A4", "A3"])
     }
 
+    func testRecentsDropsTheArticleOnScreenUnderAnySpellingOfItsAddress() {
+        // The row is excluded because it is the article you are looking at, and "the same
+        // article" cannot mean "the same string": the feed link that reached this page and
+        // the address the site redirected to are both spellings of one piece of writing.
+        var history = ReaderHistory()
+        history.record(title: "On screen", url: "https://www.dr.dk/nyheder/x")
+        history.record(title: "Another", url: "https://dr.dk/nyheder/y")
+        let excluded = history.recents(limit: 5, excluding: "https://dr.dk/nyheder/x/")
+        XCTAssertEqual(excluded.entries.map(\.title), ["Another"])
+    }
+
     func testRecentsKeepsTheLeadImage() {
         // The popover's thumbnails hang off it, and every other thumbnail test reaches
         // `recentsRows` directly — so this hop is where an image could go missing unnoticed.

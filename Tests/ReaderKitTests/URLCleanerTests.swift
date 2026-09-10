@@ -102,4 +102,41 @@ final class URLCleanerTests: XCTestCase {
         let plain = "https://example.com/article?id=7"
         XCTAssertEqual(clean(plain), plain)
     }
+
+    // MARK: - The same-article key
+
+    func testIdentityIgnoresEverythingThatIsNotTheArticle() {
+        let key = "dr.dk/nyheder/x"
+        for spelling in ["https://dr.dk/nyheder/x",
+                         "https://www.dr.dk/nyheder/x",
+                         "http://dr.dk/nyheder/x",
+                         "https://DR.dk/nyheder/x",
+                         "https://dr.dk/nyheder/x/",
+                         "https://dr.dk/nyheder/x#comments",
+                         "https://dr.dk:443/nyheder/x",
+                         "https://dr.dk/nyheder/x?utm_source=rss"] {
+            XCTAssertEqual(URLCleaner.identity(URL(string: spelling)!), key, spelling)
+        }
+    }
+
+    func testIdentityKeepsWhatMakesAnArticleADifferentOne() {
+        // A query that selects content is part of the article; a port that is not the
+        // default is a different server.
+        XCTAssertNotEqual(URLCleaner.identity(URL(string: "https://a.test/x?p=2")!),
+                          URLCleaner.identity(URL(string: "https://a.test/x")!))
+        XCTAssertNotEqual(URLCleaner.identity(URL(string: "http://a.test:8080/x")!),
+                          URLCleaner.identity(URL(string: "http://a.test/x")!))
+        // A subdomain that is not `www` is a different site: dr.dk and sport.dr.dk are not
+        // spellings of each other.
+        XCTAssertNotEqual(URLCleaner.identity(URL(string: "https://sport.a.test/x")!),
+                          URLCleaner.identity(URL(string: "https://a.test/x")!))
+    }
+
+    func testCleaningStillNavigatesToTheAddressAsWritten() {
+        // `identity` normalises for comparison only. `clean` must keep the host exactly as
+        // written — plenty of sites answer on `www.` and nowhere else, and rewriting the
+        // address people asked for is how a working link becomes a 404.
+        XCTAssertEqual(clean("https://www.dr.dk/nyheder/x"), "https://www.dr.dk/nyheder/x")
+        XCTAssertEqual(clean("https://dr.dk/nyheder/x/"), "https://dr.dk/nyheder/x/")
+    }
 }

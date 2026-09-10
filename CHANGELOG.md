@@ -15,11 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   opens in the same reader page as the Mac, with the same appearance settings, the same
   recents, and sync to a folder you pick. Built from the same reader code as the Mac app,
   not a second copy of it.
+- **WebReader on Android** (#9). Open a link from any app or share one to WebReader and it
+  lands in the same reader page as everywhere else, with the same appearance settings and
+  recents, synced through a folder you pick. The reader logic is the same compiled code as
+  the Mac's — ReaderKit runs natively on Android — so the two cannot drift apart. Adding a
+  suggestion source needs the feed's own address there for now; a bare site address finds
+  nothing.
+- **Choose what the start page leads with.** Settings now has a Start page section: recent
+  articles first, as before, or suggested articles first.
+- **A feed address offers to become a source** (#43). Open one and the page says what it is
+  and offers to add it to suggested articles, rather than only telling you there is nothing
+  to read.
+- **On a tablet the reader's controls sit in the middle of an edge**, behind one button, in
+  reach of the hand holding it — the two top corners are the hardest places to reach on a
+  screen you are holding. Settings picks the edge: right, or left.
+- **An article ends with three things to read next.** Finishing one meant going back to the
+  start page to find another; the same ranked suggestions the reader's popover already
+  carried now sit at the end of the article too, and open on a tap.
 
 ### Changed
-- The reader's WebKit half moves into a shared `ReaderWebKit` target (#6), so the coming
-  iPhone and iPad app runs the same page state, extraction and message handling as the Mac
-  rather than a second copy of it. No change to how the Mac app behaves.
+- The reader itself moves into `ReaderSession` (#6, #9): what the app decides — which page is
+  on screen, when an article is extracted, what each control does — is now one implementation
+  that every platform drives, and each host only carries the code that talks to its own web
+  view. No change to how the Mac app behaves.
+- **A shared link can carry a headline** (#9). Sharing "Worth reading: https://…" now opens
+  the link instead of refusing it. Pasting prose into the URL field is still refused: a paste
+  of a sentence is more likely a mistake than an invitation to guess.
 - **Recents live on the start page** (#32). The reader's recents popover duplicated the
   inline list and the hidden-text panel had no article to group against, so both leave the
   reader; hidden phrases move to the settings page, beside blocked outlets.
@@ -35,11 +56,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **The pages work on a touch screen** (#36). Controls reach a 44px target, popovers stay on
   screen and clear the safe areas, and the layout stops spending desktop gutters and 18vh of
   headroom on a phone. A roomy desktop window renders exactly as before.
-- **On a small viewport the reader's controls collapse into the bottom-right** (#36). Six
-  buttons over an article compete with it, and the top edge is hard to reach one-handed; one
-  button now opens them as a column. Window size triggers it, so narrow desktops get it too.
+- **The reader's controls collapse behind one button wherever a hand does the reaching**
+  (#36). Six buttons over an article compete with it, and the corners are hard to reach
+  one-handed; one button now opens them as a column. Any touch screen triggers it, and so
+  does a narrow desktop window.
+- **The compact chrome says what its controls are.** The button that opens them takes the
+  three-line mark and is a little larger — the vertical ellipsis now belongs to a suggested
+  row's own menu — and every control carries its name beside its icon, "Aa" included. A
+  roomy window keeps the icons alone, where hovering one already names it.
+- **A suggested row's controls live behind one button.** More, Less, Block and Hide sat
+  beside every headline, which read as clutter and spent width the headline wanted; tapping
+  the row's own menu now swaps them in, one row at a time, at every window size. Blocking an
+  outlet has its own mark, and the X beside it closes the menu rather than banning the
+  source.
 
 ### Fixed
+- **The article you had just read was offered again at the end of it.** A feed's address for
+  a story and the address the site redirects you to are not the same string —
+  `dr.dk/…` against `www.dr.dk/…` — so "already read" never matched and every article
+  suggested itself, with the rest of the list barely changing. The same story carried by two
+  feeds under two spellings also collapses into one row now.
+- **A feed address left the app with no way out.** Opening one — pasting it into Open URL from
+  Clipboard, say — showed either nothing at all or a page made of angle brackets, with none of
+  the reader's own chrome on it. It now says there is nothing to read there and offers Home.
+- **On Android a load that never landed never ended.** A site that answered and then went
+  silent left the app waiting behind a bare screen with the progress line sweeping, with
+  nothing to do but quit it. Such a load is now given up on after 20 seconds and reported as
+  the timeout it is, with Try Again. (WebKit raises its own timeout, so the Mac already had
+  an ending.)
+- **A glimpse of the site showed before the reader replaced it.** The cover came down as the
+  reader document was handed over rather than when it appeared, so the page it was about to
+  replace got a frame or two on screen.
+- **Back from an article returned to the same article** (#42). The web view's history holds
+  the page each article was extracted from, so going back through one extracted it again and
+  landed you where you started. Back now walks the reader's own places — the previous
+  article, or the page it came from — and from the start page it leaves the app.
+- **The reader's width setting did nothing on a narrow screen.** Below 48rem — a phone, or a
+  narrow window on a Mac — all three widths are wider than the viewport, so they looked
+  identical; the setting now picks the gutter instead. The default reads exactly as before.
 - **Buttons stayed on screen after collapsing the reader controls** (#36). Collapsing hid them
   but left their boxes standing, so parts of the column kept being drawn until the next window
   resize. The 140ms fade goes with the fix.

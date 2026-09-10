@@ -225,6 +225,35 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("if (!box) { return; }"))
     }
 
+    // MARK: - Start page order
+
+    func testTheStartPageOrderSwitchIsOffByDefault() {
+        let page = html()
+        XCTAssertTrue(page.contains("<h2 class=\"section\">Start page</h2>"))
+        // Unticked is the order the page already has, so the box says what it would change.
+        XCTAssertTrue(page.contains("id=\"startPageOrder\" type=\"checkbox\" aria-describedby=\"orderHelp\">"))
+        XCTAssertTrue(page.contains("<span>Show suggested articles before recent articles</span>"))
+        // Built from the same checkbox pattern as its neighbours, not a control of its own.
+        XCTAssertTrue(page.contains("<label class=\"check\">"))
+    }
+
+    func testTheSwitchReflectsAStoredSuggestionsFirst() {
+        var settings = ReaderSettings()
+        settings.startPageOrder = .suggestionsFirst
+        XCTAssertTrue(SettingsPage.html(appName: "WebReader", settings: settings)
+            .contains("id=\"startPageOrder\" type=\"checkbox\" aria-describedby=\"orderHelp\" checked>"))
+    }
+
+    func testTheOrderSwitchPostsTheOrderItMeans() {
+        // One key, like the thumbnail switches, and a value that names the order rather than
+        // a boolean the store would have to interpret.
+        let page = html()
+        XCTAssertTrue(page.contains("var order = document.getElementById('startPageOrder');"))
+        XCTAssertTrue(page.contains("if (order) {"))
+        XCTAssertTrue(page.contains(
+            "startPageOrder: order.checked ? 'suggestionsFirst' : 'recentsFirst'"))
+    }
+
     func testIdentifiesItselfForBackForwardRestoration() {
         XCTAssertTrue(html().contains("<meta name=\"generator\" content=\"WebReader Settings\">"))
     }

@@ -58,3 +58,115 @@ jobs:
         run: |
           bin_path="$(swift build --show-bin-path)"
           test -x "$bin_path/webreader"
+
+  # The engine half of the Android app. It runs in the Swift container because the Swift SDK
+  # for Android only works with a matching open-source toolchain — Xcode's cannot
+  # cross-compile at all, and the container's *is* the open-source one.
+  #
+  # The APK itself is not built here — the `apk` job below does that, without the NDK or a
+  # Swift toolchain. What this job catches is portability: a Foundation API that does not
+  # exist on Android, or a facade signature that drifts.
+  android:
+    runs-on: ubuntu-latest
+    container: swift:6.3-noble
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install unzip and curl
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get -q update
+          apt-get -q install -y curl unzip
+      # Both downloads are large and version-pinned, so they are worth caching: ~1 GB of NDK
+      # and ~1 GB of Swift SDK that change only when the pins below do.
+      #
+      # `/root/.swiftpm`, not `~/.swiftpm`: SwiftPM resolves its home from the passwd database
+      # rather than from HOME, and a container job here runs as root with HOME=/github/home.
+      # Caching the tilde path cached an empty directory, which is how this job first failed.
+      #
+      # Restore and save are separate on purpose. The combined action saves at the end of the
+      # job whether or not it passed, which means a run that died halfway through unpacking
+      # can publish a half-populated bundle that every later run then restores and trusts.
+      - name: Restore the Android NDK and the Swift SDK
+        id: android-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /root/.swiftpm/swift-sdks
+            /opt/android-ndk
+          key: android-sdk-swift-6.3.3-ndk-r27d
+      - name: Install the Swift SDK for Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Where SwiftPM will actually put it: its home comes from the passwd database, not
+          # from HOME, which this job's container remaps.
+          sdks="$(getent passwd "$(id -u)" | cut -d: -f6)/.swiftpm/swift-sdks"
+          # Keyed on the setup script rather than on `swift sdk list`, because a cache that
+          # restored a partial bundle answers the name question yes and the file question no —
+          # which is how this step first failed, with a "not found" that named a path the SDK
+          # was supposed to have put there.
+          setup="$(find "$sdks" -name setup-android-sdk.sh -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$setup" ]; then
+            rm -rf "$sdks"
+            swift sdk install \
+              https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz \
+              --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
+            setup="$(find "$sdks" -name setup-android-sdk.sh -type f | head -1 || true)"
+          fi
+          if [ -z "$setup" ]; then
+            echo "::error::the Swift SDK installed but has no setup-android-sdk.sh" >&2
+            swift sdk list >&2 || true
+            find "$sdks" -maxdepth 4 >&2 || true
+            exit 1
+          fi
+          if [ ! -x /opt/android-ndk/android-ndk-r27d/ndk-build ]; then
+            rm -rf /opt/android-ndk
+            mkdir -p /opt/android-ndk
+            curl -fsSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+            unzip -q /tmp/ndk.zip -d /opt/android-ndk
+          fi
+          # Through `bash`, so neither the executable bit nor the `#!/usr/bin/env bash`
+          # shebang has to survive extraction and caching intact.
+          ANDROID_NDK_HOME=/opt/android-ndk/android-ndk-r27d bash "$setup"
+      - name: Cross-build ReaderKit and the JNI facade
+        shell: bash
+        run: |
+          set -euo pipefail
+          ABIS="aarch64-unknown-linux-android28" Scripts/build-android.sh
+          test -f android/app/src/main/jniLibs/arm64-v8a/libReaderKitAndroid.so
+      # Only now, with a `.so` to show for it, is what we downloaded worth keeping.
+      - name: Save the Android NDK and the Swift SDK
+        if: steps.android-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /root/.swiftpm/swift-sdks
+            /opt/android-ndk
+          key: android-sdk-swift-6.3.3-ndk-r27d
+
+  # The Kotlin half, and the only place the Gradle build is exercised before a release runs
+  # `assembleRelease` for real. Deliberately independent of the `android` job above: the
+  # `.so`s are build outputs and are not in git, so this compiles against an absent
+  # `jniLibs` — which proves the Kotlin, the manifest, the resources and the lint baseline,
+  # and says nothing about whether `ReaderBridge`'s `native fun` finds its symbol at runtime.
+  # Cross-building the engine just to link it would double the job's cost to test nothing
+  # this job is about.
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 17, because that is what `compileOptions` targets and what `android/README.md`
+          # tells contributors to install. A newer JDK would pass here and still leave the
+          # documented setup untested.
+          java-version: '17'
+          cache: gradle
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Compile the Kotlin host and run lint
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug :app:lint

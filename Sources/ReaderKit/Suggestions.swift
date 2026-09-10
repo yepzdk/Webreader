@@ -375,7 +375,14 @@ public enum Feed {
     // ponytail: a regex over the head, not a DOM parse — the app's HTML parsing is
     // Readability's, in the web view, and this runs on a plain `URLSession` body.
     public static func discover(inHTML html: String, base: URL) -> [URL] {
-        let head = String(html.prefix(200_000))
+        // Bounded by `</head>`, not by a character count. A `<link rel="alternate">` is a head
+        // element, so that is the honest end of the search — and a fixed cap loses it on any
+        // page that inlines its stylesheets first: theguardian.com puts ~580 KB of them ahead
+        // of the tag, so a 200 KB cap made the paper look like it had no feed at all. Scanning
+        // a whole document with no `</head>` costs a regex pass over bytes already in memory,
+        // once, on a deliberate user action.
+        let head = html.range(of: "</head>", options: [.caseInsensitive])
+            .map { String(html[html.startIndex..<$0.lowerBound]) } ?? html
         let pattern = "<link\\b[^>]*>"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         else { return [] }
@@ -475,8 +482,11 @@ private final class FeedParser: NSObject, XMLParserDelegate {
     func parse(_ data: Data) -> Bool {
         let parser = XMLParser(data: data)
         parser.delegate = self
-        // A truncated or trailing-garbage feed still yields the items parsed so far.
-        parser.parse()
+        // A truncated or trailing-garbage feed still yields the items parsed so far, so the
+        // Bool is discarded on purpose — `isFeed` is the answer. Discarded explicitly because
+        // corelibs-Foundation does not mark `parse()` `@discardableResult` the way Darwin
+        // does, and the Android cross-build is the only place that warns.
+        _ = parser.parse()
         return isFeed
     }
 
@@ -651,7 +661,7 @@ public enum Suggestions {
 
     /// The best `limit` candidates for someone who has read `read` (newest first).
     ///
-    /// Items already in `readURLs`, in a filtered-out language, or duplicated across feeds
+    /// Items already read, in a filtered-out language, or duplicated across feeds
     /// are dropped; the rest are scored by cosine similarity between the item's title and a
     /// profile of the read articles (newer ones weigh more). With nothing read every score
     /// is 0 and the result is simply the newest candidates — the first-launch behavior.
@@ -662,6 +672,11 @@ public enum Suggestions {
                             blockedHosts: Set<String> = [],
                             topics: TopicPreferences = TopicPreferences(),
                             limit: Int = Suggestions.limit) -> [FeedItem] {
+        // Both sides of "have I read this?" are keyed here rather than by the caller: the
+        // comparison was between a feed's spelling of an address and the one the site
+        // redirected to, and a caller that has to remember which form to pass will
+        // eventually pass the other one.
+        let readKeys = Set(readURLs.compactMap { URL(string: $0).map(URLCleaner.identity) })
         var candidates: [FeedItem] = []
         var seen = Set<String>()
         var seenTitles = Set<String>()
@@ -671,8 +686,11 @@ public enum Suggestions {
             // some unrelated "noget-extrabladet.dk".
             if blockedHosts.contains(item.host) { continue }
             guard let url = URL(string: item.url) else { continue }
-            let key = URLCleaner.clean(url).absoluteString
-            guard !readURLs.contains(key), seen.insert(key).inserted else { continue }
+            // The same-article key, not the navigable URL: a feed's `dr.dk/x` and the
+            // `www.dr.dk/x` the site redirected to are one article, and comparing the two
+            // strings kept offering people what they had just finished reading.
+            let key = URLCleaner.identity(url)
+            guard !readKeys.contains(key), seen.insert(key).inserted else { continue }
             // An aggregator carries the same wire story from several outlets under nearly
             // the same headline; without this the list is the same news three times.
             guard seenTitles.insert(tokens(item.title).joined(separator: " ")).inserted else { continue }

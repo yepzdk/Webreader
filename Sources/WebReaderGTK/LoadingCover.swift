@@ -77,9 +77,16 @@ final class LoadingCover {
         armWatchdog()
     }
 
+    /// Reveals the page after [LoadProgress.stallPatience] of silence.
+    ///
+    /// The one host that still answers a stuck load this way. The Apple and Android hosts
+    /// end the load instead and put the offline page up, which is a better answer — a page
+    /// with a Try Again on it rather than a site with none of the reader's chrome — and it
+    /// belongs here too. It needs a hand that can run GTK to verify it: WebKitGTK's stop and
+    /// its error reporting are not something to write blind against a compile-only CI job.
     private func armWatchdog() {
         cancel(&watchdog)
-        watchdog = g_timeout_add(UInt32(LoadProgress.coverStallPatience * 1000), { data in
+        watchdog = g_timeout_add(UInt32(LoadProgress.stallPatience * 1000), { data in
             guard let data else { return 0 }
             let cover = Unmanaged<LoadingCover>.fromOpaque(data).takeUnretainedValue()
             cover.watchdog = 0

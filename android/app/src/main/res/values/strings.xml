@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WebReader</string>
+
+    <!-- Sync is the only thing the host describes itself: the folder is Android's, so the
+         wording that goes with it has to be too. Everything else on screen is a generated
+         page. The shape follows `ReaderSyncController.summary` so a Mac and a phone describe
+         the same folder the same way. -->
+    <string name="sync_off">Settings and recents stay on this device.</string>
+    <string name="sync_waiting">Waiting for the first sync\u2026</string>
+    <string name="sync_just_now">just now</string>
+    <string name="sync_summary_alone">Last synced %1$s \u00b7 no other devices yet</string>
+    <string name="sync_summary_one">Last synced %1$s \u00b7 with %2$s</string>
+    <string name="sync_summary_many">Last synced %1$s \u00b7 with %2$d other devices</string>
+
+    <!-- Shown as a snackbar, and only for the cycle the user themselves set in motion. -->
+    <string name="sync_folder_chosen">Sync folder chosen.</string>
+    <string name="sync_folder_unreadable">Can\'t read that folder. Choose the sync folder again.</string>
+    <string name="sync_write_failed">Couldn\'t write to the sync folder.</string>
+</resources>

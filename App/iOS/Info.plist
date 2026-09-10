@@ -8,6 +8,11 @@
 	<string>WebReader</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<!-- The icon lives in Assets.xcassets; iOS 11 and later require the catalog's name
+	     here, and an upload without it is rejected (ITMS-90713). Not synthesised, because
+	     this target keeps its own Info.plist rather than letting Xcode generate one. -->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
