@@ -1,22 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A page with three lines of prose, drawn as strokes rather than fills: the app has exactly
-     one subject and the mark says it without a picture. Everything sits inside the 66dp
-     centre circle an adaptive icon guarantees is never masked away. -->
+<!-- The same mark as the other hosts - a brass drop cap, its paragraph, and a page marker -
+     drawn in the artwork's own 1024 units so the paths are copied from
+     Design/AppIcon/AppIcon.svg without retracing them.
+
+     An adaptive icon hands the launcher a 108dp canvas, shows 72dp of it and only promises
+     the centre 66dp circle. The mark's far corner sits 476 units from centre, so 0.65 is the
+     largest scale that keeps every filled pixel inside that circle. Nothing else moves: the
+     artwork is centred on both axes.
+
+     The background is the tile colour in values/colors.xml, so the two together are the same
+     picture as the iOS icon at a launcher-safe size. Themed icons mask this drawable's alpha
+     and ignore its colours, which is why the same file serves as `monochrome`. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
 
-    <path
-        android:pathData="M38,28 h32 a4,4 0 0 1 4,4 v44 a4,4 0 0 1 -4,4 h-32 a4,4 0 0 1 -4,-4 v-44 a4,4 0 0 1 4,-4 z"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineJoin="round" />
-    <path
-        android:pathData="M42,44 h24 M42,54 h24 M42,64 h15"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round" />
+    <group
+        android:pivotX="512"
+        android:pivotY="512"
+        android:scaleX="0.65"
+        android:scaleY="0.65">
 
+        <!-- The page marker, and the darker band where it folds. -->
+        <path
+            android:pathData="M718,238H896V436L807,350L718,436L718,238Z"
+            android:fillColor="#D9DED8" />
+        <path
+            android:pathData="M718,241H896V285H718V241Z"
+            android:fillColor="#BEC7BD" />
+
+        <!-- The drop cap. -->
+        <path
+            android:pathData="M143.464,263.328H121V240H232.888V263.328H196.168L248.44,490.128H250.6L314.536,240H361.192L425.128,490.128H427.288L479.56,263.328H442.84V240H532.696V263.328H510.232L441.112,541.536H391.432L327.928,303.936H325.768L262.264,541.536H212.584L143.464,263.328Z"
+            android:fillColor="#C89F65" />
+
+        <!-- The lines beside it, then the paragraph, which reads brighter. -->
+        <path
+            android:pathData="M664.359,240.536H590.359C578.209,240.536 568.359,250.386 568.359,262.536C568.359,274.686 578.209,284.536 590.359,284.536H664.359C676.509,284.536 686.359,274.686 686.359,262.536C686.359,250.386 676.509,240.536 664.359,240.536Z"
+            android:fillColor="#93A79B" />
+        <path
+            android:pathData="M664.359,366H590.359C578.209,366 568.359,375.85 568.359,388C568.359,400.15 578.209,410 590.359,410H664.359C676.509,410 686.359,400.15 686.359,388C686.359,375.85 676.509,366 664.359,366Z"
+            android:fillColor="#93A79B" />
+        <path
+            android:pathData="M880.359,490.536H590.359C578.209,490.536 568.359,500.386 568.359,512.536C568.359,524.686 578.209,534.536 590.359,534.536H880.359C892.509,534.536 902.359,524.686 902.359,512.536C902.359,500.386 892.509,490.536 880.359,490.536Z"
+            android:fillColor="#93A79B" />
+        <path
+            android:pathData="M880.359,615.536H160.359C148.209,615.536 138.359,625.386 138.359,637.536C138.359,649.686 148.209,659.536 160.359,659.536H880.359C892.509,659.536 902.359,649.686 902.359,637.536C902.359,625.386 892.509,615.536 880.359,615.536Z"
+            android:fillColor="#D6E0D8" />
+        <path
+            android:pathData="M616.359,740.536H160.359C148.209,740.536 138.359,750.386 138.359,762.536C138.359,774.686 148.209,784.536 160.359,784.536H616.359C628.509,784.536 638.359,774.686 638.359,762.536C638.359,750.386 628.509,740.536 616.359,740.536Z"
+            android:fillColor="#D6E0D8" />
+    </group>
 </vector>

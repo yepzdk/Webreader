@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The app has an icon of its own.** A brass drop cap opening a paragraph, with a page
+  marker beside it, replacing the placeholder W on slate. Every platform renders from one
+  SVG through `Scripts/make-icons.sh`, so the Mac, iPhone, iPad, Android and Linux icons
+  cannot drift apart.
+
 ## [0.13.0] - 2026-09-11
 
 ### Added
