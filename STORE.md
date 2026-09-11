@@ -11,7 +11,7 @@ pages and the capture recipe is at the end of this file.
 | Field | Value | Limit |
 | --- | --- | --- |
 | Name | `WebReader` | 30 |
-| Subtitle | `The article, not the ads` | 30 |
+| Subtitle | `The article, distraction free` | 30 |
 | Bundle ID | `dk.yepz.webreader` | — |
 | SKU | `webreader` | — |
 | Primary category | Productivity | — |
@@ -38,8 +38,7 @@ WebReader strips a web page back to the article and renders it in a typography y
 control.
 
 Paste or share a link and you get the text, the byline and the images that belong to the
-story. No cookie banner, no newsletter overlay, no floating share bar, no "recommended for
-you" grid between the paragraphs.
+story. No cookie banner, no newsletter overlay, no floating share bar.
 
 TYPOGRAPHY YOU SET
 Serif or sans, four text sizes, three column widths, three line heights, and four themes —
@@ -63,7 +62,7 @@ A paywall's sign-in form lives on the site's own page, so one control hands the 
 and remembers that site for next time. Text you never want to see again — a cookie notice,
 a subscription pitch — can be hidden by selecting it once.
 
-Also on macOS, Linux and Android, from the same reader code.
+Also on the Mac, from the same reader code.
 ```
 
 ## Keywords (100, comma-separated, no spaces after commas)
@@ -128,7 +127,7 @@ Apple requires one set at each display size, up to ten each:
 | iPad 13" | 2064 x 2752 portrait | 1032 x 1376 at 2x |
 
 ```sh
-swift Scripts/screenshot-pages.swift     # -> build/screenshots/html/
+WEBREADER_SHOTS=1 swift test --filter ScreenshotPages   # -> build/screenshots/html/
 ```
 
 Capture each page at the viewport and ratio above **with touch emulation on**: the chrome
@@ -143,6 +142,12 @@ Three things the pages do not do by themselves:
   Use real headlines.
 - The popover frames need the chrome toggle clicked, then `#readerAa`.
 - The last frame needs `window.scrollTo(0, document.body.scrollHeight)`.
+
+**No real outlets.** The article, the byline, the headlines and the suggestion rows are
+written for the shot, and every host is a reserved example domain. A screenshot is
+marketing: one carrying somebody else's masthead borrows their reputation to sell ours,
+and goes stale the day their story does. The same goes for this document — nothing here
+names a place the app pulls content from.
 
 **Not the simulator, and not for want of trying.** The app can only be steered from
 outside through `webreader://open?url=…`, and iOS puts a confirmation dialog in front of a
