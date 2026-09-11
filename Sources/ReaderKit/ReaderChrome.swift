@@ -793,12 +793,12 @@ enum ReaderChrome {
     /// article, which is in normal flow. `pointer-events: none` so a band across the top of
     /// the page doesn't swallow taps meant for the text under it.
     ///
-    /// The height is the chrome's own geometry plus room to fade, rather than a number that
-    /// happened to clear it: the cluster ends `chromeEdge + touchTarget` below the safe
-    /// area — 58px, since `comfortableChrome` includes `(pointer: coarse)` and a roomy
-    /// touch viewport therefore gets 44px buttons — and the solid stop sits exactly there.
-    /// Sized against the 41px pointer cluster instead, it ended 11px short and left article
-    /// text running between the icons on a tablet.
+    /// The height is the chrome's own geometry plus room to fade, and it differs by pointer
+    /// class because the cluster does: a mouse gets the dense button and ends at
+    /// `chromeEdge + pointerTarget`, a finger gets the touch floor and ends 17px further
+    /// down. One height for both was the bug behind the first line of every desktop article
+    /// reading grey — sized for the finger, the solid stop sat 17px below the mouse's
+    /// cluster and the fade ran 34px past where the article began.
     ///
     /// It exists only for the roomy layout. On a compact viewport the chrome has moved to
     /// the bottom-right corner (see `chromeCSS`), so a fade along the top edge would be a
@@ -808,12 +808,19 @@ enum ReaderChrome {
         """
         #readerBackdrop {
           position: fixed; top: 0; left: 0; right: 0; z-index: 7;
-          height: calc(\(chromeEdge + touchTarget + backdropFade)px
-                       + var(--safe-top));
+          height: calc(\(topHeadroom)px + var(--safe-top));
           pointer-events: none;
           background: linear-gradient(to bottom, var(--bg) 0%,
-            var(--bg) calc(\(chromeEdge + touchTarget)px + var(--safe-top)),
+            var(--bg) calc(\(chromeEdge + pointerTarget)px + var(--safe-top)),
             transparent 100%);
+        }
+        @media (pointer: coarse) {
+          #readerBackdrop {
+            height: calc(\(touchTopHeadroom)px + var(--safe-top));
+            background: linear-gradient(to bottom, var(--bg) 0%,
+              var(--bg) calc(\(chromeEdge + touchTarget)px + var(--safe-top)),
+              transparent 100%);
+          }
         }
         @media \(compactViewport) {
           #readerBackdrop { display: none; }
@@ -836,16 +843,22 @@ enum ReaderChrome {
     /// the band reads as a fade rather than a toolbar edge, and no more.
     private static let backdropFade = 24
 
-    /// The headroom a page's own content needs while the chrome is at the top *and* sized
-    /// for a finger — a roomy touch viewport, which in practice means a tablet.
+    /// The dense chrome button's height, in px: 14px text on the chrome's 1.3 leading, in
+    /// 4px of padding and a 1px border, measured at 27 in a real engine. It is what the top
+    /// cluster costs wherever `comfortableChrome` has not grown it to `touchTarget`, which
+    /// in practice means a mouse in a window wider than the breakpoint.
+    private static let pointerTarget = 27
+
+    /// Where the top backdrop has finished fading, and therefore the headroom a page's own
+    /// content needs: nothing that has to be legible at scroll zero may start above it.
     ///
-    /// The cluster ends `chromeEdge + touchTarget` below the safe area (58px, since a
-    /// coarse pointer grows the buttons to the touch floor) and the backdrop's solid stop
-    /// sits exactly there. The 16px on top is the same breathing room the start page's 56px
-    /// gives the 45px pointer cluster. Without it an iPad drew the article's first line ten
-    /// pixels inside the fade — the desktop number survived the touch work because a mouse
-    /// gets 31px buttons, and nobody looked at the case in between.
-    static let touchTopHeadroom = chromeEdge + touchTarget + 16
+    /// This is one rule with two numbers, not two rules. Clearing the *cluster* is not
+    /// enough — the fade keeps painting `--bg` over another `backdropFade` px, at falling
+    /// opacity, so text that clears the icons by 7px still reads grey. That was the bug: the
+    /// desktop article began at 48px, 10px inside a solid band sized for a finger, and every
+    /// first line came out dimmed.
+    static let topHeadroom = chromeEdge + pointerTarget + backdropFade
+    static let touchTopHeadroom = chromeEdge + touchTarget + backdropFade
 
     /// The buttons that live in the collapsing stack, by id — everything the column holds
     /// except the toggle, which is the one control that never hides.

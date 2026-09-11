@@ -527,21 +527,22 @@ public enum ReaderPage {
           }
           main {
             max-width: var(--reader-width); margin: 0 auto;
-            padding-top: \(ReaderChrome.inset(48, "top"));
+            padding-top: \(ReaderChrome.inset(ReaderChrome.topHeadroom, "top"));
             padding-bottom: \(ReaderChrome.inset(96, "bottom"));
             padding-left: max(24px, var(--safe-left));
             padding-right: max(24px, var(--safe-right));
           }
           /* Two overrides of the head, for the two things that can be up there.
 
-             A coarse pointer with room for the chrome at the top — a tablet — grows the
-             buttons to the touch floor, so the cluster reaches further down than the
-             article's own 48px of headroom and the first line would start inside it.
+             The base headroom clears the top backdrop, which is where the article can start
+             without the fade greying its first line. A coarse pointer with room for the
+             chrome at the top — a tablet — grows the buttons to the touch floor, so both the
+             cluster and the fade below it reach further down.
 
-             A compact viewport has moved the chrome to the bottom-right corner, so nothing
-             is up there but the progress hairline and the headroom goes back to being the
-             article's own. Last, so it wins where both match. The 96px foot is what clears
-             the toggle, which ends 58px up. */
+             A compact viewport has moved the chrome to the bottom-right corner and hidden
+             the backdrop, so nothing is up there but the progress hairline and the headroom
+             goes back to being the article's own. Last, so it wins where both match. The
+             96px foot is what clears the toggle, which ends 58px up. */
           @media (pointer: coarse) {
             main { padding-top: \(ReaderChrome.inset(ReaderChrome.touchTopHeadroom, "top")); }
           }
