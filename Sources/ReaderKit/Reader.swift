@@ -614,7 +614,7 @@ public enum ReaderPage {
                                              excluding: currentURL),
                     canClear: !history.entries.isEmpty,
                     showsRating: true, rating: rating,
-                    showsHidden: true),
+                    showsHidden: true, showsOriginal: true),
                 collapsible: true), by: 2))
           <main>
             <header>

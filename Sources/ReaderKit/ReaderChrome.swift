@@ -1469,7 +1469,8 @@ enum ReaderChrome {
                          canClear: Bool = false,
                          showsRating: Bool = false,
                          rating: TopicPreferences.Rating? = nil,
-                         showsHidden: Bool = false) -> String {
+                         showsHidden: Bool = false,
+                         showsOriginal: Bool = false) -> String {
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -1528,21 +1529,22 @@ enum ReaderChrome {
             </div>
           </div>
         """
-        return """
-        <div class="reader-controls">
-          \(ratingControls)
-          \(recentsControl)
-          \(hiddenControl)
-          <div class="reader-control">
-            <!-- The way out of the reader, and the only control here that is about the site
-                 rather than the text. A paywall's login lives on the site's own page, so
-                 this goes and gets it — and stays out of the way on that host until the
-                 chrome injected over it says otherwise (#44).
-
-                 A globe, not an arrow leaving a box: that arrow is the web's word for
-                 "this opens somewhere else", and nothing here does. The page arrives in
-                 this same window, and what changes is that you get the site instead of the
-                 text — which is what a globe says beside six controls about typography. -->
+        // The way out of the reader, and the only control here that is about the site rather
+        // than the text. A paywall's login lives on the site's own page, so this goes and
+        // gets it — and stays out of the way on that host until the chrome injected over it
+        // says otherwise (#44).
+        //
+        // Off by default, like every other optional control, because it answers a question
+        // only a reader page can ask. The start page shipped it for a release: there is no
+        // article there and no site to go back to, so the button posted `readerOriginal`
+        // with nothing to resolve and the engine rejected it. A control that cannot work
+        // where it is drawn is worse than a missing one.
+        //
+        // A globe, not an arrow leaving a box: that arrow is the web's word for "this opens
+        // somewhere else", and nothing here does. The page arrives in this same window, and
+        // what changes is that you get the site instead of the text.
+        let originalControl = !showsOriginal ? "" : """
+        <div class="reader-control">
             <button id="readerOriginalBtn" aria-label="Show the original page"
                     title="Show the original page"
                     onclick="readerPost('readerOriginal', '')">
@@ -1554,6 +1556,13 @@ enum ReaderChrome {
               </svg>
             </button>
           </div>
+        """
+        return """
+        <div class="reader-controls">
+          \(ratingControls)
+          \(recentsControl)
+          \(hiddenControl)
+          \(originalControl)
           <div class="reader-control">
             <button id="readerAa" aria-label="Reader appearance"
                     title="Text &amp; appearance" aria-haspopup="true"

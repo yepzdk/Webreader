@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **The "show the original page" button looks like the buttons beside it**, and hides with
   them when the controls collapse on a phone. It was in no style rule and no id list, so
   the engine drew its own default button and left it on screen alone.
+- **The start page no longer offers to show "the original page".** There is no article
+  there and no site to go back to; the button did nothing when pressed.
 
 ## [0.13.0] - 2026-09-11
 

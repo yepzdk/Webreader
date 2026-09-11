@@ -873,7 +873,7 @@ final class ChromeControlStyleTests: XCTestCase {
         // Derived from the markup rather than restated, because restating the list is the
         // mistake this is here to catch.
         let row = ReaderChrome.controls(recents: ReaderHistory(), rating: nil,
-                                        showsHidden: true)
+                                        showsHidden: true, showsOriginal: true)
         var ids: [String] = []
         for control in row.components(separatedBy: "<div class=\"reader-control\">").dropFirst() {
             guard let open = control.range(of: "<button id=\"") else { continue }
@@ -886,6 +886,18 @@ final class ChromeControlStyleTests: XCTestCase {
             XCTAssertTrue(ReaderChrome.stackButtonIDs.contains(id),
                           "#\(id) never collapses, and takes none of the column's sizing")
         }
+    }
+
+    func testOnlyThePageWithAnOriginalOffersTheWayBackToIt() {
+        // The start page has no article and no site, so the button posted `readerOriginal`
+        // with nothing to resolve and the engine rejected it — a control that could not
+        // work where it was drawn. It is opt-in now, like every other optional control.
+        XCTAssertTrue(ReaderPage.html(article: article).contains("id=\"readerOriginalBtn\""))
+        // Against the markup: every page carries the shared stylesheet, which names the
+        // button whether or not that page renders one.
+        XCTAssertFalse(StartPage.html(appName: "R").contains("id=\"readerOriginalBtn\""),
+                       "there is no original page to go back to from the start page")
+        XCTAssertFalse(SettingsPage.html(appName: "R").contains("id=\"readerOriginalBtn\""))
     }
 }
 
