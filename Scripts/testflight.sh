@@ -127,7 +127,7 @@ if [ "$UPLOAD_WITH" = "nothing" ]; then
   echo
   echo "  * Xcode: Window > Organizer > Archives, pick the row that reads"
   echo "    \"$VERSION ($BUILD)\" — it is the newest — then Distribute App and choose"
-  echo "    App Store Connect, then Upload. Uses the account already signed into"
+  echo "    App Store Connect, then Distribute. Uses the account already signed into"
   echo "    Xcode, so no key is needed."
   echo
   echo "    Not \"TestFlight Internal Only\", which is the row beside it: that flag is"
