@@ -262,18 +262,36 @@ final class TouchLayoutTests: XCTestCase {
         }
         // The reader keeps its own 96px foot, and its head answers to whichever chrome is up
         // there: 48px of article headroom when the chrome has left for the bottom-right
-        // corner, and enough to clear the cluster when a tablet keeps it at the top with
-        // 44px buttons. An iPad drew the first line inside the backdrop's fade until the
-        // second of those existed.
+        // corner, and the backdrop's own end whenever it is still at the top. An iPad drew
+        // the first line inside the backdrop's fade until the second of those existed, and
+        // every desktop article drew its first line grey until the fade stopped being sized
+        // for a finger on a mouse.
         let reader = ReaderPage.html(article: article)
         XCTAssertTrue(reader.contains(
             "padding-top: calc(48px + var(--safe-top));"))
         XCTAssertTrue(reader.contains(
+            "padding-top: calc(\(ReaderChrome.topHeadroom)px + var(--safe-top));"))
+        XCTAssertTrue(reader.contains(
             "padding-top: calc(\(ReaderChrome.touchTopHeadroom)px + var(--safe-top));"))
-        XCTAssertGreaterThan(ReaderChrome.touchTopHeadroom, ReaderChrome.touchTarget + 14,
-                             "the article would start inside the chrome it is meant to clear")
         XCTAssertTrue(reader.contains(
             "padding-bottom: calc(96px + var(--safe-bottom));"))
+    }
+
+    func testContentStartsWhereTheTopBackdropStopsPainting() {
+        // The invariant behind both headrooms, stated once against the CSS that has to hold
+        // it: the backdrop is `--bg` over the article, so anything starting inside it reads
+        // dimmed however far down the gradient it is. Clearing the cluster is not enough —
+        // the fade keeps going — and the two pointer classes do not have the same answer.
+        let css = ReaderChrome.backdropCSS()
+        XCTAssertTrue(css.contains("height: calc(\(ReaderChrome.topHeadroom)px + var(--safe-top));"),
+                      "the mouse backdrop must end where the page's own headroom does")
+        XCTAssertTrue(css.contains("height: calc(\(ReaderChrome.touchTopHeadroom)px + var(--safe-top));"),
+                      "the touch backdrop must end where the touch headroom does")
+        // And the fade has to be *inside* that height, or the solid stop is the real end.
+        for headroom in [ReaderChrome.topHeadroom, ReaderChrome.touchTopHeadroom] {
+            XCTAssertTrue(css.contains("var(--bg) calc(\(headroom - 24)px + var(--safe-top)),"),
+                          "the solid stop should clear the cluster and leave 24px to fade")
+        }
     }
 
     func testANarrowPointerWindowStillClearsItsTopChrome() {
@@ -291,7 +309,10 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(start.contains("@media (min-width: 34rem) {"))
         XCTAssertTrue(start.contains("padding-top: 18vh;"))
         XCTAssertTrue(start.contains("@media (min-width: 60rem) {"))
-        XCTAssertTrue(SettingsPage.html(appName: "R").contains("padding-top: 10vh;"))
+        // Settings keeps its 10vh, with the backdrop's end as a floor: a short wide window
+        // makes a tenth of the viewport smaller than the headroom the fade needs.
+        XCTAssertTrue(SettingsPage.html(appName: "R")
+            .contains("padding-top: max(10vh, \(ReaderChrome.topHeadroom)px);"))
     }
 
     // MARK: - The collapsing bottom-right chrome

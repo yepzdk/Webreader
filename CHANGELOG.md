@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   SVG through `Scripts/make-icons.sh`, so the Mac, iPhone, iPad, Android and Linux icons
   cannot drift apart.
 
+### Fixed
+- **An article's first line no longer reads grey.** The fade behind the top controls was
+  sized for a finger on every device, so on a desktop it painted 34px past where the
+  article began. Both the fade and the headroom now follow the controls that are actually
+  up there.
+- **The Mac icon sits in the Dock at the size every other app does.** Its rounded tile was
+  being scaled twice, which cropped the artwork and left it small and soft beside its
+  neighbours.
+
 ## [0.13.0] - 2026-09-11
 
 ### Added

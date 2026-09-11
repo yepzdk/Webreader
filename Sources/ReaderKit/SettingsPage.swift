@@ -190,7 +190,9 @@ public enum SettingsPage {
           }
           @media (min-width: 34rem) and (pointer: fine) {
             main {
-              padding-top: 10vh; padding-bottom: 64px;
+              /* Airy where there is room, but never above the backdrop's fade: a short wide
+                 window makes 10vh smaller than the headroom, and the title would grey. */
+              padding-top: max(10vh, \(ReaderChrome.topHeadroom)px); padding-bottom: 64px;
               padding-left: max(24px, var(--safe-left));
               padding-right: max(24px, var(--safe-right));
             }

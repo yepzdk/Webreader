@@ -35,19 +35,32 @@ cp "$SET/AppIcon-1024.png" Linux/dk.yepz.webreader.png
 echo "Wrote Linux/dk.yepz.webreader.png"
 
 # --- macOS -------------------------------------------------------------------------------
-# Apple's grid puts a rounded-square icon in 824 of its 1024 points, with a corner radius of
-# 185.4. The artwork is scaled into that box and clipped to the shape; the margin stays
-# transparent, which is what gives a Mac icon its footprint in the Dock.
+# Nothing masks a Mac icon, so the shape and its footprint are the artwork's job. The numbers
+# are measured off this machine's own system icons rather than taken from a document: Notes,
+# Mail and Safari all draw a 204px shape in a 256px canvas (79.7%, so 824 of 1024) whose
+# corner fits a 44px circular radius to within a pixel - 21.6% of the side, hence 178 - and
+# they sit dead centre, with a soft shadow that reaches about 10px past the shape.
+#
+# The clip is a separate group *outside* the transform on purpose. `clip-path` resolves in
+# the coordinate system the element's own transform establishes, so a clip and a scale on one
+# group scales the clip too: the first version of this shipped a tile of 664px - 0.8047
+# squared - which cropped the artwork and left it small and soft beside every other icon.
 #
 # The wrapper inlines the source between its own tags, so AppIcon.svg has to open on its
 # first line and close on its last - the comment in that file says so.
 MAC=$(mktemp -d)
 {
   echo '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
-  echo '<defs><clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185.4"/></clipPath></defs>'
-  echo '<g clip-path="url(#tile)" transform="translate(100 100) scale(0.8046875)">'
+  echo '<defs>'
+  echo '<clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="178"/></clipPath>'
+  echo '<filter id="shade" x="-10%" y="-10%" width="120%" height="120%">'
+  echo '<feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.32"/>'
+  echo '</filter>'
+  echo '</defs>'
+  echo '<g filter="url(#shade)"><g clip-path="url(#tile)">'
+  echo '<g transform="translate(100 100) scale(0.8046875)">'
   sed '1d;$d' "$SRC"
-  echo '</g></svg>'
+  echo '</g></g></g></svg>'
 } > "$MAC/AppIcon-macOS.svg"
 
 ICONSET="$MAC/AppIcon.iconset"
