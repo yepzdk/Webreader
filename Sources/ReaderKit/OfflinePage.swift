@@ -86,9 +86,9 @@ public enum OfflineFallback {
                             palette: ReaderPalette? = nil) -> String {
         let headline = HTML.escape(kind.headline)
         let message = HTML.escape(kind.message(host: host))
-        // The button label stays white on the accent in every palette: `ReaderPalette` has
-        // no foreground-on-accent role, and inventing one from a colour literal the host
-        // may have written as anything is guesswork the stock themes don't do either.
+        // The button's label is the page background, not white: the accent is picked to
+        // clear 4.5:1 against that background, so a label in it inherits the same
+        // measurement on any palette — including a host's, which we cannot measure.
         // This page spells its own palette rather than taking `ReaderChrome.themeCSS`, so it
         // has to define the safe-area variables its chrome offsets read. Left out, every
         // `var(--safe-*)` here resolves to nothing, the declaration around it is invalid, and
@@ -98,7 +98,7 @@ public enum OfflineFallback {
             """
             :root {
               --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
-              --accent-fg: #ffffff; --border: \($0.border);
+              --accent-fg: var(--bg); --border: \($0.border);
               color-scheme: \($0.isDark ? "dark" : "light");
             \(safeArea)
             }
@@ -106,13 +106,13 @@ public enum OfflineFallback {
         } ?? """
         :root {
           --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-          --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+          --accent-fg: var(--bg); --border: rgba(0,0,0,0.12);
         \(safeArea)
         }
         @media (prefers-color-scheme: dark) {
           :root {
             --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-            --accent-fg: #ffffff; --border: rgba(255,255,255,0.16);
+            --accent-fg: var(--bg); --border: rgba(255,255,255,0.16);
           }
         }
         """

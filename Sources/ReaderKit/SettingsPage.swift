@@ -253,7 +253,10 @@ public enum SettingsPage {
           #source::placeholder { color: var(--muted); }
           form button {
             padding: 9px 16px; font-family: inherit; font-size: 14px;
-            color: #fff; background: var(--accent);
+            /* The page background, not white: the accent is chosen to clear 4.5:1 against
+               that background, so the label inherits the same measurement. White on the
+               accent never beat 3.7:1, and on a `tinted` accent it would be invisible. */
+            color: var(--bg); background: var(--accent);
             border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
           }
           form button:hover { filter: brightness(1.08); }

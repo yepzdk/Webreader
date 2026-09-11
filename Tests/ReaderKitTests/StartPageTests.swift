@@ -439,9 +439,11 @@ final class StartPageTests: XCTestCase {
             XCTAssertFalse(page.contains("aria-label=\"Article images\""))
             XCTAssertFalse(page.contains(">Images<"))
             XCTAssertFalse(page.contains(">No images<"))
-            // The popover is now type, quotes and theme — nothing about images.
-            XCTAssertTrue(page.contains("aria-label=\"Column width\""))
-            XCTAssertTrue(page.contains("aria-label=\"Theme\""))
+            // The popover is now type, quotes, theme and the two colour rows — nothing
+            // about images. Each row names itself in the open now, and `aria-labelledby`
+            // points at that same heading rather than repeating it.
+            XCTAssertTrue(page.contains(">Column width</h3>"))
+            XCTAssertTrue(page.contains(">Theme</h3>"))
         }
     }
 

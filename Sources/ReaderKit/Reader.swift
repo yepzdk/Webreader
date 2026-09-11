@@ -195,6 +195,27 @@ public struct ReaderSettings: Equatable, Sendable {
     /// Blue, which is what every reader already has.
     public var accent = Accent.blue
 
+    /// How loudly the accent is applied (#45, second pass).
+    ///
+    /// The hue answers *which* colour; this answers *how much of it*, and they are separate
+    /// questions: someone who wants links barely distinguishable from the prose still has a
+    /// favourite colour for the one place it shows. Four levels, quietest last:
+    ///
+    /// - `text` — the body colour. Links are revealed by their underline alone, which is
+    ///   the only tell that works for a reader who cannot separate the hues anyway.
+    /// - `bright` — the saturated shades, which is what 0.13.0 shipped.
+    /// - `tinted` — the ink with the hue mixed in at the same lightness. Measured against
+    ///   the page it lands within a point of the body text's own contrast.
+    /// - `hushed` — the quietest that still clears 4.5:1 as a colour in its own right.
+    ///
+    /// `hushed` by default: the saturated links read as noise in a page whose whole point
+    /// is the absence of it, and every shipped reader was looking at `bright` until now.
+    public enum Highlight: String, CaseIterable, Sendable {
+        case text, bright, tinted, hushed
+    }
+
+    public var highlight = Highlight.hushed
+
     public init() {}
 
     public static let fontSizeRange = 12...28
@@ -251,6 +272,9 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["accent"] as? String, let value = Accent(rawValue: raw) {
             settings.accent = value
         }
+        if let raw = dict["highlight"] as? String, let value = Highlight(rawValue: raw) {
+            settings.highlight = value
+        }
         if let hosts = dict["originalHosts"] as? [String] {
             settings.originalHosts = Set(hosts.filter { !$0.isEmpty })
         }
@@ -274,6 +298,7 @@ public struct ReaderSettings: Equatable, Sendable {
             // Sorted, because two devices holding the same set must write the same bytes or
             // sync rewrites the file forever.
             "accent": accent.rawValue,
+            "highlight": highlight.rawValue,
             "originalHosts": originalHosts.sorted(),
         ]
     }
@@ -630,7 +655,9 @@ public enum ReaderPage {
                                                              thumbnails: .reader,
                                                              hidden: hidden,
                                                              hitsJSON: HTML.jsLiteral(hits),
-                                                             platform: platform), by: 10))
+                                                             platform: platform,
+                                                             hostedAccent: settings.theme == .auto
+                                                                 && palette != nil), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
           \(ReaderChrome.indent(HiddenPhrases.hideAffordanceJS(), by: 10))

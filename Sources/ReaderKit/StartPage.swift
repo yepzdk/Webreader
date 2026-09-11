@@ -381,7 +381,9 @@ public enum StartPage {
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
                                                              thumbnails: .startPage,
                                                              hidden: HiddenPhrases([]),
-                                                             platform: platform), by: 10))
+                                                             platform: platform,
+                                                             hostedAccent: settings.theme == .auto
+                                                                 && palette != nil), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
           // What the whole column falls back to once cleared — heading and list included, so
           // it is this page's own empty state rather than the popover's one-line

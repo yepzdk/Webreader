@@ -147,7 +147,7 @@ public struct HiddenPhrases: Equatable {
           display: none; align-items: center; gap: 6px;
           margin: 0; padding: 6px 10px;
           border: 1px solid var(--accent); border-radius: 6px;
-          background: var(--accent); color: #fff;
+          background: var(--accent); color: var(--bg);
           font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
           cursor: pointer;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);

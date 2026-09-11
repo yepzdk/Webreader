@@ -103,7 +103,7 @@ final class ReaderPaletteTests: XCTestCase {
         // unintended change to a shipping app's appearance.
         XCTAssertEqual(ReaderChrome.themeCSS(ReaderSettings()), #"""
         :root {
-          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
+          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #5a6f9f;
           --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
           --reader-size: 17px;
           --reader-leading: 1.6;
@@ -115,64 +115,64 @@ final class ReaderPaletteTests: XCTestCase {
           --safe-left: env(safe-area-inset-left, 0px);
           --safe-right: env(safe-area-inset-right, 0px);
         }
-        .swatch-blue { background: #2563eb; }
-        .swatch-teal { background: #0f766e; }
-        .swatch-violet { background: #7c3aed; }
-        .swatch-rust { background: #c2410c; }
-        .swatch-moss { background: #15803d; }
+        .swatch-blue { background: #5a6f9f; }
+        .swatch-teal { background: #47767e; }
+        .swatch-violet { background: #925a9f; }
+        .swatch-rust { background: #8e6750; }
+        .swatch-moss { background: #4c7a45; }
         @media (prefers-color-scheme: dark) {
           :root {
-            --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
+            --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #7588b2;
             --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           }
-        :root:not([data-theme]) .swatch-blue { background: #3b82f6; }
-          :root:not([data-theme]) .swatch-teal { background: #0d9488; }
-          :root:not([data-theme]) .swatch-violet { background: #a78bfa; }
-          :root:not([data-theme]) .swatch-rust { background: #ea580c; }
-          :root:not([data-theme]) .swatch-moss { background: #16a34a; }
+        :root:not([data-theme]) .swatch-blue { background: #7588b2; }
+          :root:not([data-theme]) .swatch-teal { background: #57919b; }
+          :root:not([data-theme]) .swatch-violet { background: #a677b2; }
+          :root:not([data-theme]) .swatch-rust { background: #aa7f67; }
+          :root:not([data-theme]) .swatch-moss { background: #5d9654; }
         }
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
         :root[data-theme="light"] {
-          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
+          --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #5a6f9f;
           --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
           color-scheme: light;
         }
-        :root[data-theme="light"] .swatch-blue { background: #2563eb; }
-        :root[data-theme="light"] .swatch-teal { background: #0f766e; }
-        :root[data-theme="light"] .swatch-violet { background: #7c3aed; }
-        :root[data-theme="light"] .swatch-rust { background: #c2410c; }
-        :root[data-theme="light"] .swatch-moss { background: #15803d; }
+        :root[data-theme="light"] .swatch-blue { background: #5a6f9f; }
+        :root[data-theme="light"] .swatch-teal { background: #47767e; }
+        :root[data-theme="light"] .swatch-violet { background: #925a9f; }
+        :root[data-theme="light"] .swatch-rust { background: #8e6750; }
+        :root[data-theme="light"] .swatch-moss { background: #4c7a45; }
         :root[data-theme="sepia"] {
-          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #1d4ed8;
+          --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #536694;
           --border: rgba(61,50,37,0.18); --surface: rgba(61,50,37,0.07);
           color-scheme: light;
         }
-        :root[data-theme="sepia"] .swatch-blue { background: #1d4ed8; }
-        :root[data-theme="sepia"] .swatch-teal { background: #0f766e; }
-        :root[data-theme="sepia"] .swatch-violet { background: #7c3aed; }
-        :root[data-theme="sepia"] .swatch-rust { background: #9a3412; }
-        :root[data-theme="sepia"] .swatch-moss { background: #166534; }
+        :root[data-theme="sepia"] .swatch-blue { background: #536694; }
+        :root[data-theme="sepia"] .swatch-teal { background: #426e75; }
+        :root[data-theme="sepia"] .swatch-violet { background: #875394; }
+        :root[data-theme="sepia"] .swatch-rust { background: #835f4a; }
+        :root[data-theme="sepia"] .swatch-moss { background: #467140; }
         :root[data-theme="dark"] {
-          --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
+          --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #7588b2;
           --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           color-scheme: dark;
         }
-        :root[data-theme="dark"] .swatch-blue { background: #3b82f6; }
-        :root[data-theme="dark"] .swatch-teal { background: #0d9488; }
-        :root[data-theme="dark"] .swatch-violet { background: #a78bfa; }
-        :root[data-theme="dark"] .swatch-rust { background: #ea580c; }
-        :root[data-theme="dark"] .swatch-moss { background: #16a34a; }
+        :root[data-theme="dark"] .swatch-blue { background: #7588b2; }
+        :root[data-theme="dark"] .swatch-teal { background: #57919b; }
+        :root[data-theme="dark"] .swatch-violet { background: #a677b2; }
+        :root[data-theme="dark"] .swatch-rust { background: #aa7f67; }
+        :root[data-theme="dark"] .swatch-moss { background: #5d9654; }
         :root[data-theme="black"] {
-          --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #3b82f6;
+          --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #6478a8;
           --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
           color-scheme: dark;
         }
-        :root[data-theme="black"] .swatch-blue { background: #3b82f6; }
-        :root[data-theme="black"] .swatch-teal { background: #0d9488; }
-        :root[data-theme="black"] .swatch-violet { background: #8b5cf6; }
-        :root[data-theme="black"] .swatch-rust { background: #ea580c; }
-        :root[data-theme="black"] .swatch-moss { background: #16a34a; }
+        :root[data-theme="black"] .swatch-blue { background: #6478a8; }
+        :root[data-theme="black"] .swatch-teal { background: #4d8188; }
+        :root[data-theme="black"] .swatch-violet { background: #9b64a8; }
+        :root[data-theme="black"] .swatch-rust { background: #9a6f57; }
+        :root[data-theme="black"] .swatch-moss { background: #52854b; }
         """#)
     }
 }
@@ -205,7 +205,11 @@ final class ReaderPalettePageTests: XCTestCase {
             XCTAssertTrue(html.contains("--bg: #0c0b0c;"), name)
             XCTAssertTrue(html.contains("--surface: rgba(250,252,251,0.08);"), name)
             XCTAssertTrue(html.contains("--border: rgba(250,252,251,0.16);"), name)
-            XCTAssertFalse(html.contains("prefers-color-scheme"), name)
+            // The *stylesheet* must not second-guess a palette the host resolved — that is
+            // the flicker this guards. The script may still ask the same question: with a
+            // desktop palette in force `paintAccent` returns before it does, and on every
+            // other page it is how `auto` picks which row of the accent table to paint.
+            XCTAssertFalse(html.contains("@media (prefers-color-scheme"), name)
         }
     }
 
@@ -232,7 +236,7 @@ final class ReaderPalettePageTests: XCTestCase {
         XCTAssertTrue(html.contains("""
           :root {
             --bg: #0c0b0c; --fg: #FAFCFB; --muted: #9b9c9c; --accent: #b59790;
-            --accent-fg: #ffffff; --border: rgba(250,252,251,0.16);
+            --accent-fg: var(--bg); --border: rgba(250,252,251,0.16);
             color-scheme: dark;
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -248,7 +252,7 @@ final class ReaderPalettePageTests: XCTestCase {
         XCTAssertTrue(html.contains("""
           :root {
             --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-            --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+            --accent-fg: var(--bg); --border: rgba(0,0,0,0.12);
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
             --safe-left: env(safe-area-inset-left, 0px);
@@ -257,7 +261,7 @@ final class ReaderPalettePageTests: XCTestCase {
           @media (prefers-color-scheme: dark) {
             :root {
               --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-              --accent-fg: #ffffff; --border: rgba(255,255,255,0.16);
+              --accent-fg: var(--bg); --border: rgba(255,255,255,0.16);
             }
           }
         """))
@@ -350,7 +354,11 @@ final class StockPaletteTests: XCTestCase {
             var settings = ReaderSettings()
             settings.theme = theme
             let css = ReaderChrome.themeCSS(settings)
-            let palette = ReaderPalette.stock(for: theme, prefersDark: false)
+            // The palette now has two axes, and the page renders the settings' own: a
+            // default reader is on `hushed`, so comparing against `bright` would say the
+            // stylesheet had drifted when it had only been read at the wrong strength.
+            let palette = ReaderPalette.stock(for: theme, prefersDark: false,
+                                              highlight: settings.highlight)
             XCTAssertTrue(css.contains(":root[data-theme=\"\(theme.rawValue)\"] {"),
                           "\(theme.rawValue) has no pinned block")
             XCTAssertTrue(css.contains("--bg: \(palette.bg); --fg: \(palette.fg); "
@@ -406,14 +414,75 @@ final class AccentContrastTests: XCTestCase {
         return (max(x, y) + 0.05) / (min(x, y) + 0.05)
     }
 
-    func testEveryAccentIsReadableOnEveryTheme() {
+    func testEveryAccentIsReadableOnEveryThemeAtEveryStrength() {
+        // Eighty pairs, and the reason the control offers a list rather than a colour well:
+        // every one of them can be held to the floor. An underline marks a link for someone
+        // who cannot separate the hues, but the text is still text — 1.4.3 does not care
+        // how the link is signalled.
+        for highlight in ReaderSettings.Highlight.allCases {
+            for accent in ReaderSettings.Accent.allCases {
+                for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+                    let palette = ReaderPalette.stock(for: theme, prefersDark: false,
+                                                      accent: accent, highlight: highlight)
+                    let ratio = contrast(palette.accent, palette.bg)
+                    XCTAssertGreaterThanOrEqual(
+                        ratio, 4.5,
+                        "\(accent) \(highlight) on \(theme) is "
+                        + "\(String(format: "%.2f", ratio)):1 — a link is body text")
+                }
+            }
+        }
+    }
+
+    func testTheQuietLevelsAreActuallyQuieterThanTheLoudOne() {
+        // The ladder has to be a ladder, or the control is four words for one colour. What
+        // "quieter" means here is *nearer the prose*, not less saturated: a tint sits at
+        // the ink's own lightness, so on a pale page it is a deep colour with a wide
+        // channel spread and a naive chroma test calls it loud. Distance from the body
+        // text is the thing the reader actually perceives, and the thing the levels were
+        // built to order.
+        func distance(_ a: String, _ b: String) -> Double {
+            func channels(_ hex: String) -> [Double] {
+                let h = hex.dropFirst()
+                return stride(from: 0, to: 6, by: 2).map { i in
+                    let s = h.index(h.startIndex, offsetBy: i)
+                    return Double(Int(h[s..<h.index(s, offsetBy: 2)], radix: 16) ?? 0) / 255
+                }
+            }
+            return zip(channels(a), channels(b))
+                .map { ($0 - $1) * ($0 - $1) }.reduce(0, +).squareRoot()
+        }
         for accent in ReaderSettings.Accent.allCases {
             for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
-                let palette = ReaderPalette.stock(for: theme, prefersDark: false, accent: accent)
-                let ratio = contrast(palette.accent, palette.bg)
-                XCTAssertGreaterThanOrEqual(
-                    ratio, 4.5,
-                    "\(accent) on \(theme) is \(String(format: "%.2f", ratio)):1 — a link is body text")
+                let ink = ReaderPalette.stock(for: theme, prefersDark: false).fg
+                let away = { (h: ReaderSettings.Highlight) in
+                    distance(ReaderPalette.hex(accent, on: theme, highlight: h), ink)
+                }
+                XCTAssertEqual(away(.text), 0, accuracy: 0.0001,
+                               "\(accent) on \(theme) does not follow the text")
+                XCTAssertLessThan(away(.tinted), away(.hushed),
+                                  "tinted \(accent) on \(theme) is no nearer the prose than hushed")
+                // Bright and hushed both sit far from the ink — they are colours, not
+                // shades of it — so the claim there is about saturation, which is what
+                // "hushed" names. The two quiet levels have to stay apart by a real
+                // margin or the control offers the same answer twice: the narrowest pair
+                // in the table is moss on sepia, where hushed is 1.36x further out.
+                XCTAssertGreaterThan(away(.hushed), away(.tinted) * 1.3,
+                                     "the two quiet levels are not distinct on \(theme)")
+            }
+        }
+    }
+
+    func testFollowingTheTextIsTheTextAndNotAGreyNearIt() {
+        // The point of the level: a link is the prose colour exactly, so only the underline
+        // marks it. A colour merely close to the ink would be the worst of both — neither a
+        // signal nor an absence of one.
+        for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+            for accent in ReaderSettings.Accent.allCases {
+                let page = ReaderPalette.stock(for: theme, prefersDark: false,
+                                               accent: accent, highlight: .text)
+                XCTAssertEqual(page.accent, page.fg,
+                               "\(accent) on \(theme) is near the ink rather than the ink")
             }
         }
     }
@@ -444,6 +513,73 @@ final class AccentContrastTests: XCTestCase {
         for accent in ReaderSettings.Accent.allCases {
             XCTAssertTrue(page.contains("data-key=\"accent\" data-value=\"\(accent.rawValue)\""),
                           "no swatch for \(accent)")
+        }
+    }
+
+    func testTheStrengthRoundTripsAndDefaultsToHushed() {
+        // Hushed by default: every reader shipped so far has been looking at `bright`, and
+        // the point of the work is that it was too loud. An unknown value falls back like
+        // every other setting rather than poisoning the page.
+        XCTAssertEqual(ReaderSettings().highlight, .hushed)
+        var settings = ReaderSettings()
+        settings.highlight = .text
+        XCTAssertEqual(ReaderSettings.fromJSON(settings.json).highlight, .text)
+        XCTAssertEqual(ReaderSettings.decode(["highlight": "neon"]).highlight, .hushed)
+        // A device that has never heard of the key keeps the default rather than losing
+        // the rest of the payload — the sync blob is whole-settings, and an older peer
+        // writes one without it.
+        XCTAssertEqual(ReaderSettings.decode(["accent": "moss"]).highlight, .hushed)
+    }
+
+    func testThePopoverAsksTheTwoQuestionsSeparately() {
+        let page = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                    content: "<p>x</p>", hiddenHits: [:], image: nil),
+                                   settings: ReaderSettings(), history: ReaderHistory(),
+                                   platform: .iOS)
+        for highlight in ReaderSettings.Highlight.allCases {
+            XCTAssertTrue(page.contains("data-key=\"highlight\" data-value=\"\(highlight.rawValue)\""),
+                          "no control for \(highlight)")
+        }
+        XCTAssertTrue(page.contains(">Highlight</h3>"))
+        XCTAssertTrue(page.contains(">Hue</h3>"))
+        // Following the text has no hue, and the row retires rather than painting five
+        // swatches nothing will use.
+        XCTAssertTrue(page.contains(":root[data-highlight=\"text\"] #panelHue"))
+    }
+
+    func testTintedSwatchesCarryTheirHueOnTheRim() {
+        // The fill has to be honest — it is what the page will paint — but five tints on a
+        // dark page sit within 0.03 of each other, which is a row of five identical discs.
+        // The rim carries the hue at the strength that can hold it. Measured, not assumed:
+        // the closest tinted pair is blue and teal.
+        let tinted = ReaderChrome.swatchCSS(for: .dark, highlight: .tinted)
+        for accent in ReaderSettings.Accent.allCases {
+            let fill = ReaderPalette.hex(accent, on: .dark, highlight: .tinted)
+            let rim = ReaderPalette.hex(accent, on: .dark, highlight: .hushed)
+            XCTAssertTrue(tinted.contains(".swatch-\(accent.rawValue) { background: \(fill); "
+                                          + "border-color: \(rim); }"),
+                          "\(accent) has no rim to tell it apart by")
+        }
+        // The other levels are five different colours already; a second ring there is noise.
+        for level in [ReaderSettings.Highlight.bright, .hushed] {
+            XCTAssertFalse(ReaderChrome.swatchCSS(for: .dark, highlight: level).contains("border-color"),
+                           "\(level) does not need rims")
+        }
+    }
+
+    func testTheLivePathCarriesEveryShadeThePanelCanChooseTo() {
+        // The stylesheet only ever holds the pair the page was rendered with, so without
+        // this table picking a colour moved the ring on a swatch and changed nothing else
+        // until the next render — which is how the accent control shipped in 0.13.0.
+        let table = ReaderChrome.accentTableJS
+        for theme in [ReaderSettings.Theme.light, .sepia, .dark, .black] {
+            for highlight in ReaderSettings.Highlight.allCases {
+                for accent in ReaderSettings.Accent.allCases {
+                    let hex = ReaderPalette.hex(accent, on: theme, highlight: highlight)
+                    XCTAssertTrue(table.contains("\(accent.rawValue): '\(hex)'"),
+                                  "\(theme) \(highlight) \(accent) is missing from the table")
+                }
+            }
         }
     }
 }
