@@ -37,7 +37,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 3
-        versionName = "0.13.0"
+        versionName = "0.14.0"
     }
 
     // One APK per ABI, and no universal one. The Swift runtime is around 74 MB of stripped

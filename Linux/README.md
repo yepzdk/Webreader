@@ -9,7 +9,7 @@ are not used here.
 | `dk.yepz.webreader.desktop` | Desktop entry. Registers WebReader as an `http`/`https` handler so it appears in `xdg-settings`, `gio mime`, and the browsers' default-application lists. |
 | `dk.yepz.webreader.png` | Application icon, 1024x1024. |
 | `PKGBUILD-git` | Arch **VCS** package `webreader-git`, built from the default branch. **This is the one that works today** — see below. |
-| `PKGBUILD` | Arch release package `webreader`, built from the `v0.13.0` tag. |
+| `PKGBUILD` | Arch release package `webreader`, built from the `v0.14.0` tag. |
 | `install-local.sh` | Build and install into `~/.local` for the current user, no root needed. |
 
 ## Local install
@@ -43,7 +43,7 @@ repo verbatim, with no editing and no parameter to get wrong.
 | File | AUR package | Source | Usable now? |
 | --- | --- | --- | --- |
 | `PKGBUILD-git` | `webreader-git` | default branch, no tag | **yes** |
-| `PKGBUILD` | `webreader` | `v0.13.0` tag | yes |
+| `PKGBUILD` | `webreader` | `v0.14.0` tag | yes |
 
 ### Use `PKGBUILD-git` today
 
