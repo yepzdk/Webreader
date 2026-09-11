@@ -146,8 +146,11 @@ public struct HiddenPhrases: Equatable {
           position: fixed; top: 0; left: 0; z-index: 8;
           display: none; align-items: center; gap: 6px;
           margin: 0; padding: 6px 10px;
+          /* Outlined on the page's own background, like every control the accent touches.
+             It floats over prose rather than sitting in chrome, so it keeps the shadow and
+             an opaque background — a transparent pill over text is unreadable. */
           border: 1px solid var(--accent); border-radius: 6px;
-          background: var(--accent); color: var(--bg);
+          background: var(--bg); color: var(--accent);
           font-family: \(platform.sansStack); font-size: 12px; line-height: 1.3;
           cursor: pointer;
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);

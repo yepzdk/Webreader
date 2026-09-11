@@ -236,7 +236,7 @@ final class ReaderPalettePageTests: XCTestCase {
         XCTAssertTrue(html.contains("""
           :root {
             --bg: #0c0b0c; --fg: #FAFCFB; --muted: #9b9c9c; --accent: #b59790;
-            --accent-fg: var(--bg); --border: rgba(250,252,251,0.16);
+            --surface: rgba(250,252,251,0.08); --border: rgba(250,252,251,0.16);
             color-scheme: dark;
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -252,7 +252,7 @@ final class ReaderPalettePageTests: XCTestCase {
         XCTAssertTrue(html.contains("""
           :root {
             --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-            --accent-fg: var(--bg); --border: rgba(0,0,0,0.12);
+            --surface: rgba(0,0,0,0.05); --border: rgba(0,0,0,0.12);
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
             --safe-left: env(safe-area-inset-left, 0px);
@@ -261,10 +261,52 @@ final class ReaderPalettePageTests: XCTestCase {
           @media (prefers-color-scheme: dark) {
             :root {
               --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-              --accent-fg: var(--bg); --border: rgba(255,255,255,0.16);
+              --surface: rgba(255,255,255,0.08); --border: rgba(255,255,255,0.16);
             }
           }
         """))
+    }
+
+    func testNoPagePutsALabelOnTopOfTheAccent() {
+        // The rule, asserted where it can actually be broken. A filled accent button reads
+        // fine until the highlight follows the text: on black, "Open" was a white label on
+        // a near-white fill. So the accent is a border and a label, never a fill under one
+        // — and the only fills left are the page's own surfaces.
+        let pages = [
+            "start": StartPage.html(appName: "R"),
+            "settings": SettingsPage.html(appName: "R"),
+            "offline": OfflineFallback.html(appName: "R", host: "e.com", kind: .offline),
+            "reader": ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                       content: "<p>x</p>", hiddenHits: [:],
+                                                       image: nil)),
+        ]
+        for (name, html) in pages {
+            for offender in ["color: #fff; background: var(--accent)",
+                             "color: var(--accent-fg)",
+                             "background: var(--accent); color: var(--bg)"] {
+                XCTAssertFalse(html.contains(offender),
+                               "\(name) still paints a label on the accent: \(offender)")
+            }
+        }
+    }
+
+    func testTheStartPageAnswersToTheReadingControls() {
+        // Five of the seven controls did nothing here: the page was pinned to 34rem, a sans
+        // stack and 12px rows whatever the reader had chosen, so only the theme and the
+        // highlight showed any effect at all.
+        let page = StartPage.html(appName: "R")
+        XCTAssertTrue(page.contains("max-width: var(--reader-width);"))
+        XCTAssertTrue(page.contains("font-family: var(--reader-font);"))
+        XCTAssertTrue(page.contains("font-size: calc(var(--reader-size) * 0.82);"))
+        XCTAssertTrue(page.contains("line-height: var(--reader-leading);"))
+        // Quotes is the one that cannot mean anything without prose, so it is not offered
+        // here — a control that does nothing where it is drawn is worse than no control.
+        XCTAssertFalse(page.contains("data-key=\"quoteStyle\""),
+                       "the start page has no blockquote to style")
+        XCTAssertTrue(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                       content: "<p>x</p>", hiddenHits: [:],
+                                                       image: nil))
+            .contains("data-key=\"quoteStyle\""))
     }
 }
 

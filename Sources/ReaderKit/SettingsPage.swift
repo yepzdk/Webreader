@@ -251,15 +251,16 @@ public enum SettingsPage {
           }
           #source:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
           #source::placeholder { color: var(--muted); }
+          /* Outlined rather than filled, which is the rule everywhere the accent lands: the
+             colour sits on the background it was measured against, never under a label that
+             has to fight it. A filled action button reads fine until the accent *is* the
+             page's text colour, and then the label has nowhere to go. */
           form button {
             padding: 9px 16px; font-family: inherit; font-size: 14px;
-            /* The page background, not white: the accent is chosen to clear 4.5:1 against
-               that background, so the label inherits the same measurement. White on the
-               accent never beat 3.7:1, and on a `tinted` accent it would be invisible. */
-            color: var(--bg); background: var(--accent);
+            color: var(--accent); background: transparent;
             border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
           }
-          form button:hover { filter: brightness(1.08); }
+          form button:hover { background: var(--surface); }
           form button:disabled { opacity: 0.5; cursor: default; filter: none; }
           #error { margin: 8px 0 0; font-size: 12px; color: var(--accent); }
           #error[hidden] { display: none; }

@@ -142,7 +142,7 @@ public enum StartPage {
             -webkit-font-smoothing: antialiased;
           }
           main {
-            max-width: 34rem; margin: 0 auto;
+            max-width: var(--reader-width); margin: 0 auto;
             /* Mobile first. A phone has no room to spend 18vh above the title, and the side
                padding has to clear a landscape notch as well as give the text room. Both
                grow at 34rem, where the measure stops being the constraint.
@@ -173,8 +173,10 @@ public enum StartPage {
             }
           }
           /* The front door — title and URL field — stays narrow and centred whatever the
-             window does; only the lists below it spread out. */
-          .intro { max-width: 34rem; margin: 0 auto; }
+             window does; only the lists below it spread out. Its measure is the reader's own
+             column width, so Narrow/Normal/Wide mean something here too (#45 follow-up):
+             the page a reader lands on answers to the same controls the article does. */
+          .intro { max-width: var(--reader-width); margin: 0 auto; }
           .lists { display: grid; grid-template-columns: 1fr; gap: 0 32px; }
           /* Grid children default to min-width:auto, which refuses to shrink and breaks the
              ellipsis on long titles. */
@@ -195,9 +197,31 @@ public enum StartPage {
             :root[data-order="suggestionsFirst"] .recents-column .section { margin-top: 36px; }
             :root[data-order="suggestionsFirst"] #suggested .section { margin-top: 28px; }
           }
+          /* The page's own words follow the reader's typeface and size, because they are the
+             same reader looking at the same screen: before this, five of the seven controls
+             did nothing here and only the theme and the highlight showed any effect at all.
+
+             The chrome does not follow: buttons, hints and section labels stay in the sans
+             stack at their fixed sizes. Serif is a choice about prose, and a 12px serif
+             button is a worse button — the same split the reader makes, where the article
+             takes the setting and the controls around it do not. */
           h1 {
-            font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
-            margin: 0 0 20px; text-align: center;
+            font-family: var(--reader-font);
+            font-size: calc(var(--reader-size) * 1.3); font-weight: 600;
+            letter-spacing: -0.01em; margin: 0 0 20px; text-align: center;
+          }
+          /* The lists are the reading on this page, so they take the size, the face and the
+             leading. They were pinned at 12px, which is smaller than anything the reader can
+             choose and the first thing a reader who wants larger text notices. */
+          .recents-inline .recent, .suggestions .recent {
+            font-size: calc(var(--reader-size) * 0.82);
+            line-height: var(--reader-leading);
+          }
+          .recents-inline .recent-title, .suggestions .recent-title {
+            font-family: var(--reader-font);
+          }
+          .recents-inline .recent-host, .suggestions .recent-host {
+            font-size: calc(var(--reader-size) * 0.72);
           }
           /* URL entry — the primary action, so it leads. */
           form { display: flex; gap: 8px; margin: 0 0 8px; }
@@ -209,12 +233,17 @@ public enum StartPage {
           }
           #url:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
           #url::placeholder { color: var(--muted); }
+          /* Outlined, like every other control the accent touches. It was a filled slab
+             with a white label, which is legible right up until the accent is the page's
+             own text colour: on black with the highlight following the text, "Open" was
+             white on near-white. One rule for all of them — the colour goes on the
+             background it was measured against, never underneath a label. */
           button[type="submit"] {
             padding: 9px 16px; font-family: inherit; font-size: 14px;
-            color: #fff; background: var(--accent);
+            color: var(--accent); background: transparent;
             border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
           }
-          button[type="submit"]:hover { filter: brightness(1.08); }
+          button[type="submit"]:hover { background: var(--surface); }
           /* Touch: both controls reach the 44px floor, and the field's text goes to 16px.
              The size is not cosmetic — mobile Safari zooms the whole page in on focusing an
              input under 16px, which throws the layout off and needs a pinch to undo. */

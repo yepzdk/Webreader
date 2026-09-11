@@ -1559,7 +1559,20 @@ enum ReaderChrome {
                          showsRating: Bool = false,
                          rating: TopicPreferences.Rating? = nil,
                          showsHidden: Bool = false,
-                         showsOriginal: Bool = false) -> String {
+                         showsOriginal: Bool = false,
+                         showsQuotes: Bool = false) -> String {
+        // Every other row in this panel now means something on every page that carries it:
+        // the start page took the size, the face, the measure and the leading when it was
+        // given them (#45 follow-up). Quotes is the one that cannot — there is no
+        // blockquote outside an article — so it appears where there is prose to style and
+        // is left out where a reader would be choosing between two words with no effect.
+        let quotesRow = !showsQuotes ? "" : """
+        <h3 class="panel-row" id="panelQuotes">Quotes</h3>
+              <div class="seg" role="group" aria-labelledby="panelQuotes">
+                <button data-key="quoteStyle" data-value="bordered">Bordered</button>
+                <button data-key="quoteStyle" data-value="italic">Italic</button>
+              </div>
+        """
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -1686,11 +1699,7 @@ enum ReaderChrome {
                 <button data-key="lineHeight" data-value="normal">Normal</button>
                 <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
               </div>
-              <h3 class="panel-row" id="panelQuotes">Quotes</h3>
-              <div class="seg" role="group" aria-labelledby="panelQuotes">
-                <button data-key="quoteStyle" data-value="bordered">Bordered</button>
-                <button data-key="quoteStyle" data-value="italic">Italic</button>
-              </div>
+              \(quotesRow)
               <h3 class="panel-row" id="panelTheme">Theme</h3>
               <div class="themes" role="group" aria-labelledby="panelTheme">
                 <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>

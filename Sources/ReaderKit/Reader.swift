@@ -639,7 +639,7 @@ public enum ReaderPage {
                                              excluding: currentURL),
                     canClear: !history.entries.isEmpty,
                     showsRating: true, rating: rating,
-                    showsHidden: true, showsOriginal: true),
+                    showsHidden: true, showsOriginal: true, showsQuotes: true),
                 collapsible: true), by: 2))
           <main>
             <header>

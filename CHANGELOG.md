@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and let the underline mark it, or a bright, tinted or hushed shade of your chosen hue.
   Hushed is the new default — the old saturated links read as noise on a page whose point
   is not having any. Every shade still clears 4.5:1 on every theme.
+- **The start page answers to the reading settings too.** Text size, typeface, column
+  width and line spacing now shape its lists, which were pinned smaller than anything the
+  reader could choose. Quotes stays where there is prose to style.
 - **Every row in the appearance popover says what it does.** Seven controls that a screen
   reader could name and a sighted reader had to guess at.
 
@@ -22,9 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cannot drift apart.
 - **The way back to the site is a globe.** It used to be the arrow leaving a box, which on
   the web means "this opens somewhere else" — the page arrives in the same window.
-- **A control that is "on" lights its outline instead of becoming a coloured slab.** The
-  filled button's white label measured 2.7:1 against the accent under it; the outline and
-  filled icon put the colour where it was measured to work.
+- **Every button the accent touches is an outline now.** A filled one reads fine until the
+  accent is the page's own text colour — on black, "Open" was a white label on a
+  near-white fill. The colour goes on the background it was measured against instead, and
+  a control that is "on" fills its icon.
 
 ### Fixed
 - **An article's first line no longer reads grey.** The fade behind the top controls was
