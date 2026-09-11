@@ -119,12 +119,20 @@ upload.
 
 ## Screenshots
 
-Apple requires one set at each display size, up to ten each:
+App Store Connect names its slots by display size, and a record can be asking for an
+older one than the newest device: an app whose iPhone tab shows **6.5"** rejects a 6.9"
+frame outright, with the sizes it does want spelled out in the error. Generate all four
+and upload whichever the tab in front of you asks for.
 
-| Display | Pixels | Viewport x ratio |
+| Slot | Pixels (portrait) | Viewport x ratio |
 | --- | --- | --- |
-| iPhone 6.9" | 1320 x 2868 portrait | 440 x 956 at 3x |
-| iPad 13" | 2064 x 2752 portrait | 1032 x 1376 at 2x |
+| iPhone 6.9" | 1320 x 2868 | 440 x 956 at 3x |
+| iPhone 6.5" | 1284 x 2778 | 428 x 926 at 3x |
+| iPad 13" | 2064 x 2752 | 1032 x 1376 at 2x |
+| iPad 12.9" | 2048 x 2732 | 1024 x 1366 at 2x |
+
+A phone slot uses the phone's pages and a tablet slot the tablet's, whatever the exact
+pixel count: the settings are chosen for the screen a reader holds, not for the number.
 
 ```sh
 WEBREADER_SHOTS=1 swift test --filter ScreenshotPages   # -> build/screenshots/html/
