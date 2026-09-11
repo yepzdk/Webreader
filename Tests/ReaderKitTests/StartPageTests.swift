@@ -429,20 +429,44 @@ final class StartPageTests: XCTestCase {
             .contains("list.classList.toggle('has-thumbs'"))
     }
 
-    func testTheAaPopoverHasNoImagesSegment() {
-        // "Images / No images" sat among the type and theme controls, where it read as
-        // governing the article's own images. It never did — it governed the thumbnails in
-        // the recents and suggested lists, which now say so on the settings page.
+    func testEachSurfacesPopoverAsksItsOwnQuestions() {
+        // One list of rows was wrong on both pages at once: column width and line spacing
+        // are about a paragraph the start page does not have, and its two lists' order and
+        // thumbnails mean nothing inside an article. The overlap — type, theme, highlight —
+        // is real, so both carry it; the rest is per surface.
         let reader = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
                                                       content: "<p>x</p>"))
-        for page in [StartPage.html(appName: "Reader"), reader] {
+        let start = StartPage.html(appName: "Reader")
+
+        XCTAssertTrue(reader.contains(">Reader appearance</h2>"))
+        XCTAssertTrue(start.contains(">Start page appearance</h2>"))
+
+        for page in [start, reader] {
+            // Shared: the type rows, the theme and the two colour rows.
+            for row in [">Text size</h3>", ">Typeface</h3>", ">Theme</h3>",
+                        ">Highlight</h3>", ">Hue</h3>"] {
+                XCTAssertTrue(page.contains(row), "both popovers need \(row)")
+            }
+            // The old single images control is gone from both; each surface has its own
+            // switch now, in its own popover.
             XCTAssertFalse(page.contains("aria-label=\"Article images\""))
-            XCTAssertFalse(page.contains(">Images<"))
             XCTAssertFalse(page.contains(">No images<"))
-            // The popover is now type, quotes and theme — nothing about images.
-            XCTAssertTrue(page.contains("aria-label=\"Column width\""))
-            XCTAssertTrue(page.contains("aria-label=\"Theme\""))
         }
+
+        // The reader's own: a paragraph's measure, its leading, its quotations, and the edge
+        // the chrome sits against.
+        for row in [">Column width</h3>", ">Line spacing</h3>", ">Quotes</h3>",
+                    ">Controls</h3>"] {
+            XCTAssertTrue(reader.contains(row), "the reader needs \(row)")
+            XCTAssertFalse(start.contains(row), "the start page has no use for \(row)")
+        }
+        XCTAssertTrue(reader.contains("data-key=\"readerThumbnails\" data-value=\"off\""))
+
+        // The start page's own: which list leads, and whether its rows carry images.
+        XCTAssertTrue(start.contains(">Lists</h3>"))
+        XCTAssertTrue(start.contains("data-key=\"startPageOrder\" data-value=\"suggestionsFirst\""))
+        XCTAssertTrue(start.contains("data-key=\"startPageThumbnails\" data-value=\"off\""))
+        XCTAssertFalse(reader.contains("data-key=\"startPageOrder\""))
     }
 
     // MARK: - Which section leads

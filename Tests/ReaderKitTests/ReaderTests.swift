@@ -245,17 +245,18 @@ final class ControlSideSettingTests: XCTestCase {
         XCTAssertEqual(ReaderSettings.decode(["controlSide": "sideways"]).controlSide, .right)
     }
 
-    func testTheSettingsPageOffersTheChoiceAndPostsTheSide() {
-        let page = SettingsPage.html(appName: "R")
-        XCTAssertTrue(page.contains("id=\"controlSide\" type=\"checkbox\""),
-                      "no way to pick the side")
-        XCTAssertTrue(page.contains("controlSide: side.checked ? 'left' : 'right'"),
-                      "the choice is not posted, or is posted as a boolean")
-        // Ticked when the setting is already left, or reopening Settings would misreport it.
-        var settings = ReaderSettings()
-        settings.controlSide = .left
-        XCTAssertTrue(SettingsPage.html(appName: "R", settings: settings)
-            .contains("id=\"controlSide\" type=\"checkbox\" aria-describedby=\"sideHelp\" checked"))
+    func testTheReadersOwnPopoverOffersTheChoice() {
+        // It was a checkbox in Settings, two pages from the chrome it moves. The edge is a
+        // fact about these buttons, so the question is asked where they are — and the answer
+        // arrives under the hand that asked.
+        let page = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                    content: "<p>x</p>", hiddenHits: [:],
+                                                    image: nil))
+        XCTAssertTrue(page.contains(">Controls</h3>"), "no label for the edge")
+        XCTAssertTrue(page.contains("data-key=\"controlSide\" data-value=\"left\""))
+        XCTAssertTrue(page.contains("data-key=\"controlSide\" data-value=\"right\""))
+        XCTAssertFalse(SettingsPage.html(appName: "R").contains("id=\"controlSide\""),
+                       "the settings page still carries the old switch")
     }
 
     func testTheReaderKeepsTheAttributeInStepLive() {
@@ -389,10 +390,12 @@ final class ReaderPageTests: XCTestCase {
         let html = ReaderPage.html(article: article)
         XCTAssertTrue(html.contains("title=\"Recent articles\""))
         XCTAssertTrue(html.contains("title=\"Hidden text\""))
-        XCTAssertTrue(html.contains("title=\"Text &amp; appearance\""))
+        XCTAssertTrue(html.contains("title=\"Reader appearance\""))
         XCTAssertTrue(html.contains(">Recent articles</h2>"))
         XCTAssertTrue(html.contains(">Hidden text</h2>"))
-        XCTAssertTrue(html.contains(">Text &amp; appearance</h2>"))
+        // Named for its surface: the start page's popover asks a different
+        // set of questions and says so in its own title.
+        XCTAssertTrue(html.contains(">Reader appearance</h2>"))
         XCTAssertTrue(html.contains("aria-labelledby=\"readerRecentsTitle\""))
         XCTAssertTrue(html.contains("aria-labelledby=\"readerHiddenTitle\""))
         XCTAssertTrue(html.contains("aria-labelledby=\"readerPanelTitle\""))

@@ -184,74 +184,23 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("&quot; onload=&quot;"))
     }
 
-    // MARK: - Article images (#33)
+    // MARK: - What left this page (#45 follow-up)
 
-    func testBothThumbnailSwitchesAreOnTheSettingsPage() {
-        // One switch in the Aa popover, labelled "Images / No images", read as governing the
-        // article's own images. It never did — only these lists' thumbnails.
+    func testTheSurfaceSettingsAreNotHereAnyMore() {
+        // Article images, start page order and the reader's control edge all lived here, two
+        // pages away from the lists and the chrome they change. They are in the popover of
+        // the surface they belong to now, where a reader can see the effect while choosing.
         let page = html()
-        XCTAssertTrue(page.contains("<h2 class=\"section\">Article images</h2>"))
-        XCTAssertTrue(page.contains("id=\"startPageThumbnails\" type=\"checkbox\" checked"))
-        XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\" checked"))
-        XCTAssertTrue(page.contains("post('readerSettings', change)"))
-        // Each says which surface it governs.
-        XCTAssertTrue(page.contains("on the start page</span>"))
-        XCTAssertTrue(page.contains("in the reader dropdown</span>"))
-    }
-
-    func testEachSwitchReflectsItsOwnStoredChoice() {
-        var settings = ReaderSettings()
-        settings.readerThumbnails = .off
-        let page = SettingsPage.html(appName: "WebReader", settings: settings)
-        XCTAssertTrue(page.contains("id=\"startPageThumbnails\" type=\"checkbox\" checked"))
-        XCTAssertTrue(page.contains("id=\"readerThumbnails\" type=\"checkbox\">"))
-    }
-
-    func testTheSwitchesPostOnlyTheKeyTheyOwn() {
-        // This page's copy of the settings is as old as the document — a back/forward restore
-        // reuses the original bytes — so posting a whole object from here would push a stale
-        // font size and theme over newer ones. The host merges one key onto what is stored.
-        var settings = ReaderSettings()
-        settings.fontSize = 22
-        settings.theme = .sepia
-        let page = SettingsPage.html(appName: "WebReader", settings: settings)
-        XCTAssertFalse(page.contains("var settings = \(settings.json);"))
-        XCTAssertTrue(page.contains("var change = {};"))
-        XCTAssertTrue(page.contains("change[key] = box.checked ? 'on' : 'off';"))
-        // The box's id IS the key it writes, so the two cannot drift apart.
-        XCTAssertTrue(page.contains("['startPageThumbnails',"))
-        XCTAssertTrue(page.contains("'readerThumbnails'].forEach"))
-        // …and the lookup is guarded like every other one in this script.
-        XCTAssertTrue(page.contains("if (!box) { return; }"))
-    }
-
-    // MARK: - Start page order
-
-    func testTheStartPageOrderSwitchIsOffByDefault() {
-        let page = html()
-        XCTAssertTrue(page.contains("<h2 class=\"section\">Start page</h2>"))
-        // Unticked is the order the page already has, so the box says what it would change.
-        XCTAssertTrue(page.contains("id=\"startPageOrder\" type=\"checkbox\" aria-describedby=\"orderHelp\">"))
-        XCTAssertTrue(page.contains("<span>Show suggested articles before recent articles</span>"))
-        // Built from the same checkbox pattern as its neighbours, not a control of its own.
-        XCTAssertTrue(page.contains("<label class=\"check\">"))
-    }
-
-    func testTheSwitchReflectsAStoredSuggestionsFirst() {
-        var settings = ReaderSettings()
-        settings.startPageOrder = .suggestionsFirst
-        XCTAssertTrue(SettingsPage.html(appName: "WebReader", settings: settings)
-            .contains("id=\"startPageOrder\" type=\"checkbox\" aria-describedby=\"orderHelp\" checked>"))
-    }
-
-    func testTheOrderSwitchPostsTheOrderItMeans() {
-        // One key, like the thumbnail switches, and a value that names the order rather than
-        // a boolean the store would have to interpret.
-        let page = html()
-        XCTAssertTrue(page.contains("var order = document.getElementById('startPageOrder');"))
-        XCTAssertTrue(page.contains("if (order) {"))
-        XCTAssertTrue(page.contains(
-            "startPageOrder: order.checked ? 'suggestionsFirst' : 'recentsFirst'"))
+        for section in ["Article images", "Start page", "Reader controls"] {
+            XCTAssertFalse(page.contains("<h2 class=\"section\">\(section)</h2>"),
+                           "\(section) should have moved into a popover")
+        }
+        for id in ["startPageThumbnails", "readerThumbnails", "startPageOrder", "controlSide"] {
+            XCTAssertFalse(page.contains("id=\"\(id)\""), "\(id) still has a switch here")
+        }
+        // The sections that are about the app rather than a surface stay.
+        XCTAssertTrue(page.contains("<h2 class=\"section\">Suggestion sources</h2>"))
+        XCTAssertTrue(page.contains("<h2 class=\"section\">Hidden text</h2>"))
     }
 
     func testIdentifiesItselfForBackForwardRestoration() {

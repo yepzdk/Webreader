@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Choose how loud a link is, not just what colour** (#45). Four levels: follow the text
+  and let the underline mark it, or a bright, tinted or hushed shade of your chosen hue.
+  Hushed is the new default — the old saturated links read as noise on a page whose point
+  is not having any. Every shade still clears 4.5:1 on every theme.
+- **The start page has its own appearance popover** with its own text size and typeface,
+  plus which of its two lists leads and whether rows carry thumbnails. Its lists were
+  pinned smaller than anything you could choose; sharing the reader's settings was worse,
+  since a 22px serif article dragged them along with it.
+- **The reader's popover gained the controls that belong to it**: quotes, thumbnails and
+  which edge its buttons sit against.
+- **Every row in both popovers says what it does.** Controls a screen reader could name
+  and a sighted reader had to guess at.
+
 ### Changed
 - **The app has an icon of its own.** A brass drop cap opening a paragraph, with a page
   marker beside it, replacing the placeholder W on slate. Every platform renders from one
@@ -14,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cannot drift apart.
 - **The way back to the site is a globe.** It used to be the arrow leaving a box, which on
   the web means "this opens somewhere else" — the page arrives in the same window.
+- **Every button the accent touches is an outline now.** A filled one reads fine until the
+  accent is the page's own text colour — on black, "Open" was a white label on a
+  near-white fill. The colour goes on the background it was measured against instead, and
+  a control that is "on" fills its icon.
+- **Settings no longer holds article images, start page order or the reader's control
+  edge.** All three now live in the popover of the surface they change, where the effect is
+  on screen while you choose.
 
 ### Fixed
 - **An article's first line no longer reads grey.** The fade behind the top controls was

@@ -80,25 +80,24 @@ public enum OfflineFallback {
     /// always applies when one is given, replacing the light defaults and the
     /// `prefers-color-scheme` block both. Without one it follows the system exactly as
     /// before. Its palette is spelled out here rather than taken from `ReaderChrome`
-    /// because it needs `--accent-fg` (the Try Again button) and no reading variables.
+    /// because it needs none of the reading variables — only the five the chrome uses.
     public static func html(appName: String, host: String?, kind: Kind,
                             platform: Platform = .macOS,
                             palette: ReaderPalette? = nil) -> String {
         let headline = HTML.escape(kind.headline)
         let message = HTML.escape(kind.message(host: host))
-        // The button label stays white on the accent in every palette: `ReaderPalette` has
-        // no foreground-on-accent role, and inventing one from a colour literal the host
-        // may have written as anything is guesswork the stock themes don't do either.
-        // This page spells its own palette rather than taking `ReaderChrome.themeCSS`, so it
-        // has to define the safe-area variables its chrome offsets read. Left out, every
-        // `var(--safe-*)` here resolves to nothing, the declaration around it is invalid, and
+        // `--surface` is the Try Again button's hover, and has to be spelled here like the
+        // rest: this page writes its own `:root` rather than taking `ReaderChrome.themeCSS`,
+        // so a variable it forgets resolves to nothing and takes its declaration with it.
+        // The same is true of the safe-area variables its chrome offsets read: left out,
+        // every `var(--safe-*)` resolves to nothing, the declaration around it is invalid,
         // the page loses the insets that keep Home clear of a notch.
         let safeArea = ReaderChrome.safeAreaCSS(platform: platform)
         let theme = palette.map {
             """
             :root {
               --bg: \($0.bg); --fg: \($0.fg); --muted: \($0.muted); --accent: \($0.accent);
-              --accent-fg: #ffffff; --border: \($0.border);
+              --surface: \($0.surface); --border: \($0.border);
               color-scheme: \($0.isDark ? "dark" : "light");
             \(safeArea)
             }
@@ -106,13 +105,13 @@ public enum OfflineFallback {
         } ?? """
         :root {
           --bg: #fafafa; --fg: #1c1c1e; --muted: #6b6b70; --accent: #2563eb;
-          --accent-fg: #ffffff; --border: rgba(0,0,0,0.12);
+          --surface: rgba(0,0,0,0.05); --border: rgba(0,0,0,0.12);
         \(safeArea)
         }
         @media (prefers-color-scheme: dark) {
           :root {
             --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #3b82f6;
-            --accent-fg: #ffffff; --border: rgba(255,255,255,0.16);
+            --surface: rgba(255,255,255,0.08); --border: rgba(255,255,255,0.16);
           }
         }
         """
@@ -153,13 +152,16 @@ public enum OfflineFallback {
           .icon svg { width: 44px; height: 44px; }
           h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
           p { color: var(--muted); margin: 0 auto 24px; max-width: 24rem; }
+          /* Outlined, like every control the accent touches: the colour sits on the
+             background it was measured against rather than under a label. A filled button
+             reads fine until the accent is the page's own text colour. */
           .card button {
             font: inherit; font-weight: 500;
-            color: var(--accent-fg); background: var(--accent);
-            border: 0; border-radius: 6px; padding: 9px 18px; cursor: pointer;
-            transition: opacity 160ms ease-out;
+            color: var(--accent); background: transparent;
+            border: 1px solid var(--accent); border-radius: 6px; padding: 9px 18px;
+            cursor: pointer; transition: background-color 160ms ease-out;
           }
-          .card button:hover { opacity: 0.92; }
+          .card button:hover { background: var(--surface); }
           .card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
           @media (prefers-reduced-motion: reduce) { .card button { transition: none; } }
           /* Touch: the one action on the page reaches the 44px floor. */

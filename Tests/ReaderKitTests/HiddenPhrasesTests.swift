@@ -134,7 +134,10 @@ final class HiddenPhrasesTests: XCTestCase {
         // text label — never an emoji.
         let css = HiddenPhrases.hideAffordanceCSS()
         let js = HiddenPhrases.hideAffordanceJS()
-        XCTAssertTrue(css.contains("background: var(--accent);"))
+        // Outlined like every control the accent touches: the colour is the border
+        // and the label, never a fill under a label.
+        XCTAssertTrue(css.contains("border: 1px solid var(--accent);"))
+        XCTAssertTrue(css.contains("color: var(--accent);"))
         XCTAssertTrue(css.contains("border-radius: 6px;"))
         XCTAssertTrue(js.contains("stroke=\"currentColor\""))
         XCTAssertTrue(js.contains("<span>Hide text</span>"))

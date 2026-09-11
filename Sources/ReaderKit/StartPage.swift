@@ -173,7 +173,9 @@ public enum StartPage {
             }
           }
           /* The front door — title and URL field — stays narrow and centred whatever the
-             window does; only the lists below it spread out. */
+             window does; only the lists below it spread out. Its own measure, not the
+             reader's: the column width setting is about a paragraph's line length, and this
+             page has no paragraphs. */
           .intro { max-width: 34rem; margin: 0 auto; }
           .lists { display: grid; grid-template-columns: 1fr; gap: 0 32px; }
           /* Grid children default to min-width:auto, which refuses to shrink and breaks the
@@ -195,9 +197,34 @@ public enum StartPage {
             :root[data-order="suggestionsFirst"] .recents-column .section { margin-top: 36px; }
             :root[data-order="suggestionsFirst"] #suggested .section { margin-top: 28px; }
           }
+          /* The page's own words follow the page's own two settings — `--start-*`, not the
+             reader's. Sharing one pair meant a 22px serif article dragged this page's lists
+             with it, and neither value could be right for both: an article is read, a list
+             of them is scanned.
+
+             The chrome does not follow: buttons, hints and section labels stay in the sans
+             stack at their fixed sizes. Serif is a choice about prose, and a 12px serif
+             button is a worse button — the same split the reader makes, where the article
+             takes the setting and the controls around it do not.
+
+             The multipliers keep 15px reading exactly as it did before the control existed:
+             a 22px title, 12px rows, an 11px host line. */
           h1 {
-            font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
-            margin: 0 0 20px; text-align: center;
+            font-family: var(--start-font);
+            font-size: calc(var(--start-size) * 1.47); font-weight: 600;
+            letter-spacing: -0.01em; margin: 0 0 20px; text-align: center;
+          }
+          /* The lists are the reading on this page, so they take its size and face. They
+             were pinned at 12px, which is smaller than anything a reader can choose and the
+             first thing someone who wants larger text notices. */
+          .recents-inline .recent, .suggestions .recent {
+            font-size: calc(var(--start-size) * 0.8);
+          }
+          .recents-inline .recent-title, .suggestions .recent-title {
+            font-family: var(--start-font);
+          }
+          .recents-inline .recent-host, .suggestions .recent-host {
+            font-size: calc(var(--start-size) * 0.73);
           }
           /* URL entry — the primary action, so it leads. */
           form { display: flex; gap: 8px; margin: 0 0 8px; }
@@ -209,12 +236,17 @@ public enum StartPage {
           }
           #url:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
           #url::placeholder { color: var(--muted); }
+          /* Outlined, like every other control the accent touches. It was a filled slab
+             with a white label, which is legible right up until the accent is the page's
+             own text colour: on black with the highlight following the text, "Open" was
+             white on near-white. One rule for all of them — the colour goes on the
+             background it was measured against, never underneath a label. */
           button[type="submit"] {
             padding: 9px 16px; font-family: inherit; font-size: 14px;
-            color: #fff; background: var(--accent);
+            color: var(--accent); background: transparent;
             border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
           }
-          button[type="submit"]:hover { filter: brightness(1.08); }
+          button[type="submit"]:hover { background: var(--surface); }
           /* Touch: both controls reach the 44px floor, and the field's text goes to 16px.
              The size is not cosmetic — mobile Safari zooms the whole page in on focusing an
              input under 16px, which throws the layout off and needs a pinch to undo. */
@@ -381,7 +413,9 @@ public enum StartPage {
           \(ReaderChrome.indent(ReaderChrome.controlsScript(settings: settings,
                                                              thumbnails: .startPage,
                                                              hidden: HiddenPhrases([]),
-                                                             platform: platform), by: 10))
+                                                             platform: platform,
+                                                             hostedAccent: settings.theme == .auto
+                                                                 && palette != nil), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
           // What the whole column falls back to once cleared — heading and list included, so
           // it is this page's own empty state rather than the popover's one-line

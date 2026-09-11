@@ -241,6 +241,10 @@ enum ReaderChrome {
                 ? "" : " data-order=\"\(settings.startPageOrder.rawValue)\"")
             + (settings.controlSide == .right
                 ? "" : " data-controls=\"\(settings.controlSide.rawValue)\"")
+            // Only `text` needs an attribute: it is the one value that changes the panel's
+            // own shape by retiring the hue row. The colours themselves arrive as
+            // `--accent`, which every theme block already writes.
+            + (settings.highlight == .text ? " data-highlight=\"text\"" : "")
     }
 
     /// The palette custom properties: light defaults, the dark media query, and the four
@@ -263,7 +267,8 @@ enum ReaderChrome {
                          palette: ReaderPalette? = nil) -> String {
         let hosted = settings.theme == .auto ? palette : nil
         let rootPalette = hosted.map { properties($0, colorScheme: true) }
-            ?? properties(.stock(for: .light, prefersDark: false, accent: settings.accent),
+            ?? properties(.stock(for: .light, prefersDark: false, accent: settings.accent,
+                                 highlight: settings.highlight),
                           colorScheme: false)
         var blocks = ["""
         :root {
@@ -273,18 +278,27 @@ enum ReaderChrome {
           --reader-width: \(settings.width.css);
           --reader-gutter: \(settings.width.compactGutter);
           --reader-font: \(settings.fontFamily.css(on: platform));
+          /* The start page's own two, because an article and a list of them are not the same
+             piece of reading and one pair could not be right for both: setting the article
+             to 22px serif used to take the start page's lists with it. Both pairs are
+             emitted on every page; each page uses the one it owns. */
+          --start-size: \(settings.startFontSize)px;
+          --start-font: \(settings.startFontFamily.css(on: platform));
         \(indent(safeAreaCSS(platform: platform), by: 0))
         }
-        \(hosted == nil ? swatchCSS(for: .light) : hostedSwatchCSS)
+        \(hosted == nil ? swatchCSS(for: .light, highlight: settings.highlight) : hostedSwatchCSS)
         """]
         if hosted == nil {
             blocks.append("""
             @media (prefers-color-scheme: dark) {
               :root {
                 \(indent(properties(.stock(for: .dark, prefersDark: true,
-                                            accent: settings.accent), colorScheme: false), by: 4))
+                                            accent: settings.accent,
+                                            highlight: settings.highlight),
+                                     colorScheme: false), by: 4))
               }
-            \(indent(swatchCSS(for: .dark, scoped: ":root:not([data-theme])"), by: 2))
+            \(indent(swatchCSS(for: .dark, scoped: ":root:not([data-theme])",
+                               highlight: settings.highlight), by: 2))
             }
             """)
         }
@@ -292,9 +306,12 @@ enum ReaderChrome {
             """
             :root[data-theme="\(theme.rawValue)"] {
               \(indent(properties(.stock(for: theme, prefersDark: false,
-                                          accent: settings.accent), colorScheme: true), by: 2))
+                                          accent: settings.accent,
+                                          highlight: settings.highlight),
+                                   colorScheme: true), by: 2))
             }
-            \(swatchCSS(for: theme, scoped: ":root[data-theme=\"\(theme.rawValue)\"]"))
+            \(swatchCSS(for: theme, scoped: ":root[data-theme=\"\(theme.rawValue)\"]",
+                        highlight: settings.highlight))
             """
         }.joined(separator: "\n")
         blocks.append("""
@@ -305,23 +322,69 @@ enum ReaderChrome {
         return blocks.joined(separator: "\n")
     }
 
-    /// The accent swatches, in the shade each theme actually renders.
+    /// The hue swatches, in the shade each theme actually renders at the strength in force.
+    ///
+    /// They follow the highlight rather than showing one fixed ramp, because a swatch that
+    /// does not paint what picking it paints is a lie you can see: at `.tinted` the five
+    /// are pale shades of the ink, which is exactly what the page will do. They stay
+    /// distinguishable there because a tint keeps the ink's *lightness* and only the hue
+    /// moves — 65% of it, which separates five discs long before it colours a paragraph.
+    ///
+    /// `.text` paints no hue at all, so the row is hidden rather than rendered grey five
+    /// times; see `highlightCSS`.
     ///
     /// Emitted from here rather than written into `controlsCSS` because only this function
     /// knows whether the host supplied a palette. A static block would have added a
     /// `prefers-color-scheme` query to pages that must not answer one — a hosted desktop
     /// theme is the answer, and a page that second-guesses it flickers on login.
-    static func swatchCSS(for theme: ReaderSettings.Theme, scoped: String = ":root") -> String {
-        ReaderSettings.Accent.allCases.map { accent in
+    static func swatchCSS(for theme: ReaderSettings.Theme, scoped: String = ":root",
+                          highlight: ReaderSettings.Highlight = .bright) -> String {
+        // `.text` has no hue to show; the swatches keep the nearest strength that does, so
+        // the row a reader re-opens after switching back is not five grey dots.
+        let shown: ReaderSettings.Highlight = highlight == .text ? .hushed : highlight
+        return ReaderSettings.Accent.allCases.map { accent in
             let selector = scoped == ":root" ? ".swatch-\(accent.rawValue)"
                                              : "\(scoped) .swatch-\(accent.rawValue)"
-            return "\(selector) { background: \(ReaderPalette.hex(accent, on: theme)); }"
+            let fill = ReaderPalette.hex(accent, on: theme, highlight: shown)
+            // A tint is the ink with a whisper of hue in it, so five of them sit within
+            // 0.03 of each other on a dark page — honest, and nearly unreadable as a row of
+            // discs. The fill still shows exactly what the page will paint; the rim carries
+            // the hue at the strength that can hold it. Only here: at the other levels the
+            // fills are already five different colours and a second ring is noise.
+            guard shown == .tinted else {
+                return "\(selector) { background: \(fill); }"
+            }
+            let rim = ReaderPalette.hex(accent, on: theme, highlight: .hushed)
+            return "\(selector) { background: \(fill); border-color: \(rim); }"
         }.joined(separator: "\n")
     }
 
     /// A hosted palette supplies the accent itself, so the choice has nothing to change and
     /// the control says so by not being there.
     static let hostedSwatchCSS = ".accents { display: none; }"
+
+    /// The whole colour table as a JS object literal: `ACCENTS[theme][highlight][hue]`.
+    ///
+    /// Eighty hexes, about a kilobyte, and the only way the popover can answer instantly.
+    /// The alternative was a stylesheet keyed on two more attributes — five hues times four
+    /// strengths times four themes of `--accent` declarations, which is the same table at
+    /// eight times the bytes and with the cascade in the way.
+    ///
+    /// Generated from `ReaderPalette.hex`, so the live path and the rendered stylesheet
+    /// cannot disagree: one table, read twice.
+    static var accentTableJS: String {
+        let themes: [ReaderSettings.Theme] = [.light, .sepia, .dark, .black]
+        let body = themes.map { theme in
+            let levels = ReaderSettings.Highlight.allCases.map { highlight -> String in
+                let hues = ReaderSettings.Accent.allCases.map { accent in
+                    "\(accent.rawValue): '\(ReaderPalette.hex(accent, on: theme, highlight: highlight))'"
+                }.joined(separator: ", ")
+                return "\(highlight.rawValue): { \(hues) }"
+            }.joined(separator: ",\n    ")
+            return "  \(theme.rawValue): {\n    \(levels)\n  }"
+        }.joined(separator: ",\n")
+        return "{\n\(body)\n}"
+    }
 
     /// A palette's six custom properties, two declarations to a line, as every block in
     /// `themeCSS` has always written them. `colorScheme` adds the `color-scheme` line: the
@@ -423,8 +486,16 @@ enum ReaderChrome {
         }
         #readerRecentsBtn svg, #readerHiddenBtn svg, #readerOriginalBtn svg,
         #readerMoreBtn svg, #readerLessBtn svg { display: block; }
-        /* Rating buttons: same box as the other icon controls. Pressed is the accent, the one
-           place in the chrome where a control is "on" rather than merely open. */
+        /* Rating buttons: same box as the other icon controls. Pressed is the one place in
+           the chrome where a control is "on" rather than merely open, and it says so by
+           lighting its outline and filling its glyph rather than by becoming a slab.
+
+           The slab was a real defect, not a taste: white on the accent measured 2.7:1 for
+           violet and never beat 3.7:1 for any hue, so the label on the one control that
+           reports a decision was the least readable thing on the page. Outline and fill
+           put the accent on the *background*, where the same colour is the 4.5:1 it was
+           chosen to be — and it keeps working when the highlight is `text`, where a filled
+           slab would have been the body colour with nothing legible on it. */
         #readerMoreBtn, #readerLessBtn {
           padding: 5px 9px; font-family: inherit;
           color: var(--muted); background: var(--bg);
@@ -432,7 +503,10 @@ enum ReaderChrome {
         }
         #readerMoreBtn:hover, #readerLessBtn:hover { color: var(--fg); }
         #readerMoreBtn[aria-pressed="true"], #readerLessBtn[aria-pressed="true"] {
-          color: #fff; background: var(--accent); border-color: var(--accent);
+          color: var(--accent); border-color: var(--accent);
+        }
+        #readerMoreBtn[aria-pressed="true"] svg, #readerLessBtn[aria-pressed="true"] svg {
+          fill: currentColor;
         }
         /* How many blocks this article lost. Inverted neutrals — black on white in light,
            white on black in dark, brown on cream in sepia — never the accent. */
@@ -589,6 +663,27 @@ enum ReaderChrome {
         .swatch-dark { background: #1c1c1e; }
         .swatch-black { background: #000000; }
         .accents { display: flex; justify-content: space-between; padding: 2px; }
+        /* A row's own label. Seven controls with nothing above them was seven guesses; the
+           labels were already in `aria-label`, so this shows the reader what the screen
+           reader was being told. Quieter and smaller than `.panel-title`, which names the
+           whole popover — the hierarchy has to be visible or the panel reads as a list of
+           equal headings. */
+        .panel-row {
+          margin: 12px 2px 5px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
+          text-transform: uppercase; color: var(--muted);
+        }
+        .panel-row:first-of-type { margin-top: 8px; }
+        /* Four options in a 2x2, because "Follow text" cannot survive a quarter of 250px.
+           The grid keeps one border box around the set, so it still reads as one control
+           rather than four buttons. */
+        .seg-grid { display: grid; grid-template-columns: 1fr 1fr; }
+        .seg-grid button + button { border-left: 0; }
+        .seg-grid button:nth-child(even) { border-left: 1px solid var(--border); }
+        .seg-grid button:nth-child(n+3) { border-top: 1px solid var(--border); }
+        /* Following the text is a real answer to "which colour", so the hue row retires
+           rather than sitting there painting five swatches nothing will use. */
+        :root[data-highlight="text"] #panelHue,
+        :root[data-highlight="text"] .accents { display: none; }
         /* Two blocks at the end, so source order settles every override without a
            specificity fight. They answer different questions, which is why they are two.
 
@@ -1470,7 +1565,15 @@ enum ReaderChrome {
                          showsRating: Bool = false,
                          rating: TopicPreferences.Rating? = nil,
                          showsHidden: Bool = false,
-                         showsOriginal: Bool = false) -> String {
+                         showsOriginal: Bool = false,
+                         surface: Surface = .start) -> String {
+        // Which page this chrome belongs to, and therefore which questions its popover asks.
+        // The two lists overlap but are not the same list, and sharing one was a defect
+        // rather than a shortcut: column width and line spacing are about a paragraph, which
+        // the start page has none of, while the order of its two lists and their thumbnails
+        // mean nothing inside an article. Three of them used to live in Settings, a page away
+        // from the thing they change.
+        let panelRows = surface == .reader ? readerPanelRows : startPanelRows
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -1564,52 +1667,153 @@ enum ReaderChrome {
           \(hiddenControl)
           \(originalControl)
           <div class="reader-control">
-            <button id="readerAa" aria-label="Reader appearance"
-                    title="Text &amp; appearance" aria-haspopup="true"
+            <button id="readerAa" aria-label="\(surface.appearanceLabel)"
+                    title="\(surface.appearanceLabel)" aria-haspopup="true"
                     aria-expanded="false" aria-controls="readerPanel">Aa</button>
             <div id="readerPanel" hidden aria-labelledby="readerPanelTitle">
-              <h2 class="panel-title" id="readerPanelTitle">Text &amp; appearance</h2>
-              <div class="seg" role="group" aria-label="Font size">
-                <button data-step="-1" aria-label="Decrease font size"
-                        title="Smaller text"><span class="a-small">A</span></button>
-                <button data-step="1" aria-label="Increase font size"
-                        title="Larger text"><span class="a-large">A</span></button>
-              </div>
-              <div class="seg" role="group" aria-label="Font style">
-                <button data-key="fontFamily" data-value="serif">Serif</button>
-                <button data-key="fontFamily" data-value="sans">Sans</button>
-              </div>
-              <div class="seg" role="group" aria-label="Column width">
-                <button data-key="width" data-value="narrow">Narrow</button>
-                <button data-key="width" data-value="normal">Normal</button>
-                <button data-key="width" data-value="wide">Wide</button>
-              </div>
-              <div class="seg" role="group" aria-label="Line height">
-                <button data-key="lineHeight" data-value="compact">Compact</button>
-                <button data-key="lineHeight" data-value="normal">Normal</button>
-                <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
-              </div>
-              <div class="seg" role="group" aria-label="Quotes">
-                <button data-key="quoteStyle" data-value="bordered">Bordered</button>
-                <button data-key="quoteStyle" data-value="italic">Italic</button>
-              </div>
-              <div class="themes" role="group" aria-label="Theme">
-                <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
-                <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
-                <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
-                <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
-                <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
-              </div>
-              <div class="accents" role="group" aria-label="Accent colour">
-                <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue accent" title="Blue"></button>
-                <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal accent" title="Teal"></button>
-                <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet accent" title="Violet"></button>
-                <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust accent" title="Rust"></button>
-                <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss accent" title="Moss"></button>
-              </div>
+              <h2 class="panel-title" id="readerPanelTitle">\(surface.appearanceLabel)</h2>
+              \(indent(panelRows, by: 8))
             </div>
           </div>
         </div>
+        """
+    }
+
+    /// Which page the chrome belongs to. Only the appearance popover differs, but it differs
+    /// enough that one list of rows was wrong on both pages at once.
+    public enum Surface: Sendable {
+        case reader, start
+
+        var appearanceLabel: String {
+            switch self {
+            case .reader: return "Reader appearance"
+            case .start: return "Start page appearance"
+            }
+        }
+    }
+
+    /// Rows shared by both popovers, parameterised by whose type settings they change.
+    ///
+    /// `sizeKey` and `faceKey` are the only difference: the start page keeps `startFontSize`
+    /// and `startFontFamily`, the reader keeps `fontSize` and `fontFamily`. One pair for both
+    /// was the bug — a 22px serif article dragged the start page's lists along with it.
+    private static func typeRows(sizeKey: String, faceKey: String) -> String {
+        """
+        <!-- Every row says what it does. The `aria-label`s said it already, so a screen
+             reader knew what a sighted reader had to guess at; `aria-labelledby` points each
+             group at the heading a reader can see, which is one label rather than two that
+             can disagree. -->
+        <h3 class="panel-row" id="panelSize">Text size</h3>
+        <div class="seg" role="group" aria-labelledby="panelSize">
+          <button data-step="-1" data-size-key="\(sizeKey)" aria-label="Decrease text size"
+                  title="Smaller text"><span class="a-small">A</span></button>
+          <button data-step="1" data-size-key="\(sizeKey)" aria-label="Increase text size"
+                  title="Larger text"><span class="a-large">A</span></button>
+        </div>
+        <h3 class="panel-row" id="panelFace">Typeface</h3>
+        <div class="seg" role="group" aria-labelledby="panelFace">
+          <button data-key="\(faceKey)" data-value="serif">Serif</button>
+          <button data-key="\(faceKey)" data-value="sans">Sans</button>
+        </div>
+        """
+    }
+
+    /// Theme, then how loud a link is, then which colour it is. The tail of both popovers:
+    /// these three are the app's, not a page's, and a reader who changes them on one surface
+    /// means them everywhere.
+    ///
+    /// Two colour rows because they are two questions, and the second is only worth asking
+    /// once the first has said yes to colour at all — `:root[data-highlight="text"]` hides
+    /// it. A 2x2 grid rather than one row of four: "Follow text" is the option that has to
+    /// be legible, and four segments across a 250px popover leaves room for "Text", which
+    /// says nothing on its own.
+    private static let sharedPanelRows = """
+    <h3 class="panel-row" id="panelTheme">Theme</h3>
+    <div class="themes" role="group" aria-labelledby="panelTheme">
+      <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
+      <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
+      <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
+      <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
+      <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
+    </div>
+    <h3 class="panel-row" id="panelHighlight">Highlight</h3>
+    <div class="seg seg-grid" role="group" aria-labelledby="panelHighlight">
+      <button data-key="highlight" data-value="text">Follow text</button>
+      <button data-key="highlight" data-value="bright">Bright</button>
+      <button data-key="highlight" data-value="tinted">Tinted</button>
+      <button data-key="highlight" data-value="hushed">Hushed</button>
+    </div>
+    <h3 class="panel-row" id="panelHue">Hue</h3>
+    <div class="accents" role="group" aria-labelledby="panelHue">
+      <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue" title="Blue"></button>
+      <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal" title="Teal"></button>
+      <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet" title="Violet"></button>
+      <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust" title="Rust"></button>
+      <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss" title="Moss"></button>
+    </div>
+    """
+
+    /// The reader's popover: the article's own typography, then the app's colours, then the
+    /// hand that holds the device.
+    ///
+    /// Column width, line spacing and quotes live here and only here — all three are about a
+    /// paragraph, and the start page has none. The controls' edge came out of Settings: it is
+    /// a fact about this chrome, and a reader who wants it moved wants it moved while looking
+    /// at it.
+    private static var readerPanelRows: String {
+        """
+        \(typeRows(sizeKey: "fontSize", faceKey: "fontFamily"))
+        <h3 class="panel-row" id="panelWidth">Column width</h3>
+        <div class="seg" role="group" aria-labelledby="panelWidth">
+          <button data-key="width" data-value="narrow">Narrow</button>
+          <button data-key="width" data-value="normal">Normal</button>
+          <button data-key="width" data-value="wide">Wide</button>
+        </div>
+        <h3 class="panel-row" id="panelLeading">Line spacing</h3>
+        <div class="seg" role="group" aria-labelledby="panelLeading">
+          <button data-key="lineHeight" data-value="compact">Compact</button>
+          <button data-key="lineHeight" data-value="normal">Normal</button>
+          <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
+        </div>
+        <h3 class="panel-row" id="panelQuotes">Quotes</h3>
+        <div class="seg" role="group" aria-labelledby="panelQuotes">
+          <button data-key="quoteStyle" data-value="bordered">Bordered</button>
+          <button data-key="quoteStyle" data-value="italic">Italic</button>
+        </div>
+        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+        <div class="seg" role="group" aria-labelledby="panelThumbs">
+          <button data-key="readerThumbnails" data-value="on">On</button>
+          <button data-key="readerThumbnails" data-value="off">Off</button>
+        </div>
+        \(sharedPanelRows)
+        <h3 class="panel-row" id="panelSide">Controls</h3>
+        <div class="seg" role="group" aria-labelledby="panelSide">
+          <button data-key="controlSide" data-value="left">Left</button>
+          <button data-key="controlSide" data-value="right">Right</button>
+        </div>
+        """
+    }
+
+    /// The start page's popover: what its two lists show and in which order, then its own
+    /// typography, then the app's colours.
+    ///
+    /// The order and the thumbnails came out of Settings, where they were two pages away
+    /// from the lists they rearrange — and a list you can see while you change it needs no
+    /// explaining.
+    private static var startPanelRows: String {
+        """
+        <h3 class="panel-row" id="panelOrder">Lists</h3>
+        <div class="seg" role="group" aria-labelledby="panelOrder">
+          <button data-key="startPageOrder" data-value="recentsFirst">Recent first</button>
+          <button data-key="startPageOrder" data-value="suggestionsFirst">Suggested first</button>
+        </div>
+        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+        <div class="seg" role="group" aria-labelledby="panelThumbs">
+          <button data-key="startPageThumbnails" data-value="on">On</button>
+          <button data-key="startPageThumbnails" data-value="off">Off</button>
+        </div>
+        \(typeRows(sizeKey: "startFontSize", faceKey: "startFontFamily"))
+        \(sharedPanelRows)
         """
     }
 
@@ -1633,7 +1837,8 @@ enum ReaderChrome {
     static func controlsScript(settings: ReaderSettings,
                                thumbnails: ReaderSettings.ThumbnailScope,
                                hidden: HiddenPhrases = HiddenPhrases(),
-                               hitsJSON: String = "{}", platform: Platform = .macOS) -> String {
+                               hitsJSON: String = "{}", platform: Platform = .macOS,
+                               hostedAccent: Bool = false) -> String {
         let sans = platform.sansStack
         let serif = platform.serifStack
         return """
@@ -1648,6 +1853,17 @@ enum ReaderChrome {
           var WIDTHS = { narrow: '\(ReaderSettings.Width.narrow.css)', normal: '\(ReaderSettings.Width.normal.css)', wide: '\(ReaderSettings.Width.wide.css)' };
           var GUTTERS = { narrow: '\(ReaderSettings.Width.narrow.compactGutter)', normal: '\(ReaderSettings.Width.normal.compactGutter)', wide: '\(ReaderSettings.Width.wide.compactGutter)' };
           var LEADINGS = { compact: '\(ReaderSettings.LineHeight.compact.css)', normal: '\(ReaderSettings.LineHeight.normal.css)', relaxed: '\(ReaderSettings.LineHeight.relaxed.css)' };
+          // Every shade the two colour controls can produce, by theme, so a change repaints
+          // without a round trip. The server-rendered stylesheet only carries the pair that
+          // was chosen when the page was built: before this, picking a new accent moved the
+          // ring on the swatch and nothing else until the next render.
+          var ACCENTS = \(accentTableJS);
+          // A desktop palette owns the accent, so the live repaint stands down; see
+          // `paintAccent`. The name deliberately avoids the Android bridge's own prefix:
+          // a WebKit page must contain no trace of that global, and the transport tests
+          // check for the string rather than for a real reference — correctly, since a
+          // page that merely mentions it has something in it that does not belong.
+          window.readerDesktopAccent = \(hostedAccent ? "true" : "false");
           var root = document.documentElement;
           var btn = document.getElementById('readerAa');
           var panel = document.getElementById('readerPanel');
@@ -1692,6 +1908,41 @@ enum ReaderChrome {
             });
           };
 
+          // Repaints `--accent` and the hue swatches for the settings as they now stand.
+          //
+          // Inline on `:root`, which outranks every `[data-theme]` block in the stylesheet,
+          // and recomputed on every change — including a theme change, or the inline value
+          // would pin the old theme's shade over the new theme's block.
+          //
+          // A host-supplied desktop palette is the one case that opts out: there the accent
+          // is the desktop's, the hue row is hidden, and painting over it would replace the
+          // colour the user chose in their theme with one from our table.
+          function paintAccent() {
+            if (window.readerDesktopAccent) { return; }
+            var theme = s.theme;
+            if (theme === 'auto') {
+              theme = window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            var byLevel = ACCENTS[theme];
+            if (!byLevel) { return; }
+            var level = byLevel[s.highlight] || byLevel.hushed;
+            root.style.setProperty('--accent', level[s.accent] || level.blue);
+            // The swatches show what picking them paints — except under `text`, which has
+            // no hue of its own, where they keep the nearest strength that has one so the
+            // hidden row is not five grey dots when it comes back.
+            var shown = s.highlight === 'text' ? byLevel.hushed : level;
+            // Tints land within a whisker of each other, so the rim carries the hue there
+            // and the fill stays honest; see `swatchCSS`, which does this server-side.
+            var rims = s.highlight === 'tinted' ? byLevel.hushed : null;
+            Object.keys(shown).forEach(function (hue) {
+              var sw = panel && panel.querySelector('.swatch-' + hue);
+              if (!sw) { return; }
+              sw.style.background = shown[hue];
+              sw.style.borderColor = rims ? rims[hue] : '';
+            });
+          }
+
           // How the host hands a document it did not just render the settings as they now
           // stand. A back/forward restore reuses the original bytes, so `s` is as old as the
           // document: without this the next `save()` would post those stale values back over
@@ -1707,6 +1958,11 @@ enum ReaderChrome {
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
             root.style.setProperty('--reader-font', FONTS[s.fontFamily]);
+            // The start page's own pair, written on every page for the same reason the
+            // reader's is: one function applies whatever the settings now say, and the page
+            // that does not use a variable is not harmed by its being set.
+            root.style.setProperty('--start-size', s.startFontSize + 'px');
+            root.style.setProperty('--start-font', FONTS[s.startFontFamily]);
             root.style.setProperty('--reader-width', WIDTHS[s.width]);
             // The compact layout reads this instead; setting both is what makes the control
             // answer on a phone as immediately as it does on a desktop.
@@ -1733,11 +1989,23 @@ enum ReaderChrome {
             // the buttons move under the hand rather than at the next render.
             if (s.controlSide === 'left') { root.setAttribute('data-controls', 'left'); }
             else { root.removeAttribute('data-controls'); }
+            // The two colour controls, applied together because they are one answer: which
+            // hue, and how much of it. `text` keeps the hue row hidden and paints the body
+            // colour, so a link is marked by its underline alone.
+            if (s.highlight === 'text') { root.setAttribute('data-highlight', 'text'); }
+            else { root.removeAttribute('data-highlight'); }
+            paintAccent();
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });
-            panel.querySelector('button[data-step="-1"]').disabled = s.fontSize <= MIN;
-            panel.querySelector('button[data-step="1"]').disabled = s.fontSize >= MAX;
+            // The stepper names the field it changes — `fontSize` in the reader, and
+            // `startFontSize` on the start page — so the bounds follow the same field rather
+            // than always the reader's.
+            panel.querySelectorAll('button[data-step]').forEach(function (b) {
+              var key = b.dataset.sizeKey;
+              var next = s[key] + Number(b.dataset.step);
+              b.disabled = next < MIN || next > MAX;
+            });
             // Type metrics change how much there is to scroll, so anything tracking scroll
             // position has to re-measure. Only the reader page installs this (see
             // progressScript); the start page leaves it undefined.
@@ -1860,7 +2128,10 @@ enum ReaderChrome {
             var b = e.target.closest('button');
             if (!b || b.disabled) { return; }
             if (b.dataset.step) {
-              s.fontSize = Math.min(MAX, Math.max(MIN, s.fontSize + Number(b.dataset.step)));
+              // The button carries the field: the reader's `fontSize`, the start page's
+              // `startFontSize`. One handler, whichever popover it is in.
+              var key = b.dataset.sizeKey;
+              s[key] = Math.min(MAX, Math.max(MIN, s[key] + Number(b.dataset.step)));
             } else if (b.dataset.key) {
               s[b.dataset.key] = b.dataset.value;
             } else { return; }
