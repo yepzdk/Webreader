@@ -22,6 +22,41 @@ pages and the capture recipe is at the end of this file.
 | Privacy policy URL | `https://github.com/yepzdk/webreader/blob/main/PRIVACY.md` | — |
 | Copyright | `2026 Jesper Pedersen` | — |
 
+Two of these live under **App Information**, not under the version, and review cannot be
+started until both are set — "Unable to Add for Review" names them:
+
+### Category
+
+Productivity, with News second. The app is a tool for reading, not a publication: it
+carries no articles of its own and ships no editorial. Utilities would also be defensible;
+News as the *primary* would not, since the primary category is what the app is rather than
+what it is pointed at.
+
+### Content rights
+
+> Apps that contain, show, or access third-party content must have all the necessary
+> rights to that content or be otherwise permitted to use it under the laws of each App
+> Store country or region in which they're available. Does your app contain, show, or
+> access third-party content?
+
+**Yes** — the question says *access*, and that is exactly what the app does. Answering no
+would be a reading of the question rather than an answer to it. Yes opens a details field;
+this is what goes in it:
+
+```
+WebReader fetches and reformats web pages at the user's request, on the device, the way a
+browser or a reader mode does. It accesses third-party content in that sense and contains
+none: no articles are bundled, stored on a server, cached for other users, modified or
+redistributed. Each fetch is a page the user opened, shared to the app, or subscribed to
+as a feed, and the result is rendered only on the device that fetched it.
+
+Article extraction uses Mozilla's Readability (Apache-2.0), used in accordance with its
+licence. The app ships with one suggestion source, a public RSS feed of freely accessible
+articles, and the user can remove it or add their own; feeds are consumed as published.
+
+The app has no server, no account and collects no data.
+```
+
 ## Promotional text (170)
 
 Editable without a new build, so this is the line to change when something ships.
