@@ -404,17 +404,24 @@ enum ReaderChrome {
         }
         /* Each button owns the popover anchored under it. */
         .reader-control { position: relative; }
-        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn"))
+        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn, #readerOriginalBtn"))
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
+        #readerOriginalBtn:hover,
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
         /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor.
            `justify-content` centres the icon once the coarse floor makes the box wider
-           than the glyph needs; on a pointer the box is content-sized and it does nothing. */
-        #readerRecentsBtn, #readerHiddenBtn, #readerMoreBtn, #readerLessBtn {
+           than the glyph needs; on a pointer the box is content-sized and it does nothing.
+
+           Every icon control in the row belongs in both of these. `#readerOriginalBtn` was
+           in neither for one release: it was the only chrome button no rule named, so it
+           came out as whatever the engine draws by default — a filled grey slab beside six
+           outlined ones. `testEveryChromeButtonIsStyled` now fails if that happens again. */
+        #readerRecentsBtn, #readerHiddenBtn, #readerOriginalBtn,
+        #readerMoreBtn, #readerLessBtn {
           display: flex; align-items: center; justify-content: center; padding: 5px 9px;
         }
-        #readerRecentsBtn svg, #readerHiddenBtn svg,
+        #readerRecentsBtn svg, #readerHiddenBtn svg, #readerOriginalBtn svg,
         #readerMoreBtn svg, #readerLessBtn svg { display: block; }
         /* Rating buttons: same box as the other icon controls. Pressed is the accent, the one
            place in the chrome where a control is "on" rather than merely open. */
@@ -869,8 +876,14 @@ enum ReaderChrome {
     /// for the engine to mis-invalidate, which is exactly what it did. A list of ids says
     /// the same thing in a form that cannot drift from the markup without failing loudly,
     /// and that you can look up directly in an inspector.
+    ///
+    /// `readerOriginalBtn` was missing from this list for a release, which is why a phone
+    /// with the stack closed showed two controls: the toggle, and the one button no list
+    /// knew about. `testEveryButtonInTheRowIsInTheStack` now derives the answer from the
+    /// markup rather than trusting this to be complete.
     static let stackButtonIDs = ["readerHomeBtn", "startSettings", "readerAa",
                                  "readerRecentsBtn", "readerHiddenBtn",
+                                 "readerOriginalBtn",
                                  "readerMoreBtn", "readerLessBtn"]
 
     /// The same list plus the toggle: everything that takes the column's square sizing.
@@ -1524,15 +1537,20 @@ enum ReaderChrome {
             <!-- The way out of the reader, and the only control here that is about the site
                  rather than the text. A paywall's login lives on the site's own page, so
                  this goes and gets it — and stays out of the way on that host until the
-                 chrome injected over it says otherwise (#44). -->
+                 chrome injected over it says otherwise (#44).
+
+                 A globe, not an arrow leaving a box: that arrow is the web's word for
+                 "this opens somewhere else", and nothing here does. The page arrives in
+                 this same window, and what changes is that you get the site instead of the
+                 text — which is what a globe says beside six controls about typography. -->
             <button id="readerOriginalBtn" aria-label="Show the original page"
                     title="Show the original page"
                     onclick="readerPost('readerOriginal', '')">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M15 3h6v6"/>
-                <path d="M10 14 21 3"/>
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M3 12h18"/>
+                <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>
               </svg>
             </button>
           </div>

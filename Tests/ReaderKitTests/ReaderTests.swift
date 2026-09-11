@@ -774,14 +774,15 @@ final class ChromeBackdropTests: XCTestCase {
     func testTheSolidStopIsTheChromesOwnHeightRatherThanAGuess() {
         // Sized at 65% of 72px — 47px — against the 41px pointer cluster, the fade started
         // 11px above the bottom of the buttons on any roomy touch viewport, where the same
-        // buttons are 44px: article text ran between the icons at 1024x768 coarse. The stop
-        // is the chrome's own geometry now: the 14px inset plus the 44px floor.
-        let solid = 14 + ReaderChrome.touchTarget
+        // buttons are 44px: article text ran between the icons at 1024x768 coarse. Then one
+        // height for both classes greyed every desktop article's first line. The stop is the
+        // cluster that is actually up there, and the element runs 24px past it to fade.
         let css = ReaderChrome.backdropCSS()
-        XCTAssertTrue(css.contains(
-            "var(--bg) calc(\(solid)px + var(--safe-top)),"))
-        // And the element runs past that stop, or there is no room left to fade in.
-        XCTAssertTrue(css.contains("height: calc(\(solid + 24)px"))
+        for headroom in [ReaderChrome.topHeadroom, ReaderChrome.touchTopHeadroom] {
+            XCTAssertTrue(css.contains(
+                "var(--bg) calc(\(headroom - 24)px + var(--safe-top)),"))
+            XCTAssertTrue(css.contains("height: calc(\(headroom)px + var(--safe-top));"))
+        }
     }
 
     func testItIsARoomyLayoutDeviceAndRetiresWhenCompact() {
@@ -808,6 +809,83 @@ final class ChromeBackdropTests: XCTestCase {
         // which is a reason not to add stray children to it on a hunch.
         let offline = OfflineFallback.html(appName: "R", host: "example.com", kind: .offline)
         XCTAssertFalse(offline.contains("readerBackdrop"))
+    }
+}
+
+/// The row of controls at the top of the reader, as a set rather than one button at a time.
+final class ChromeControlStyleTests: XCTestCase {
+    private let article = Article(title: "T", byline: nil, siteName: nil,
+                                  content: "<p>x</p>", image: nil)
+
+    func testEveryChromeButtonIsNamedByTheStylesheetItShipsWith() {
+        // `#readerOriginalBtn` was added for #44 and put in no selector list, so it was the
+        // one button in the chrome with no rule of its own: the engine drew its default
+        // button — filled, differently rounded — in a row of six outlined ones, and it
+        // shipped that way. A button nobody styles is the failure mode, so this asks the
+        // question of every button the page renders rather than of the one that got it
+        // wrong.
+        let html = ReaderPage.html(article: article, history: ReaderHistory(),
+                                   hidden: HiddenPhrases(), rating: nil)
+        guard let styleStart = html.range(of: "<style>"),
+              let styleEnd = html.range(of: "</style>", range: styleStart.upperBound..<html.endIndex)
+        else { return XCTFail("the reader page has no stylesheet") }
+        let stylesheet = String(html[styleStart.upperBound..<styleEnd.lowerBound])
+
+        var ids: [String] = []
+        for part in html.components(separatedBy: "<button id=\"").dropFirst() {
+            ids.append(String(part.prefix(while: { $0 != "\"" })))
+        }
+        XCTAssertGreaterThan(ids.count, 4, "the control row went missing")
+        for id in ids {
+            XCTAssertTrue(stylesheet.contains("#\(id)"),
+                          "#\(id) has no rule: it will render as whatever the engine defaults to")
+        }
+    }
+
+    func testTheOriginalPageButtonWearsTheSameBoxAsTheRest() {
+        // Not merely styled — styled by the *shared* declaration, so it cannot drift from
+        // its neighbours the next time one of them changes.
+        let css = ReaderChrome.controlsCSS()
+        XCTAssertTrue(css.contains("#readerAa, #readerRecentsBtn, #readerHiddenBtn, "
+                                   + "#readerOriginalBtn {"))
+        XCTAssertTrue(css.contains("#readerOriginalBtn svg"), "the glyph needs the shared box")
+    }
+
+    func testTheWayBackToTheSiteIsAGlobeAndNotAnArrowLeavingTheApp() {
+        // The arrow-out-of-a-box glyph is the web's word for "this opens somewhere else",
+        // and this opens in the same window. The circle is the assertion that matters: it
+        // fails if anyone puts the old mark back.
+        let html = ReaderPage.html(article: article)
+        guard let button = html.range(of: "id=\"readerOriginalBtn\""),
+              let end = html.range(of: "</button>", range: button.upperBound..<html.endIndex)
+        else { return XCTFail("the original-page button went missing") }
+        let glyph = String(html[button.upperBound..<end.lowerBound])
+        XCTAssertTrue(glyph.contains("<circle cx=\"12\" cy=\"12\" r=\"9\"/>"))
+        XCTAssertFalse(glyph.contains("M15 3h6v6"), "the external-link arrow is back")
+    }
+
+    func testEveryButtonInTheRowIsInTheStack() {
+        // The other half of the same omission. `stackButtonIDs` is what a collapsed column
+        // hides and what `chromeButtonIDs` sizes, so a button missing from it stays on
+        // screen on a phone with the stack shut — which is exactly what `readerOriginalBtn`
+        // did: two controls floating in the corner, one of them a mystery.
+        //
+        // Derived from the markup rather than restated, because restating the list is the
+        // mistake this is here to catch.
+        let row = ReaderChrome.controls(recents: ReaderHistory(), rating: nil,
+                                        showsHidden: true)
+        var ids: [String] = []
+        for control in row.components(separatedBy: "<div class=\"reader-control\">").dropFirst() {
+            guard let open = control.range(of: "<button id=\"") else { continue }
+            ids.append(String(control[open.upperBound...].prefix(while: { $0 != "\"" })))
+        }
+        // Recents, hidden text, the way back to the site, and "Aa" — the first button of
+        // each wrapper, since a popover's own buttons live in there too.
+        XCTAssertEqual(ids.count, 4, "the control row changed shape")
+        for id in ids {
+            XCTAssertTrue(ReaderChrome.stackButtonIDs.contains(id),
+                          "#\(id) never collapses, and takes none of the column's sizing")
+        }
     }
 }
 

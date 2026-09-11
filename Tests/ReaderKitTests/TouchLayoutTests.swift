@@ -277,23 +277,6 @@ final class TouchLayoutTests: XCTestCase {
             "padding-bottom: calc(96px + var(--safe-bottom));"))
     }
 
-    func testContentStartsWhereTheTopBackdropStopsPainting() {
-        // The invariant behind both headrooms, stated once against the CSS that has to hold
-        // it: the backdrop is `--bg` over the article, so anything starting inside it reads
-        // dimmed however far down the gradient it is. Clearing the cluster is not enough —
-        // the fade keeps going — and the two pointer classes do not have the same answer.
-        let css = ReaderChrome.backdropCSS()
-        XCTAssertTrue(css.contains("height: calc(\(ReaderChrome.topHeadroom)px + var(--safe-top));"),
-                      "the mouse backdrop must end where the page's own headroom does")
-        XCTAssertTrue(css.contains("height: calc(\(ReaderChrome.touchTopHeadroom)px + var(--safe-top));"),
-                      "the touch backdrop must end where the touch headroom does")
-        // And the fade has to be *inside* that height, or the solid stop is the real end.
-        for headroom in [ReaderChrome.topHeadroom, ReaderChrome.touchTopHeadroom] {
-            XCTAssertTrue(css.contains("var(--bg) calc(\(headroom - 24)px + var(--safe-top)),"),
-                          "the solid stop should clear the cluster and leave 24px to fade")
-        }
-    }
-
     func testANarrowPointerWindowStillClearsItsTopChrome() {
         // The one case that keeps the chrome at the top: a mouse in a window narrower than
         // the measure breakpoint. 56px clears the 41px the pointer cluster occupies.
