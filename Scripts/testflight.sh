@@ -126,8 +126,16 @@ if [ "$UPLOAD_WITH" = "nothing" ]; then
   echo "No credentials set, so it stops here. Two ways to send it:"
   echo
   echo "  * Xcode: Window > Organizer > Archives, pick the row that reads"
-  echo "    \"$VERSION ($BUILD)\" — it is the newest — then Distribute App. Uses the"
-  echo "    account already signed into Xcode, so no key is needed."
+  echo "    \"$VERSION ($BUILD)\" — it is the newest — then Distribute App and choose"
+  echo "    App Store Connect, then Upload. Uses the account already signed into"
+  echo "    Xcode, so no key is needed."
+  echo
+  echo "    Not \"TestFlight Internal Only\", which is the row beside it: that flag is"
+  echo "    permanent per build and bars every external group, so a build carrying it"
+  echo "    shows testers outside your team no builds at all. App Store Connect covers"
+  echo "    internal and external TestFlight both, and leaves the store submission"
+  echo "    as a later choice rather than making one now."
+  echo
   echo "  * Transporter (free, App Store): drag the .ipa in and press Deliver."
   echo
   echo "For an unattended run, set either ASC_KEY_ID + ASC_ISSUER_ID (an App Store Connect"
