@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   marker beside it, replacing the placeholder W on slate. Every platform renders from one
   SVG through `Scripts/make-icons.sh`, so the Mac, iPhone, iPad, Android and Linux icons
   cannot drift apart.
+- **The way back to the site is a globe.** It used to be the arrow leaving a box, which on
+  the web means "this opens somewhere else" — the page arrives in the same window.
 
 ### Fixed
 - **An article's first line no longer reads grey.** The fade behind the top controls was
@@ -21,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **The Mac icon sits in the Dock at the size every other app does.** Its rounded tile was
   being scaled twice, which cropped the artwork and left it small and soft beside its
   neighbours.
+- **The "show the original page" button looks like the buttons beside it**, and hides with
+  them when the controls collapse on a phone. It was in no style rule and no id list, so
+  the engine drew its own default button and left it on screen alone.
+- **The start page no longer offers to show "the original page".** There is no article
+  there and no site to go back to; the button did nothing when pressed.
 
 ## [0.13.0] - 2026-09-11
 
