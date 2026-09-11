@@ -56,54 +56,6 @@ public enum SettingsPage {
                 }.joined(separator: "\n            "))
               </div>
         """
-        // Thumbnails, one switch per surface. They used to be one switch in the Aa popover
-        // labelled "Images / No images", which read as governing the article's own images —
-        // it never did, it only ever governed the thumbnails in these lists. Split and moved
-        // here, where a setting is expected and can afford to say what it does.
-        let startChecked = settings.startPageThumbnails == .on ? " checked" : ""
-        let readerChecked = settings.readerThumbnails == .on ? " checked" : ""
-        let imagesSection = """
-        <h2 class="section">Article images</h2>
-              <p class="help" id="imagesHelp">The article's own lead image, shown beside its
-              row. A list with this off carries no images, reserves no space for them, and
-              fetches nothing.</p>
-              <div class="checks" role="group" aria-label="Article images"
-                   aria-describedby="imagesHelp">
-                <label class="check">
-                  <input id="\(ReaderSettings.ThumbnailScope.startPage.rawValue)" type="checkbox"\(startChecked)>
-                  <span>Show thumbnail image next to recents and suggested on the start page</span>
-                </label>
-                <label class="check">
-                  <input id="\(ReaderSettings.ThumbnailScope.reader.rawValue)" type="checkbox"\(readerChecked)>
-                  <span>Show thumbnail image next to recents and suggested in the reader dropdown</span>
-                </label>
-              </div>
-        """
-        // Which of the start page's two lists leads. A checkbox, not a pair of segmented
-        // buttons like the Aa popover's: the choice is two-way and every switch on this page
-        // is a checkbox. What it writes is still an enum (`StartPageOrder`), so the stored
-        // value says which order it means rather than which box happened to be ticked.
-        let suggestionsFirst = settings.startPageOrder == .suggestionsFirst ? " checked" : ""
-        let controlsLeft = settings.controlSide == .left ? " checked" : ""
-        let sideSection = """
-        <h2 class="section">Reader controls</h2>
-              <p class="help" id="sideHelp">On a touch screen the reader\'s buttons collapse
-              into one column against an edge, in reach of the hand holding the device. Pick
-              the edge.</p>
-              <label class="check">
-                <input id="controlSide" type="checkbox" aria-describedby="sideHelp"\(controlsLeft)>
-                <span>Put the reader\'s controls on the left</span>
-              </label>
-        """
-        let orderSection = """
-        <h2 class="section">Start page</h2>
-              <p class="help" id="orderHelp">Recent articles lead the page. Turn this on to
-              land on the suggestions instead, without scrolling past your own history.</p>
-              <label class="check">
-                <input id="startPageOrder" type="checkbox" aria-describedby="orderHelp"\(suggestionsFirst)>
-                <span>Show suggested articles before recent articles</span>
-              </label>
-        """
         // Only shown once something is blocked: an empty section on first run is noise, and
         // rows are added from the start page, not typed in here.
         let blocked = suggestions.blockedHosts.sorted()
@@ -360,12 +312,6 @@ public enum SettingsPage {
 
             \(hiddenSection)
 
-            \(imagesSection)
-
-            \(orderSection)
-
-            \(sideSection)
-
             \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
           </main>
           <script>
@@ -486,46 +432,6 @@ public enum SettingsPage {
                 var checked = Array.prototype.filter.call(
                   langs.querySelectorAll('input'), function (input) { return input.checked; });
                 post('readerSetLanguages', checked.map(function (input) { return input.value; }));
-              });
-            }
-
-            // The two thumbnail switches; each box's id is the settings key it writes.
-            //
-            // Only the changed key is posted. This page's copy of the settings would be as
-            // old as the document — a back/forward restore reuses the original bytes — so
-            // posting a whole object from here would push a stale font size and theme over
-            // newer ones. The host merges a payload onto the settings as stored
-            // (`ReaderSettings.decode(_:onto:)`), which is what makes one key safe to send.
-            ['\(ReaderSettings.ThumbnailScope.startPage.rawValue)',
-             '\(ReaderSettings.ThumbnailScope.reader.rawValue)'].forEach(function (key) {
-              var box = document.getElementById(key);
-              if (!box) { return; }
-              box.addEventListener('change', function () {
-                var change = {};
-                change[key] = box.checked ? 'on' : 'off';
-                post('readerSettings', change);
-              });
-            });
-
-            // The start page's section order, posted a key at a time for the same reason the
-            // switches above are. Ticked means suggestions first; the value spells the order
-            // out rather than sending a boolean, because that is what is stored.
-            var order = document.getElementById('startPageOrder');
-            if (order) {
-              order.addEventListener('change', function () {
-                post('readerSettings', {
-                  startPageOrder: order.checked ? 'suggestionsFirst' : 'recentsFirst'
-                });
-              });
-            }
-
-            // Which edge the reader's chrome sits against. Ticked means left; the value
-            // names the side rather than sending a boolean, for the same reason the order
-            // switch above spells its order out.
-            var side = document.getElementById('controlSide');
-            if (side) {
-              side.addEventListener('change', function () {
-                post('readerSettings', { controlSide: side.checked ? 'left' : 'right' });
               });
             }
 

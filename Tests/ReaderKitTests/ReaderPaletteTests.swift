@@ -110,6 +110,12 @@ final class ReaderPaletteTests: XCTestCase {
           --reader-width: 42rem;
           --reader-gutter: 6%;
           --reader-font: ui-serif, "New York", Georgia, serif;
+          /* The start page's own two, because an article and a list of them are not the same
+             piece of reading and one pair could not be right for both: setting the article
+             to 22px serif used to take the start page's lists with it. Both pairs are
+             emitted on every page; each page uses the one it owns. */
+          --start-size: 15px;
+          --start-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
           --safe-top: env(safe-area-inset-top, 0px);
           --safe-bottom: env(safe-area-inset-bottom, 0px);
           --safe-left: env(safe-area-inset-left, 0px);
@@ -290,23 +296,23 @@ final class ReaderPalettePageTests: XCTestCase {
         }
     }
 
-    func testTheStartPageAnswersToTheReadingControls() {
-        // Five of the seven controls did nothing here: the page was pinned to 34rem, a sans
-        // stack and 12px rows whatever the reader had chosen, so only the theme and the
-        // highlight showed any effect at all.
+    func testTheStartPageAnswersToItsOwnTypeSettings() {
+        // Its lists were pinned at 12px whatever the reader had chosen. Then they followed
+        // the *reader's* size and face, which was worse: a 22px serif article blew up the
+        // start page at the same time. Its own pair, its own popover.
         let page = StartPage.html(appName: "R")
-        XCTAssertTrue(page.contains("max-width: var(--reader-width);"))
-        XCTAssertTrue(page.contains("font-family: var(--reader-font);"))
-        XCTAssertTrue(page.contains("font-size: calc(var(--reader-size) * 0.82);"))
-        XCTAssertTrue(page.contains("line-height: var(--reader-leading);"))
-        // Quotes is the one that cannot mean anything without prose, so it is not offered
-        // here — a control that does nothing where it is drawn is worse than no control.
-        XCTAssertFalse(page.contains("data-key=\"quoteStyle\""),
-                       "the start page has no blockquote to style")
-        XCTAssertTrue(ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
-                                                       content: "<p>x</p>", hiddenHits: [:],
-                                                       image: nil))
-            .contains("data-key=\"quoteStyle\""))
+        XCTAssertTrue(page.contains("font-family: var(--start-font);"))
+        XCTAssertTrue(page.contains("font-size: calc(var(--start-size) * 0.8);"))
+        XCTAssertFalse(page.contains("var(--reader-size)"), "it is reading the article's size")
+        XCTAssertFalse(page.contains("var(--reader-font)"), "it is reading the article's face")
+        // The measure is not shared either: column width is about a paragraph's line length,
+        // and this page has no paragraphs.
+        XCTAssertFalse(page.contains("max-width: var(--reader-width);"))
+        // Quotes and the rest of the article's rows are not offered here; the start page's
+        // own two questions are.
+        XCTAssertFalse(page.contains("data-key=\"quoteStyle\""))
+        XCTAssertTrue(page.contains("data-key=\"startFontFamily\""))
+        XCTAssertTrue(page.contains("data-size-key=\"startFontSize\""))
     }
 }
 

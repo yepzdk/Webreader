@@ -278,6 +278,12 @@ enum ReaderChrome {
           --reader-width: \(settings.width.css);
           --reader-gutter: \(settings.width.compactGutter);
           --reader-font: \(settings.fontFamily.css(on: platform));
+          /* The start page's own two, because an article and a list of them are not the same
+             piece of reading and one pair could not be right for both: setting the article
+             to 22px serif used to take the start page's lists with it. Both pairs are
+             emitted on every page; each page uses the one it owns. */
+          --start-size: \(settings.startFontSize)px;
+          --start-font: \(settings.startFontFamily.css(on: platform));
         \(indent(safeAreaCSS(platform: platform), by: 0))
         }
         \(hosted == nil ? swatchCSS(for: .light, highlight: settings.highlight) : hostedSwatchCSS)
@@ -1560,19 +1566,14 @@ enum ReaderChrome {
                          rating: TopicPreferences.Rating? = nil,
                          showsHidden: Bool = false,
                          showsOriginal: Bool = false,
-                         showsQuotes: Bool = false) -> String {
-        // Every other row in this panel now means something on every page that carries it:
-        // the start page took the size, the face, the measure and the leading when it was
-        // given them (#45 follow-up). Quotes is the one that cannot — there is no
-        // blockquote outside an article — so it appears where there is prose to style and
-        // is left out where a reader would be choosing between two words with no effect.
-        let quotesRow = !showsQuotes ? "" : """
-        <h3 class="panel-row" id="panelQuotes">Quotes</h3>
-              <div class="seg" role="group" aria-labelledby="panelQuotes">
-                <button data-key="quoteStyle" data-value="bordered">Bordered</button>
-                <button data-key="quoteStyle" data-value="italic">Italic</button>
-              </div>
-        """
+                         surface: Surface = .start) -> String {
+        // Which page this chrome belongs to, and therefore which questions its popover asks.
+        // The two lists overlap but are not the same list, and sharing one was a defect
+        // rather than a shortcut: column width and line spacing are about a paragraph, which
+        // the start page has none of, while the order of its two lists and their thumbnails
+        // mean nothing inside an article. Three of them used to live in Settings, a page away
+        // from the thing they change.
+        let panelRows = surface == .reader ? readerPanelRows : startPanelRows
         let current = rating
         let ratingControls = !showsRating ? "" : """
         <div class="reader-control">
@@ -1666,73 +1667,153 @@ enum ReaderChrome {
           \(hiddenControl)
           \(originalControl)
           <div class="reader-control">
-            <button id="readerAa" aria-label="Reader appearance"
-                    title="Text &amp; appearance" aria-haspopup="true"
+            <button id="readerAa" aria-label="\(surface.appearanceLabel)"
+                    title="\(surface.appearanceLabel)" aria-haspopup="true"
                     aria-expanded="false" aria-controls="readerPanel">Aa</button>
             <div id="readerPanel" hidden aria-labelledby="readerPanelTitle">
-              <h2 class="panel-title" id="readerPanelTitle">Text &amp; appearance</h2>
-              <!-- Every row says what it does. The `aria-label`s said it already, so a
-                   screen reader knew what a sighted reader had to guess at; `aria-labelledby`
-                   points each group at the heading a reader can see, which is one label
-                   rather than two that can disagree. -->
-              <h3 class="panel-row" id="panelSize">Text size</h3>
-              <div class="seg" role="group" aria-labelledby="panelSize">
-                <button data-step="-1" aria-label="Decrease font size"
-                        title="Smaller text"><span class="a-small">A</span></button>
-                <button data-step="1" aria-label="Increase font size"
-                        title="Larger text"><span class="a-large">A</span></button>
-              </div>
-              <h3 class="panel-row" id="panelFace">Typeface</h3>
-              <div class="seg" role="group" aria-labelledby="panelFace">
-                <button data-key="fontFamily" data-value="serif">Serif</button>
-                <button data-key="fontFamily" data-value="sans">Sans</button>
-              </div>
-              <h3 class="panel-row" id="panelWidth">Column width</h3>
-              <div class="seg" role="group" aria-labelledby="panelWidth">
-                <button data-key="width" data-value="narrow">Narrow</button>
-                <button data-key="width" data-value="normal">Normal</button>
-                <button data-key="width" data-value="wide">Wide</button>
-              </div>
-              <h3 class="panel-row" id="panelLeading">Line spacing</h3>
-              <div class="seg" role="group" aria-labelledby="panelLeading">
-                <button data-key="lineHeight" data-value="compact">Compact</button>
-                <button data-key="lineHeight" data-value="normal">Normal</button>
-                <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
-              </div>
-              \(quotesRow)
-              <h3 class="panel-row" id="panelTheme">Theme</h3>
-              <div class="themes" role="group" aria-labelledby="panelTheme">
-                <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
-                <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
-                <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
-                <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
-                <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
-              </div>
-              <!-- How loud a link is, then which colour it is. Two rows because they are two
-                   questions, and the second is only worth asking once the first has said
-                   yes to colour at all - `:root[data-highlight="text"]` hides it.
-
-                   A 2x2 grid rather than one row of four: "Follow text" is the option that
-                   has to be legible, and four segments across a 250px popover leaves room
-                   for "Text", which says nothing on its own. -->
-              <h3 class="panel-row" id="panelHighlight">Highlight</h3>
-              <div class="seg seg-grid" role="group" aria-labelledby="panelHighlight">
-                <button data-key="highlight" data-value="text">Follow text</button>
-                <button data-key="highlight" data-value="bright">Bright</button>
-                <button data-key="highlight" data-value="tinted">Tinted</button>
-                <button data-key="highlight" data-value="hushed">Hushed</button>
-              </div>
-              <h3 class="panel-row" id="panelHue">Hue</h3>
-              <div class="accents" role="group" aria-labelledby="panelHue">
-                <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue" title="Blue"></button>
-                <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal" title="Teal"></button>
-                <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet" title="Violet"></button>
-                <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust" title="Rust"></button>
-                <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss" title="Moss"></button>
-              </div>
+              <h2 class="panel-title" id="readerPanelTitle">\(surface.appearanceLabel)</h2>
+              \(indent(panelRows, by: 8))
             </div>
           </div>
         </div>
+        """
+    }
+
+    /// Which page the chrome belongs to. Only the appearance popover differs, but it differs
+    /// enough that one list of rows was wrong on both pages at once.
+    public enum Surface: Sendable {
+        case reader, start
+
+        var appearanceLabel: String {
+            switch self {
+            case .reader: return "Reader appearance"
+            case .start: return "Start page appearance"
+            }
+        }
+    }
+
+    /// Rows shared by both popovers, parameterised by whose type settings they change.
+    ///
+    /// `sizeKey` and `faceKey` are the only difference: the start page keeps `startFontSize`
+    /// and `startFontFamily`, the reader keeps `fontSize` and `fontFamily`. One pair for both
+    /// was the bug — a 22px serif article dragged the start page's lists along with it.
+    private static func typeRows(sizeKey: String, faceKey: String) -> String {
+        """
+        <!-- Every row says what it does. The `aria-label`s said it already, so a screen
+             reader knew what a sighted reader had to guess at; `aria-labelledby` points each
+             group at the heading a reader can see, which is one label rather than two that
+             can disagree. -->
+        <h3 class="panel-row" id="panelSize">Text size</h3>
+        <div class="seg" role="group" aria-labelledby="panelSize">
+          <button data-step="-1" data-size-key="\(sizeKey)" aria-label="Decrease text size"
+                  title="Smaller text"><span class="a-small">A</span></button>
+          <button data-step="1" data-size-key="\(sizeKey)" aria-label="Increase text size"
+                  title="Larger text"><span class="a-large">A</span></button>
+        </div>
+        <h3 class="panel-row" id="panelFace">Typeface</h3>
+        <div class="seg" role="group" aria-labelledby="panelFace">
+          <button data-key="\(faceKey)" data-value="serif">Serif</button>
+          <button data-key="\(faceKey)" data-value="sans">Sans</button>
+        </div>
+        """
+    }
+
+    /// Theme, then how loud a link is, then which colour it is. The tail of both popovers:
+    /// these three are the app's, not a page's, and a reader who changes them on one surface
+    /// means them everywhere.
+    ///
+    /// Two colour rows because they are two questions, and the second is only worth asking
+    /// once the first has said yes to colour at all — `:root[data-highlight="text"]` hides
+    /// it. A 2x2 grid rather than one row of four: "Follow text" is the option that has to
+    /// be legible, and four segments across a 250px popover leaves room for "Text", which
+    /// says nothing on its own.
+    private static let sharedPanelRows = """
+    <h3 class="panel-row" id="panelTheme">Theme</h3>
+    <div class="themes" role="group" aria-labelledby="panelTheme">
+      <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
+      <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
+      <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
+      <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
+      <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
+    </div>
+    <h3 class="panel-row" id="panelHighlight">Highlight</h3>
+    <div class="seg seg-grid" role="group" aria-labelledby="panelHighlight">
+      <button data-key="highlight" data-value="text">Follow text</button>
+      <button data-key="highlight" data-value="bright">Bright</button>
+      <button data-key="highlight" data-value="tinted">Tinted</button>
+      <button data-key="highlight" data-value="hushed">Hushed</button>
+    </div>
+    <h3 class="panel-row" id="panelHue">Hue</h3>
+    <div class="accents" role="group" aria-labelledby="panelHue">
+      <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue" title="Blue"></button>
+      <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal" title="Teal"></button>
+      <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet" title="Violet"></button>
+      <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust" title="Rust"></button>
+      <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss" title="Moss"></button>
+    </div>
+    """
+
+    /// The reader's popover: the article's own typography, then the app's colours, then the
+    /// hand that holds the device.
+    ///
+    /// Column width, line spacing and quotes live here and only here — all three are about a
+    /// paragraph, and the start page has none. The controls' edge came out of Settings: it is
+    /// a fact about this chrome, and a reader who wants it moved wants it moved while looking
+    /// at it.
+    private static var readerPanelRows: String {
+        """
+        \(typeRows(sizeKey: "fontSize", faceKey: "fontFamily"))
+        <h3 class="panel-row" id="panelWidth">Column width</h3>
+        <div class="seg" role="group" aria-labelledby="panelWidth">
+          <button data-key="width" data-value="narrow">Narrow</button>
+          <button data-key="width" data-value="normal">Normal</button>
+          <button data-key="width" data-value="wide">Wide</button>
+        </div>
+        <h3 class="panel-row" id="panelLeading">Line spacing</h3>
+        <div class="seg" role="group" aria-labelledby="panelLeading">
+          <button data-key="lineHeight" data-value="compact">Compact</button>
+          <button data-key="lineHeight" data-value="normal">Normal</button>
+          <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
+        </div>
+        <h3 class="panel-row" id="panelQuotes">Quotes</h3>
+        <div class="seg" role="group" aria-labelledby="panelQuotes">
+          <button data-key="quoteStyle" data-value="bordered">Bordered</button>
+          <button data-key="quoteStyle" data-value="italic">Italic</button>
+        </div>
+        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+        <div class="seg" role="group" aria-labelledby="panelThumbs">
+          <button data-key="readerThumbnails" data-value="on">On</button>
+          <button data-key="readerThumbnails" data-value="off">Off</button>
+        </div>
+        \(sharedPanelRows)
+        <h3 class="panel-row" id="panelSide">Controls</h3>
+        <div class="seg" role="group" aria-labelledby="panelSide">
+          <button data-key="controlSide" data-value="left">Left</button>
+          <button data-key="controlSide" data-value="right">Right</button>
+        </div>
+        """
+    }
+
+    /// The start page's popover: what its two lists show and in which order, then its own
+    /// typography, then the app's colours.
+    ///
+    /// The order and the thumbnails came out of Settings, where they were two pages away
+    /// from the lists they rearrange — and a list you can see while you change it needs no
+    /// explaining.
+    private static var startPanelRows: String {
+        """
+        <h3 class="panel-row" id="panelOrder">Lists</h3>
+        <div class="seg" role="group" aria-labelledby="panelOrder">
+          <button data-key="startPageOrder" data-value="recentsFirst">Recent first</button>
+          <button data-key="startPageOrder" data-value="suggestionsFirst">Suggested first</button>
+        </div>
+        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+        <div class="seg" role="group" aria-labelledby="panelThumbs">
+          <button data-key="startPageThumbnails" data-value="on">On</button>
+          <button data-key="startPageThumbnails" data-value="off">Off</button>
+        </div>
+        \(typeRows(sizeKey: "startFontSize", faceKey: "startFontFamily"))
+        \(sharedPanelRows)
         """
     }
 
@@ -1877,6 +1958,11 @@ enum ReaderChrome {
           function apply() {
             root.style.setProperty('--reader-size', s.fontSize + 'px');
             root.style.setProperty('--reader-font', FONTS[s.fontFamily]);
+            // The start page's own pair, written on every page for the same reason the
+            // reader's is: one function applies whatever the settings now say, and the page
+            // that does not use a variable is not harmed by its being set.
+            root.style.setProperty('--start-size', s.startFontSize + 'px');
+            root.style.setProperty('--start-font', FONTS[s.startFontFamily]);
             root.style.setProperty('--reader-width', WIDTHS[s.width]);
             // The compact layout reads this instead; setting both is what makes the control
             // answer on a phone as immediately as it does on a desktop.
@@ -1912,8 +1998,14 @@ enum ReaderChrome {
             panel.querySelectorAll('button[data-key]').forEach(function (b) {
               b.setAttribute('aria-pressed', String(s[b.dataset.key] === b.dataset.value));
             });
-            panel.querySelector('button[data-step="-1"]').disabled = s.fontSize <= MIN;
-            panel.querySelector('button[data-step="1"]').disabled = s.fontSize >= MAX;
+            // The stepper names the field it changes — `fontSize` in the reader, and
+            // `startFontSize` on the start page — so the bounds follow the same field rather
+            // than always the reader's.
+            panel.querySelectorAll('button[data-step]').forEach(function (b) {
+              var key = b.dataset.sizeKey;
+              var next = s[key] + Number(b.dataset.step);
+              b.disabled = next < MIN || next > MAX;
+            });
             // Type metrics change how much there is to scroll, so anything tracking scroll
             // position has to re-measure. Only the reader page installs this (see
             // progressScript); the start page leaves it undefined.
@@ -2036,7 +2128,10 @@ enum ReaderChrome {
             var b = e.target.closest('button');
             if (!b || b.disabled) { return; }
             if (b.dataset.step) {
-              s.fontSize = Math.min(MAX, Math.max(MIN, s.fontSize + Number(b.dataset.step)));
+              // The button carries the field: the reader's `fontSize`, the start page's
+              // `startFontSize`. One handler, whichever popover it is in.
+              var key = b.dataset.sizeKey;
+              s[key] = Math.min(MAX, Math.max(MIN, s[key] + Number(b.dataset.step)));
             } else if (b.dataset.key) {
               s[b.dataset.key] = b.dataset.value;
             } else { return; }

@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and let the underline mark it, or a bright, tinted or hushed shade of your chosen hue.
   Hushed is the new default — the old saturated links read as noise on a page whose point
   is not having any. Every shade still clears 4.5:1 on every theme.
-- **The start page answers to the reading settings too.** Text size, typeface, column
-  width and line spacing now shape its lists, which were pinned smaller than anything the
-  reader could choose. Quotes stays where there is prose to style.
-- **Every row in the appearance popover says what it does.** Seven controls that a screen
-  reader could name and a sighted reader had to guess at.
+- **The start page has its own appearance popover** with its own text size and typeface,
+  plus which of its two lists leads and whether rows carry thumbnails. Its lists were
+  pinned smaller than anything you could choose; sharing the reader's settings was worse,
+  since a 22px serif article dragged them along with it.
+- **The reader's popover gained the controls that belong to it**: quotes, thumbnails and
+  which edge its buttons sit against.
+- **Every row in both popovers says what it does.** Controls a screen reader could name
+  and a sighted reader had to guess at.
 
 ### Changed
 - **The app has an icon of its own.** A brass drop cap opening a paragraph, with a page
@@ -29,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   accent is the page's own text colour — on black, "Open" was a white label on a
   near-white fill. The colour goes on the background it was measured against instead, and
   a control that is "on" fills its icon.
+- **Settings no longer holds article images, start page order or the reader's control
+  edge.** All three now live in the popover of the surface they change, where the effect is
+  on screen while you choose.
 
 ### Fixed
 - **An article's first line no longer reads grey.** The fade behind the top controls was

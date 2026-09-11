@@ -159,6 +159,17 @@ public struct ReaderSettings: Equatable, Sendable {
     /// which is what the start page did before #25.
     public var startPageThumbnails = ArticleImages.on
     public var readerThumbnails = ArticleImages.on
+    /// The start page's own text size and typeface (#45 follow-up).
+    ///
+    /// Separate from the reader's, because they are separate pieces of reading: one is an
+    /// article you sit with, the other is a list you glance at. Sharing them was worse than
+    /// not having them at all — setting the article to 22px serif blew up the start page's
+    /// two lists at the same time, and neither setting could be right for both.
+    ///
+    /// 15px sans, which is what the start page has always been, so nobody's page moves until
+    /// they ask it to.
+    public var startFontSize = 15
+    public var startFontFamily = FontFamily.sans
     /// Which list the start page leads with. Recents by default, which is where the page has
     /// always started; someone who mostly comes here to find something new scrolls past
     /// their own history to reach it, and on a phone that history is the whole first screen.
@@ -237,6 +248,15 @@ public struct ReaderSettings: Equatable, Sendable {
         if let raw = dict["fontFamily"] as? String, let value = FontFamily(rawValue: raw) {
             settings.fontFamily = value
         }
+        // Clamped to the same range as the reader's: the bounds are about what a screen can
+        // show and a hand can hit, not about which page is asking.
+        if let size = dict["startFontSize"] as? Int {
+            settings.startFontSize = min(max(size, fontSizeRange.lowerBound),
+                                         fontSizeRange.upperBound)
+        }
+        if let raw = dict["startFontFamily"] as? String, let value = FontFamily(rawValue: raw) {
+            settings.startFontFamily = value
+        }
         if let raw = dict["width"] as? String, let value = Width(rawValue: raw) {
             settings.width = value
         }
@@ -287,6 +307,8 @@ public struct ReaderSettings: Equatable, Sendable {
         [
             "fontSize": fontSize,
             "fontFamily": fontFamily.rawValue,
+            "startFontSize": startFontSize,
+            "startFontFamily": startFontFamily.rawValue,
             "width": width.rawValue,
             "lineHeight": lineHeight.rawValue,
             "theme": theme.rawValue,
@@ -639,7 +661,7 @@ public enum ReaderPage {
                                              excluding: currentURL),
                     canClear: !history.entries.isEmpty,
                     showsRating: true, rating: rating,
-                    showsHidden: true, showsOriginal: true, showsQuotes: true),
+                    showsHidden: true, showsOriginal: true, surface: .reader),
                 collapsible: true), by: 2))
           <main>
             <header>
