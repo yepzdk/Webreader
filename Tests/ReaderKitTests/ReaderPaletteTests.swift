@@ -121,21 +121,21 @@ final class ReaderPaletteTests: XCTestCase {
           --safe-left: env(safe-area-inset-left, 0px);
           --safe-right: env(safe-area-inset-right, 0px);
         }
-        .swatch-blue { background: #5a6f9f; }
-        .swatch-teal { background: #47767e; }
-        .swatch-violet { background: #925a9f; }
-        .swatch-rust { background: #8e6750; }
-        .swatch-moss { background: #4c7a45; }
+        .swatch-blue { --swatch: #5a6f9f; }
+        .swatch-teal { --swatch: #47767e; }
+        .swatch-violet { --swatch: #925a9f; }
+        .swatch-rust { --swatch: #8e6750; }
+        .swatch-moss { --swatch: #4c7a45; }
         @media (prefers-color-scheme: dark) {
           :root {
             --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #7588b2;
             --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           }
-        :root:not([data-theme]) .swatch-blue { background: #7588b2; }
-          :root:not([data-theme]) .swatch-teal { background: #57919b; }
-          :root:not([data-theme]) .swatch-violet { background: #a677b2; }
-          :root:not([data-theme]) .swatch-rust { background: #aa7f67; }
-          :root:not([data-theme]) .swatch-moss { background: #5d9654; }
+        :root:not([data-theme]) .swatch-blue { --swatch: #7588b2; }
+          :root:not([data-theme]) .swatch-teal { --swatch: #57919b; }
+          :root:not([data-theme]) .swatch-violet { --swatch: #a677b2; }
+          :root:not([data-theme]) .swatch-rust { --swatch: #aa7f67; }
+          :root:not([data-theme]) .swatch-moss { --swatch: #5d9654; }
         }
         /* Explicit themes pin a palette; the attribute selector outranks both the
            light defaults and the dark media query above. */
@@ -144,41 +144,41 @@ final class ReaderPaletteTests: XCTestCase {
           --border: rgba(0,0,0,0.12); --surface: rgba(0,0,0,0.05);
           color-scheme: light;
         }
-        :root[data-theme="light"] .swatch-blue { background: #5a6f9f; }
-        :root[data-theme="light"] .swatch-teal { background: #47767e; }
-        :root[data-theme="light"] .swatch-violet { background: #925a9f; }
-        :root[data-theme="light"] .swatch-rust { background: #8e6750; }
-        :root[data-theme="light"] .swatch-moss { background: #4c7a45; }
+        :root[data-theme="light"] .swatch-blue { --swatch: #5a6f9f; }
+        :root[data-theme="light"] .swatch-teal { --swatch: #47767e; }
+        :root[data-theme="light"] .swatch-violet { --swatch: #925a9f; }
+        :root[data-theme="light"] .swatch-rust { --swatch: #8e6750; }
+        :root[data-theme="light"] .swatch-moss { --swatch: #4c7a45; }
         :root[data-theme="sepia"] {
           --bg: #f4ecd8; --fg: #3d3225; --muted: #6f6049; --accent: #536694;
           --border: rgba(61,50,37,0.18); --surface: rgba(61,50,37,0.07);
           color-scheme: light;
         }
-        :root[data-theme="sepia"] .swatch-blue { background: #536694; }
-        :root[data-theme="sepia"] .swatch-teal { background: #426e75; }
-        :root[data-theme="sepia"] .swatch-violet { background: #875394; }
-        :root[data-theme="sepia"] .swatch-rust { background: #835f4a; }
-        :root[data-theme="sepia"] .swatch-moss { background: #467140; }
+        :root[data-theme="sepia"] .swatch-blue { --swatch: #536694; }
+        :root[data-theme="sepia"] .swatch-teal { --swatch: #426e75; }
+        :root[data-theme="sepia"] .swatch-violet { --swatch: #875394; }
+        :root[data-theme="sepia"] .swatch-rust { --swatch: #835f4a; }
+        :root[data-theme="sepia"] .swatch-moss { --swatch: #467140; }
         :root[data-theme="dark"] {
           --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9a9aa0; --accent: #7588b2;
           --border: rgba(255,255,255,0.16); --surface: rgba(255,255,255,0.08);
           color-scheme: dark;
         }
-        :root[data-theme="dark"] .swatch-blue { background: #7588b2; }
-        :root[data-theme="dark"] .swatch-teal { background: #57919b; }
-        :root[data-theme="dark"] .swatch-violet { background: #a677b2; }
-        :root[data-theme="dark"] .swatch-rust { background: #aa7f67; }
-        :root[data-theme="dark"] .swatch-moss { background: #5d9654; }
+        :root[data-theme="dark"] .swatch-blue { --swatch: #7588b2; }
+        :root[data-theme="dark"] .swatch-teal { --swatch: #57919b; }
+        :root[data-theme="dark"] .swatch-violet { --swatch: #a677b2; }
+        :root[data-theme="dark"] .swatch-rust { --swatch: #aa7f67; }
+        :root[data-theme="dark"] .swatch-moss { --swatch: #5d9654; }
         :root[data-theme="black"] {
           --bg: #000000; --fg: #f2f2f7; --muted: #98989e; --accent: #6478a8;
           --border: rgba(255,255,255,0.18); --surface: rgba(255,255,255,0.10);
           color-scheme: dark;
         }
-        :root[data-theme="black"] .swatch-blue { background: #6478a8; }
-        :root[data-theme="black"] .swatch-teal { background: #4d8188; }
-        :root[data-theme="black"] .swatch-violet { background: #9b64a8; }
-        :root[data-theme="black"] .swatch-rust { background: #9a6f57; }
-        :root[data-theme="black"] .swatch-moss { background: #52854b; }
+        :root[data-theme="black"] .swatch-blue { --swatch: #6478a8; }
+        :root[data-theme="black"] .swatch-teal { --swatch: #4d8188; }
+        :root[data-theme="black"] .swatch-violet { --swatch: #9b64a8; }
+        :root[data-theme="black"] .swatch-rust { --swatch: #9a6f57; }
+        :root[data-theme="black"] .swatch-moss { --swatch: #52854b; }
         """#)
     }
 }
@@ -604,13 +604,13 @@ final class AccentContrastTests: XCTestCase {
         for accent in ReaderSettings.Accent.allCases {
             let fill = ReaderPalette.hex(accent, on: .dark, highlight: .tinted)
             let rim = ReaderPalette.hex(accent, on: .dark, highlight: .hushed)
-            XCTAssertTrue(tinted.contains(".swatch-\(accent.rawValue) { background: \(fill); "
-                                          + "border-color: \(rim); }"),
+            XCTAssertTrue(tinted.contains(".swatch-\(accent.rawValue) { --swatch: \(fill); "
+                                          + "--swatch-rim: \(rim); }"),
                           "\(accent) has no rim to tell it apart by")
         }
         // The other levels are five different colours already; a second ring there is noise.
         for level in [ReaderSettings.Highlight.bright, .hushed] {
-            XCTAssertFalse(ReaderChrome.swatchCSS(for: .dark, highlight: level).contains("border-color"),
+            XCTAssertFalse(ReaderChrome.swatchCSS(for: .dark, highlight: level).contains("--swatch-rim"),
                            "\(level) does not need rims")
         }
     }
