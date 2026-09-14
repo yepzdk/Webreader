@@ -352,10 +352,10 @@ enum ReaderChrome {
             // the hue at the strength that can hold it. Only here: at the other levels the
             // fills are already five different colours and a second ring is noise.
             guard shown == .tinted else {
-                return "\(selector) { background: \(fill); }"
+                return "\(selector) { --swatch: \(fill); }"
             }
             let rim = ReaderPalette.hex(accent, on: theme, highlight: .hushed)
-            return "\(selector) { background: \(fill); border-color: \(rim); }"
+            return "\(selector) { --swatch: \(fill); --swatch-rim: \(rim); }"
         }.joined(separator: "\n")
     }
 
@@ -460,6 +460,16 @@ enum ReaderChrome {
         let sans = platform.sansStack
         let serif = platform.serifStack
         return """
+        /* Hygiene, not a fix: WebKit inflates text in a narrow viewport unless a document
+           opts out, by a heuristic no other engine shares, and every box in this stylesheet
+           is sized in pixels against type it expects to stay put. It was the first suspect
+           for the SE's unreadable panel — wrongly; that was flex shrinking, which is
+           reproducible and now fixed below. The opt-out stays because the reasoning holds
+           on its own: nothing here wants the engine second-guessing a 12px label.
+
+           The article's own text is untouched by it either way, being sized from
+           `--reader-size`, which is the reader's choice. */
+        :root { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
         .reader-controls {
           position: fixed; top: \(inset(14, "top")); right: \(inset(14, "right")); z-index: 10;
           display: flex; gap: 6px;
@@ -528,6 +538,17 @@ enum ReaderChrome {
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
           display: flex; flex-direction: column; gap: 10px;
         }
+        /* A flex item whose own `overflow` is not `visible` loses the automatic minimum size
+           that would otherwise stop it shrinking below its content — and `.seg` sets
+           `overflow: hidden` to clip its buttons to the rounded corners. So the moment a
+           panel's content exceeded its height cap, every row in it shrank to its two
+           borders: 2px tall, buttons clipped out of sight, labels gone. That is the SE
+           report — content is 637px against 581px of room there, and nothing shrinks on a
+           taller phone, which is why it read as a small-screen mystery.
+
+           The rows keep their size and the panel scrolls instead, which is what the height
+           cap and `overflow-y` were for. */
+        #readerPanel > *, #readerRecents > *, #readerHidden > * { flex-shrink: 0; }
         #readerPanel[hidden], #readerRecents[hidden], #readerHidden[hidden] { display: none; }
         /* Recents: two short groups of rows. Padding is on the rows, so the panel itself
            sheds its gap. Right-anchored like the Aa panel: the controls sit at the window's
@@ -652,27 +673,41 @@ enum ReaderChrome {
         .a-small { font-size: 12px; }
         .a-large { font-size: 17px; }
         .themes { display: flex; justify-content: space-between; padding: 2px; }
+        /* The disc is painted by the pseudo-element, not the button, so the target can grow
+           to the 44px a finger needs without the colour growing with it. The colour arrives
+           as `--swatch` from the rules `swatchCSS` emits; `--swatch-rim` is the tinted
+           level's, where five fills sit within a whisker of each other. */
         .swatch {
-          width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
-          border: 1px solid var(--border); padding: 0;
+          width: 26px; height: 26px; border: 0; padding: 0; background: none;
+          position: relative; cursor: pointer;
         }
-        .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
-        .swatch-auto { background: linear-gradient(135deg, #fafafa 50%, #1c1c1e 50%); }
-        .swatch-light { background: #fafafa; }
-        .swatch-sepia { background: #f4ecd8; }
-        .swatch-dark { background: #1c1c1e; }
-        .swatch-black { background: #000000; }
+        .swatch::before {
+          content: ""; position: absolute; inset: 0; border-radius: 50%;
+          background: var(--swatch); border: 1px solid var(--swatch-rim, var(--border));
+        }
+        .swatch[aria-pressed="true"]::before {
+          box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+        }
+        .swatch-auto { --swatch: linear-gradient(135deg, #fafafa 50%, #1c1c1e 50%); }
+        .swatch-light { --swatch: #fafafa; }
+        .swatch-sepia { --swatch: #f4ecd8; }
+        .swatch-dark { --swatch: #1c1c1e; }
+        .swatch-black { --swatch: #000000; }
         .accents { display: flex; justify-content: space-between; padding: 2px; }
         /* A row's own label. Seven controls with nothing above them was seven guesses; the
            labels were already in `aria-label`, so this shows the reader what the screen
            reader was being told. Quieter and smaller than `.panel-title`, which names the
            whole popover — the hierarchy has to be visible or the panel reads as a list of
            equal headings. */
+        /* A row is its label and the control under it, kept together in one box: the panel
+           lays out rows, not a stream of headings and widgets that can be separated by a
+           column break or a scroll position. The margins live here now, so the spacing is
+           the gap between items rather than a sum of collapsing margins. */
+        .panel-item { display: flex; flex-direction: column; gap: 5px; }
         .panel-row {
-          margin: 12px 2px 5px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
+          margin: 0 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
           text-transform: uppercase; color: var(--muted);
         }
-        .panel-row:first-of-type { margin-top: 8px; }
         /* Four options in a 2x2, because "Follow text" cannot survive a quarter of 250px.
            The grid keeps one border box around the set, so it still reads as one control
            rather than four buttons. */
@@ -697,29 +732,80 @@ enum ReaderChrome {
            `.reader-control` containing block without changing DOM ancestry, so
            `controlsScript`'s outside-click dismissal keys off the same `.reader-controls`
            it always did. */
-        @media \(collapsingChrome) {
+        /* Keyed on `compactViewport`, not on the chrome's own query: the chrome collapses
+           into one column wherever a hand is holding the device, tablets included, but a
+           sheet is the answer only where the screen is small enough that a popover would
+           cover it. A 13" iPad has room for a panel hanging off its button, and a
+           full-width sheet of 44px rows there would be a worse answer than the one it
+           already had. */
+        @media \(compactViewport) {
           #readerPanel, #readerRecents, #readerHidden {
             position: fixed;
-            /* Anchored to the bottom now, not the top: the chrome that opens these sits in
-               the bottom-right corner, and a panel that appeared at the far end of the
-               screen from the button you just pressed would be a different gesture
-               entirely. It grows upward from just above the toggle — which is all that is
-               left on screen, because opening a panel collapses the stack. */
-            top: auto;
-            bottom: calc(\(chromeEdge + toggleTarget + chromeGap)px
-                         + var(--safe-bottom));
-            left: max(\(chromeEdge)px, var(--safe-left));
-            right: max(\(chromeEdge)px, var(--safe-right));
-            width: auto;
-            /* Full width on a portrait phone, but a landscape one is 844px wide and a
-               816px band of 13px rows is not a list anyone wants to read. Capped, and
-               pushed back to the right so it still reads as hanging from the cluster that
-               opened it. */
-            max-width: 30rem; margin-left: auto;
-            max-height: calc(100vh - \(chromeEdge * 2 + toggleTarget + chromeGap)px
-                             - var(--safe-top)
-                             - var(--safe-bottom));
+            /* A sheet, not a panel. Anchored to the bottom edge and the side edges, because
+               a popover that covers 81% of an SE is a modal pretending to be a popover — and
+               it pretended badly: the appearance panel's ten rows are 637px against 581px of
+               room, so the last row could not be reached, and in landscape half the rows
+               could not. Full width buys back the space the margins and the 2x2 grid were
+               spending, and the shape tells the truth about what it is.
+
+               Nothing is capped to 30rem any more: a landscape phone gets a wide sheet, and
+               its rows reflow into two columns rather than stretching to 800px. */
+            top: auto; bottom: 0; left: 0; right: 0;
+            width: auto; max-width: none; margin: 0;
+            border-radius: 14px 14px 0 0; border-bottom: 0;
+            padding-bottom: calc(10px + var(--safe-bottom));
+            /* `dvh` rather than `vh`: on a phone `vh` is the tallest the viewport can ever
+               be, so a sheet sized in it hides its own last row behind the browser's own
+               furniture on the hosts that have any. */
+            max-height: 85dvh;
             overflow-y: auto;
+            /* The scroll stops here. Without this the sheet's few px of travel are spent
+               instantly and the gesture chains to the article underneath — which is what
+               "scrolling only scrolls the article" was: the sheet did scroll, for about
+               56px, and then handed the flick to the page. */
+            overscroll-behavior: contain;
+            box-shadow: 0 -2px 24px rgba(0, 0, 0, 0.24);
+          }
+          /* The handle: a sheet that scrolls has to say so before the first flick, and the
+             grabber is the one shape everybody already reads as "this moves". Sticky, so it
+             stays while the content runs under it. */
+          #readerPanel::before, #readerRecents::before, #readerHidden::before {
+            content: ""; display: block; position: sticky; top: 0; z-index: 1;
+            width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 2px;
+            background: var(--border);
+            /* `#readerPanel > *` cannot reach a pseudo-element, so the handle shrank to 0px
+               for the same reason the rows did — it is a flex item like any other. */
+            flex: none;
+          }
+          /* The scrim, which exists only where the panel is a sheet. On a pointer the panel
+             hangs off its button and the page behind stays usable, which is the whole point
+             of a popover; on a phone it is a modal and dimming says so. */
+          #readerScrim {
+            position: fixed; inset: 0; z-index: 9; display: block;
+            background: rgba(0, 0, 0, 0.32);
+          }
+          #readerScrim[hidden] { display: none; }
+          /* What the width buys. The 2x2 grid existed because "Follow text" cannot survive a
+             quarter of 250px; across a phone's full width all four fit in a row, which is
+             44px of height back. The swatch rows stop hugging the edges for the same reason.
+
+             Two columns once the sheet is wider than a portrait phone — a landscape phone,
+             where the sheet is 667px across and vertical room is what there is least of. */
+          .seg-grid { grid-template-columns: repeat(4, 1fr); }
+          .seg-grid button:nth-child(n+3) { border-top: 0; }
+          .seg-grid button + button { border-left: 1px solid var(--border); }
+          .themes, .accents { justify-content: space-around; }
+          /* Wider than a portrait phone means a phone on its side, where the sheet is 667px
+             across and vertical room is the scarcest thing there is. Two columns of rows —
+             a grid rather than `column-count`, which a flex container ignores outright, and
+             which would have split a label from its control anyway. `.panel-item` is what
+             makes this a one-line change: the pair is already one box. */
+          @media (min-width: 34rem) {
+            #readerPanel {
+              display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px;
+              align-content: start;
+            }
+            #readerPanel .panel-title { grid-column: 1 / -1; }
           }
         }
         /* Second: how big the rating pair is. It is chrome — it stands in the column beside
@@ -740,8 +826,13 @@ enum ReaderChrome {
           .recent { min-height: \(touchTarget)px; padding: 10px 10px; font-size: 13px; }
           .recent-empty, .phrase-empty { padding: 10px; }
           .seg button { min-height: \(touchTarget)px; padding: 0 4px; }
-          .swatch { width: 34px; height: 34px; }
-          .themes { padding: 2px 0; }
+          /* 44px of target, 34px of colour. The disc was the button, so the target was the
+             disc — 34px on every phone, ten under the floor a finger needs, and the reason
+             the row felt fiddly rather than merely small. The pseudo-element insets inside
+             a box that does not have to be the same size as what it shows. */
+          .swatch { width: \(touchTarget)px; height: \(touchTarget)px; }
+          .swatch::before { inset: 5px; }
+          .themes, .accents { padding: 2px 0; }
           /* The X on a hidden-phrase row: a 20px icon box inside a list built for reading. */
           .phrase-remove { min-height: \(touchTarget)px; min-width: \(touchTarget)px; }
         }
@@ -1661,6 +1752,11 @@ enum ReaderChrome {
           </div>
         """
         return """
+        <!-- Behind the sheet on a phone, and nowhere else: a sheet that covers most of the
+             screen has to stop the article taking the taps and the flicks meant for it.
+             Outside `.reader-controls` so it sits below that stacking context, and therefore
+             below the sheet it dims. -->
+        <div id="readerScrim" hidden></div>
         <div class="reader-controls">
           \(ratingControls)
           \(recentsControl)
@@ -1703,17 +1799,21 @@ enum ReaderChrome {
              reader knew what a sighted reader had to guess at; `aria-labelledby` points each
              group at the heading a reader can see, which is one label rather than two that
              can disagree. -->
-        <h3 class="panel-row" id="panelSize">Text size</h3>
-        <div class="seg" role="group" aria-labelledby="panelSize">
-          <button data-step="-1" data-size-key="\(sizeKey)" aria-label="Decrease text size"
-                  title="Smaller text"><span class="a-small">A</span></button>
-          <button data-step="1" data-size-key="\(sizeKey)" aria-label="Increase text size"
-                  title="Larger text"><span class="a-large">A</span></button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelSize">Text size</h3>
+          <div class="seg" role="group" aria-labelledby="panelSize">
+            <button data-step="-1" data-size-key="\(sizeKey)" aria-label="Decrease text size"
+                    title="Smaller text"><span class="a-small">A</span></button>
+            <button data-step="1" data-size-key="\(sizeKey)" aria-label="Increase text size"
+                    title="Larger text"><span class="a-large">A</span></button>
+          </div>
         </div>
-        <h3 class="panel-row" id="panelFace">Typeface</h3>
-        <div class="seg" role="group" aria-labelledby="panelFace">
-          <button data-key="\(faceKey)" data-value="serif">Serif</button>
-          <button data-key="\(faceKey)" data-value="sans">Sans</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelFace">Typeface</h3>
+          <div class="seg" role="group" aria-labelledby="panelFace">
+            <button data-key="\(faceKey)" data-value="serif">Serif</button>
+            <button data-key="\(faceKey)" data-value="sans">Sans</button>
+          </div>
         </div>
         """
     }
@@ -1728,28 +1828,34 @@ enum ReaderChrome {
     /// be legible, and four segments across a 250px popover leaves room for "Text", which
     /// says nothing on its own.
     private static let sharedPanelRows = """
-    <h3 class="panel-row" id="panelTheme">Theme</h3>
-    <div class="themes" role="group" aria-labelledby="panelTheme">
-      <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
-      <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
-      <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
-      <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
-      <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
+    <div class="panel-item">
+      <h3 class="panel-row" id="panelTheme">Theme</h3>
+      <div class="themes" role="group" aria-labelledby="panelTheme">
+            <button class="swatch swatch-auto" data-key="theme" data-value="auto" aria-label="Auto theme" title="Auto"></button>
+            <button class="swatch swatch-light" data-key="theme" data-value="light" aria-label="Light theme" title="Light"></button>
+            <button class="swatch swatch-sepia" data-key="theme" data-value="sepia" aria-label="Sepia theme" title="Sepia"></button>
+            <button class="swatch swatch-dark" data-key="theme" data-value="dark" aria-label="Dark theme" title="Dark"></button>
+            <button class="swatch swatch-black" data-key="theme" data-value="black" aria-label="Black theme" title="Black"></button>
+          </div>
     </div>
-    <h3 class="panel-row" id="panelHighlight">Highlight</h3>
-    <div class="seg seg-grid" role="group" aria-labelledby="panelHighlight">
-      <button data-key="highlight" data-value="text">Follow text</button>
-      <button data-key="highlight" data-value="bright">Bright</button>
-      <button data-key="highlight" data-value="tinted">Tinted</button>
-      <button data-key="highlight" data-value="hushed">Hushed</button>
+    <div class="panel-item">
+      <h3 class="panel-row" id="panelHighlight">Highlight</h3>
+      <div class="seg seg-grid" role="group" aria-labelledby="panelHighlight">
+        <button data-key="highlight" data-value="text">Follow text</button>
+        <button data-key="highlight" data-value="bright">Bright</button>
+        <button data-key="highlight" data-value="tinted">Tinted</button>
+        <button data-key="highlight" data-value="hushed">Hushed</button>
+      </div>
     </div>
-    <h3 class="panel-row" id="panelHue">Hue</h3>
-    <div class="accents" role="group" aria-labelledby="panelHue">
-      <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue" title="Blue"></button>
-      <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal" title="Teal"></button>
-      <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet" title="Violet"></button>
-      <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust" title="Rust"></button>
-      <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss" title="Moss"></button>
+    <div class="panel-item">
+      <h3 class="panel-row" id="panelHue">Hue</h3>
+      <div class="accents" role="group" aria-labelledby="panelHue">
+            <button class="swatch swatch-blue" data-key="accent" data-value="blue" aria-label="Blue" title="Blue"></button>
+            <button class="swatch swatch-teal" data-key="accent" data-value="teal" aria-label="Teal" title="Teal"></button>
+            <button class="swatch swatch-violet" data-key="accent" data-value="violet" aria-label="Violet" title="Violet"></button>
+            <button class="swatch swatch-rust" data-key="accent" data-value="rust" aria-label="Rust" title="Rust"></button>
+            <button class="swatch swatch-moss" data-key="accent" data-value="moss" aria-label="Moss" title="Moss"></button>
+          </div>
     </div>
     """
 
@@ -1763,33 +1869,43 @@ enum ReaderChrome {
     private static var readerPanelRows: String {
         """
         \(typeRows(sizeKey: "fontSize", faceKey: "fontFamily"))
-        <h3 class="panel-row" id="panelWidth">Column width</h3>
-        <div class="seg" role="group" aria-labelledby="panelWidth">
-          <button data-key="width" data-value="narrow">Narrow</button>
-          <button data-key="width" data-value="normal">Normal</button>
-          <button data-key="width" data-value="wide">Wide</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelWidth">Column width</h3>
+          <div class="seg" role="group" aria-labelledby="panelWidth">
+            <button data-key="width" data-value="narrow">Narrow</button>
+            <button data-key="width" data-value="normal">Normal</button>
+            <button data-key="width" data-value="wide">Wide</button>
+          </div>
         </div>
-        <h3 class="panel-row" id="panelLeading">Line spacing</h3>
-        <div class="seg" role="group" aria-labelledby="panelLeading">
-          <button data-key="lineHeight" data-value="compact">Compact</button>
-          <button data-key="lineHeight" data-value="normal">Normal</button>
-          <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelLeading">Line spacing</h3>
+          <div class="seg" role="group" aria-labelledby="panelLeading">
+            <button data-key="lineHeight" data-value="compact">Compact</button>
+            <button data-key="lineHeight" data-value="normal">Normal</button>
+            <button data-key="lineHeight" data-value="relaxed">Relaxed</button>
+          </div>
         </div>
-        <h3 class="panel-row" id="panelQuotes">Quotes</h3>
-        <div class="seg" role="group" aria-labelledby="panelQuotes">
-          <button data-key="quoteStyle" data-value="bordered">Bordered</button>
-          <button data-key="quoteStyle" data-value="italic">Italic</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelQuotes">Quotes</h3>
+          <div class="seg" role="group" aria-labelledby="panelQuotes">
+            <button data-key="quoteStyle" data-value="bordered">Bordered</button>
+            <button data-key="quoteStyle" data-value="italic">Italic</button>
+          </div>
         </div>
-        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
-        <div class="seg" role="group" aria-labelledby="panelThumbs">
-          <button data-key="readerThumbnails" data-value="on">On</button>
-          <button data-key="readerThumbnails" data-value="off">Off</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+          <div class="seg" role="group" aria-labelledby="panelThumbs">
+            <button data-key="readerThumbnails" data-value="on">On</button>
+            <button data-key="readerThumbnails" data-value="off">Off</button>
+          </div>
         </div>
         \(sharedPanelRows)
-        <h3 class="panel-row" id="panelSide">Controls</h3>
-        <div class="seg" role="group" aria-labelledby="panelSide">
-          <button data-key="controlSide" data-value="left">Left</button>
-          <button data-key="controlSide" data-value="right">Right</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelSide">Controls</h3>
+          <div class="seg" role="group" aria-labelledby="panelSide">
+            <button data-key="controlSide" data-value="left">Left</button>
+            <button data-key="controlSide" data-value="right">Right</button>
+          </div>
         </div>
         """
     }
@@ -1802,15 +1918,19 @@ enum ReaderChrome {
     /// explaining.
     private static var startPanelRows: String {
         """
-        <h3 class="panel-row" id="panelOrder">Lists</h3>
-        <div class="seg" role="group" aria-labelledby="panelOrder">
-          <button data-key="startPageOrder" data-value="recentsFirst">Recent first</button>
-          <button data-key="startPageOrder" data-value="suggestionsFirst">Suggested first</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelOrder">Lists</h3>
+          <div class="seg" role="group" aria-labelledby="panelOrder">
+            <button data-key="startPageOrder" data-value="recentsFirst">Recent first</button>
+            <button data-key="startPageOrder" data-value="suggestionsFirst">Suggested first</button>
+          </div>
         </div>
-        <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
-        <div class="seg" role="group" aria-labelledby="panelThumbs">
-          <button data-key="startPageThumbnails" data-value="on">On</button>
-          <button data-key="startPageThumbnails" data-value="off">Off</button>
+        <div class="panel-item">
+          <h3 class="panel-row" id="panelThumbs">Thumbnails</h3>
+          <div class="seg" role="group" aria-labelledby="panelThumbs">
+            <button data-key="startPageThumbnails" data-value="on">On</button>
+            <button data-key="startPageThumbnails" data-value="off">Off</button>
+          </div>
         </div>
         \(typeRows(sizeKey: "startFontSize", faceKey: "startFontFamily"))
         \(sharedPanelRows)
@@ -1938,8 +2058,11 @@ enum ReaderChrome {
             Object.keys(shown).forEach(function (hue) {
               var sw = panel && panel.querySelector('.swatch-' + hue);
               if (!sw) { return; }
-              sw.style.background = shown[hue];
-              sw.style.borderColor = rims ? rims[hue] : '';
+              // The variables the pseudo-element paints from, not the button's own
+              // background: the button is a 44px target with a smaller disc inside it.
+              sw.style.setProperty('--swatch', shown[hue]);
+              if (rims) { sw.style.setProperty('--swatch-rim', rims[hue]); }
+              else { sw.style.removeProperty('--swatch-rim'); }
             });
           }
 
@@ -2073,6 +2196,15 @@ enum ReaderChrome {
           // The buttons are looked up once, from the ids the stylesheet uses, and a page
           // that never rendered one simply drops out of the list.
           var chromeToggle = document.getElementById('readerChromeToggle');
+          // Painted only where the panels are sheets; absent on a page whose chrome never
+          // rendered controls at all, which is why every use is guarded.
+          var scrim = document.getElementById('readerScrim');
+          if (scrim) {
+            scrim.addEventListener('click', function () {
+              setOpen(null);
+              if (chromeToggle) { chromeToggle.focus(); }
+            });
+          }
           var chromeButtons = \(HTML.jsString(stackButtonIDs.joined(separator: " ")))
             .split(' ')
             .map(function (id) { return document.getElementById(id); })
@@ -2110,6 +2242,9 @@ enum ReaderChrome {
               p.panel.hidden = !open;
               p.btn.setAttribute('aria-expanded', String(open));
             });
+            // The scrim follows the panels. It is display:none above the breakpoint, so this
+            // costs a hidden attribute on a host that will never paint it.
+            if (scrim) { scrim.hidden = !which; }
             // A panel fills the screen above the toggle, so the column of buttons that
             // opened it would only be in the way. One thing on screen at a time.
             if (which) { setChromeOpen(false); }

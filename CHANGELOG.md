@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The appearance controls work on a small phone.** On a screen short enough that the
+  panel ran out of room — an SE, or any phone on its side — every row collapsed to a
+  2px line, taking its buttons and labels with it.
+- **On a phone the appearance controls are a sheet**, anchored to the bottom edge with a
+  grab handle and a dimmed page behind. It scrolls itself now instead of handing the flick
+  to the article, and a phone on its side lays the rows out in two columns.
+- **The theme and colour swatches are a finger wide.** They were 34px, ten under the
+  floor; the colour stays the size it was.
+
 ## [0.14.0] - 2026-09-11
 
 ### Added

@@ -138,32 +138,29 @@ final class TouchLayoutTests: XCTestCase {
 
     // MARK: - Popover anchoring
 
-    func testTouchPopoversArePinnedToTheViewportNotTheirButton() {
-        // Measured at -47px off the left edge before this: each panel is `right: 0` inside
-        // its own `.reader-control`, and the recents button is the third of five, so its
-        // right edge is ~273px in on a 390px phone. A panel wider than that starts
-        // off-screen, and the `max-width` guard never fires because the panel is narrower
-        // than the viewport while still outside it. Re-anchoring is the only fix.
-        //
-        // Anchored to the *bottom* since the chrome moved to the bottom-right corner: a
-        // panel opening at the far end of the screen from the button just pressed would be
-        // a different gesture entirely.
+    func testTouchPopoversAreSheetsPinnedToTheBottomEdge() {
+        // Measured at -47px off the left edge before any of this: each panel is `right: 0`
+        // inside its own `.reader-control`, and the recents button is the third of five, so
+        // a panel wider than ~273px started off-screen on a 390px phone. Re-anchoring was
+        // the fix, and then the anchoring itself was the problem: a panel that covers 81% of
+        // an SE is a modal pretending to be a popover. It is a sheet now — both edges, the
+        // bottom, and a scrim.
         let css = ReaderChrome.controlsCSS()
         guard let coarse = css.range(of: "#readerPanel, #readerRecents, #readerHidden {\n"
                                          + "    position: fixed;") else {
             return XCTFail("the panels need a coarse-pointer anchoring")
         }
-        let touch = String(css[coarse.lowerBound...])
-        XCTAssertTrue(touch.contains("top: auto;"))
-        XCTAssertTrue(touch.contains("left: max(14px, var(--safe-left));"))
-        XCTAssertTrue(touch.contains("right: max(14px, var(--safe-right));"))
-        // Clear of the toggle: the 14px inset, the 48px toggle and the 10px column gap. The
-        // toggle is the larger target, so this is the number that has to move with it — a
-        // panel that cleared 44px would sit 4px inside the button it hangs from.
-        XCTAssertTrue(touch.contains("bottom: calc(72px"),
-                      "the panels must clear ReaderChrome.toggleTarget, not touchTarget")
-        // And capped, so a landscape phone doesn't get an 816px band of 13px rows.
-        XCTAssertTrue(touch.contains("max-width: 30rem; margin-left: auto;"))
+        let sheet = String(css[coarse.lowerBound...])
+        XCTAssertTrue(sheet.contains("top: auto; bottom: 0; left: 0; right: 0;"))
+        XCTAssertTrue(sheet.contains("max-width: none;"),
+                      "a sheet spans the screen; the 30rem cap belonged to a hanging panel")
+        XCTAssertTrue(sheet.contains("border-radius: 14px 14px 0 0;"))
+        // The two that make it behave like a sheet rather than look like one.
+        XCTAssertTrue(sheet.contains("overscroll-behavior: contain;"),
+                      "without this a flick hands the page the rest of the gesture")
+        XCTAssertTrue(sheet.contains("max-height: 85dvh;"),
+                      "vh is the tallest the viewport can ever be, which is not this one")
+        XCTAssertTrue(sheet.contains("#readerScrim {"), "a sheet has to stop the page behind")
     }
 
     func testThePointerLayoutStillAnchorsPopoversToTheirButton() {
@@ -174,13 +171,30 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertTrue(css.contains("position: absolute; top: calc(100% + 8px); right: 0;"))
         XCTAssertTrue(css.contains("max-width: calc(100vw - 28px);"))
         // And the override comes later, or source order would leave the desktop rule on top.
-        // Anchored on the landscape cap, which appears only in the coarse block — a bare
-        // `position: fixed` also matches `.reader-controls` itself, at the top of the file.
+        // Anchored on the sheet's own corner radius, which appears nowhere else.
         guard let absolute = css.range(of: "position: absolute; top: calc(100% + 8px)"),
-              let override = css.range(of: "max-width: 30rem; margin-left: auto;") else {
+              let override = css.range(of: "border-radius: 14px 14px 0 0;") else {
             return XCTFail("both anchorings must be present")
         }
         XCTAssertLessThan(absolute.lowerBound, override.lowerBound)
+    }
+
+    func testAPanelRowKeepsItsSizeWhenTheSheetRunsOutOfRoom() {
+        // The SE's unreadable panel: `.seg` clips its buttons to the rounded corners, and a
+        // flex item whose overflow is not visible loses the automatic minimum size that
+        // stops it shrinking below its content. So every row collapsed to its two borders
+        // the moment the content passed the height cap — 2px tall, buttons gone — on the one
+        // phone short enough to trigger it.
+        let css = ReaderChrome.controlsCSS()
+        XCTAssertTrue(css.contains(
+            "#readerPanel > *, #readerRecents > *, #readerHidden > * { flex-shrink: 0; }"))
+        // The handle is a flex item too, and a child selector cannot reach a pseudo-element:
+        // it shrank to 0px for exactly the same reason, and nobody saw the grabber.
+        guard let handle = css.range(of: "#readerPanel::before, #readerRecents::before"),
+              let handleEnd = css.range(of: "}", range: handle.upperBound..<css.endIndex) else {
+            return XCTFail("the sheet needs a grab handle")
+        }
+        XCTAssertTrue(css[handle.upperBound..<handleEnd.upperBound].contains("flex: none;"))
     }
 
     // MARK: - Touch targets
