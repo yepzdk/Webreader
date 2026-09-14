@@ -137,6 +137,70 @@ No sign-in is required to review the app. Paste any article URL into the field o
 page, or use the Share sheet from Safari.
 ```
 
+## Demo video for App Review
+
+Asked for after the first submission, alongside a note about testing on real devices. Two
+separate things, and the order matters:
+
+**1. Upload a build that has the fix.** The rejected submission was `0.14.0 (114)`, which
+predates the appearance panel collapsing on short screens (#60). Apple's small test device
+is an SE — exactly the screen where every row in that panel shrank to a 2px line with its
+buttons clipped away. A reviewer who opened the appearance menu there found a broken
+control, which is what "test on real devices" is describing. `0.14.2 (128)` fixes it.
+
+**2. Then the video.** Record it on the smallest device you own, running the build that is
+under review, so the recording answers the complaint rather than sidestepping it.
+
+### Shot list — about 75 seconds
+
+No narration needed; App Review wants to see the app work, not hear about it.
+
+| Time | What is on screen |
+| --- | --- |
+| 0:00 | Safari, on a normal article page — ads, banners, the lot. Share sheet -> WebReader. |
+| 0:10 | The article in the reader: text, byline, images. Scroll a screen or two. |
+| 0:25 | Open the appearance sheet. Change text size, then typeface, then theme. The article reflows behind the sheet, which is the point of leaving it visible. |
+| 0:45 | The globe control: back to the site's own page. Then back into the reader. |
+| 0:55 | Scroll to the end of the article: three suggestions under "Read next". Tap one, it opens in the reader. |
+| 1:05 | Home, to the start page: recents and suggestions. Paste a URL into the field and open it. |
+
+Stop there. Sync, hidden text and blocked outlets are secondary; a reviewer needs the
+primary use, and a long video is a video nobody watches to the end.
+
+### Recording it
+
+Control Centre -> Screen Recording (add it in Settings -> Control Centre if it is not
+there). Microphone off. Then Photos -> trim the countdown off the front.
+
+### Where it goes
+
+App Review asks for a **link**, not an attachment. A GitHub release asset gives a stable
+URL that needs no account:
+
+```sh
+gh release upload v0.14.2 webreader-demo.mp4 --clobber
+# -> https://github.com/yepzdk/webreader/releases/download/v0.14.2/webreader-demo.mp4
+```
+
+Put that URL in **App Review Information -> Notes**, and reply in Resolution Center:
+
+```
+Thank you for the review.
+
+We have uploaded build 0.14.2 (128), which fixes a layout defect in the appearance
+controls on short screens such as the iPhone SE: rows in that panel could collapse and
+their buttons became unusable. That build has been tested on physical iPhone and iPad
+hardware, and the controls behave correctly at every size we ship for.
+
+A video of the app's primary use — opening an article from the Share sheet, reading it,
+adjusting the typography, and following a suggestion at the end of the article — is linked
+in the App Review Information section:
+
+<URL>
+
+No account or sign-in is required to review the app.
+```
+
 ## Age rating
 
 The questionnaire's **Unrestricted Web Access** item applies — the user can paste any URL —
