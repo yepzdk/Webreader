@@ -756,8 +756,16 @@ enum ReaderChrome {
             padding-bottom: calc(10px + var(--safe-bottom));
             /* `dvh` rather than `vh`: on a phone `vh` is the tallest the viewport can ever
                be, so a sheet sized in it hides its own last row behind the browser's own
-               furniture on the hosts that have any. */
-            max-height: 85dvh;
+               furniture on the hosts that have any.
+
+               Two thirds, not the 85% a sheet usually takes. The panel is taller than any
+               phone whatever this number is — 809px of rows against 567px on an SE — so the
+               cap is not buying rows, it is choosing how much of the article stays on
+               screen behind it. A third of the page is two or three paragraphs, which is
+               enough to watch the text reflow while the size, the face or the measure
+               changes underneath the sheet. Every one of these controls is about that text;
+               a sheet that covers it asks you to change it blind. */
+            max-height: 67dvh;
             overflow-y: auto;
             /* The scroll stops here. Without this the sheet's few px of travel are spent
                instantly and the gesture chains to the article underneath — which is what
@@ -779,10 +787,15 @@ enum ReaderChrome {
           }
           /* The scrim, which exists only where the panel is a sheet. On a pointer the panel
              hangs off its button and the page behind stays usable, which is the whole point
-             of a popover; on a phone it is a modal and dimming says so. */
+             of a popover; on a phone it is a modal and dimming says so.
+
+             Light enough to read through, because the third of the page the sheet leaves is
+             there to be watched: the text reflows under it as the size or the measure
+             changes. A heavier scrim would say "modal" more loudly and hide the only
+             feedback these controls have. */
           #readerScrim {
             position: fixed; inset: 0; z-index: 9; display: block;
-            background: rgba(0, 0, 0, 0.32);
+            background: rgba(0, 0, 0, 0.18);
           }
           #readerScrim[hidden] { display: none; }
           /* What the width buys. The 2x2 grid existed because "Follow text" cannot survive a
