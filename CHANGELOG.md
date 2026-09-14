@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-14
+
 ### Fixed
 - **The appearance controls work on a small phone.** On a screen short enough that the
   panel ran out of room — an SE, or any phone on its side — every row collapsed to a
@@ -286,7 +288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - webwrap-only options the reader never used: navigation toolbar, Settings window, user-agent
   selector, window background color.
 
-[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/yepzdk/webreader/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/yepzdk/webreader/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/yepzdk/webreader/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/yepzdk/webreader/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/yepzdk/webreader/compare/v0.11.0...v0.12.0
