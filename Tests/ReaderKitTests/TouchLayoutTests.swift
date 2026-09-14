@@ -158,7 +158,7 @@ final class TouchLayoutTests: XCTestCase {
         // The two that make it behave like a sheet rather than look like one.
         XCTAssertTrue(sheet.contains("overscroll-behavior: contain;"),
                       "without this a flick hands the page the rest of the gesture")
-        XCTAssertTrue(sheet.contains("max-height: 85dvh;"),
+        XCTAssertTrue(sheet.contains("max-height: 67dvh;"),
                       "vh is the tallest the viewport can ever be, which is not this one")
         XCTAssertTrue(sheet.contains("#readerScrim {"), "a sheet has to stop the page behind")
     }
