@@ -645,7 +645,7 @@ public enum ReaderPage {
           \(ReaderChrome.indent(ReaderChrome.progressCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastCSS(platform: platform), by: 10))
-          \(ReaderChrome.indent(HiddenPhrases.hideAffordanceCSS(platform: platform), by: 10))
+          \(ReaderChrome.indent(BlockPicker.css(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.readNextCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform,
                                                        collapsible: true), by: 10))
@@ -661,7 +661,8 @@ public enum ReaderPage {
                                              excluding: currentURL),
                     canClear: !history.entries.isEmpty,
                     showsRating: true, rating: rating,
-                    showsHidden: true, showsOriginal: true, surface: .reader),
+                    showsHidden: true, showsOriginal: true, showsPicker: true,
+                    surface: .reader),
                 collapsible: true), by: 2))
           <main>
             <header>
@@ -682,7 +683,7 @@ public enum ReaderPage {
                                                                  && palette != nil), by: 10))
           \(ReaderChrome.indent(ReaderChrome.progressScript(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.toastScript(), by: 10))
-          \(ReaderChrome.indent(HiddenPhrases.hideAffordanceJS(), by: 10))
+          \(ReaderChrome.indent(BlockPicker.js(), by: 10))
           </script>
         </body>
         </html>

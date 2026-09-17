@@ -107,6 +107,37 @@ final class ReaderSessionTests: XCTestCase {
         XCTAssertNotNil(ReaderStore.history(store: store).clearedAt)
     }
 
+    func testARemovedBlockIsKeptInTheArticlesOwnCachedCopy() {
+        enterReader()
+        let cached = session.cache.article(for: page)
+        XCTAssertEqual(cached?.content, "<p>Body</p>")
+
+        XCTAssertEqual(session.message("readerHideBlock", body: .text("<p>Kept</p>")), [])
+
+        let updated = session.cache.article(for: page)
+        XCTAssertEqual(updated?.content, "<p>Kept</p>")
+        // Only the body: the title, byline and lead image are the article's, not the
+        // page's, and a recents row still needs them.
+        XCTAssertEqual(updated?.title, article.title)
+        XCTAssertEqual(updated?.image, article.image)
+        XCTAssertEqual(updated?.hiddenHits, article.hiddenHits)
+    }
+
+    func testOnlyTheReaderPageMayRewriteACachedArticle() {
+        // The gate every handler needs: the message is session-wide, so without it a live
+        // site's JavaScript could replace the saved copy of whatever was read last. The
+        // start page arrives as a document load, which is what clears the reader flag —
+        // driven here in the order a host drives it.
+        enterReader()
+        _ = session.showStartPage()
+        session.navigationStarted()
+        _ = session.navigationFinished(url: nil, generator: "WebReader Start")
+
+        XCTAssertEqual(session.message("readerHideBlock", body: .text("<p>Hostile</p>")), [])
+
+        XCTAssertEqual(session.cache.article(for: page)?.content, "<p>Body</p>")
+    }
+
     func testASavedCopyBeatsTheOfflinePage() {
         // The article is what was asked for, and a reload fetches the live page again once
         // the network is back.

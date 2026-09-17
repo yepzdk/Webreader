@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Remove things from an article by pointing at them.** A new chrome button turns the
+  article into something you aim at: the block under the pointer is outlined, a click takes
+  it — text, pictures and the space it held — and the bar has Undo. What you remove stays
+  gone in that article's saved copy; a reload fetches the publisher's version again.
+- **Selecting text in the reader is the browser's own business again.** The floating
+  "Hide text" button that followed your selection is gone: it fought the system's selection
+  controls on every platform. Hiding a phrase in *every* article is now offered on the
+  block you just removed.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

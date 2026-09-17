@@ -47,8 +47,13 @@ switch, two more built only by Xcode, no dependencies:
     sources with a 10-minute in-memory TTL; failures are "no items", never errors.
   - `SettingsPage.swift` — the suggestion sources, the language filter, and the way into
     sync (⌘,).
-  - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
-    `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
+  - `HiddenPhrases.swift` — boilerplate phrases removed from every article (cap 100) and the
+    JS `readerHideBlocks` that does it, shared by the extraction script and the live reader
+    page.
+  - `BlockPicker.swift` — the reader-page mode that removes one block from *this* article by
+    pointing at it (`readerHideBlock` → the article's cached copy). It replaced the
+    selection-driven Hide-text button, which fought the browser's own selection; the phrase
+    list is unchanged and is reached from the picker's "Hide everywhere".
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
   - `URLCleaner.swift` — tracking-redirect unwrap / tracking-param strip (ported from
     yepzdk/url-cleaner; never unwraps OAuth `redirect*` params or unencoded nested URLs).
@@ -155,18 +160,29 @@ switch, two more built only by Xcode, no dependencies:
   `showSuggestions(_:)` / `sourceResolved(_:)`. Anything that reads `store`, the cache or
   `pageState` from a second thread is a race, however small the window looks.
 - Generated pages talk to the host via `readerRetry`, `readerSettings`, `readerOpen`,
-  `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
-  `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
-  `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`,
-  `readerOpenSync`. Rename in both Swift and the page scripts together. The host calls back
+  `readerClear`, `readerOpenURL`, `readerHide`, `readerHideBlock`, `readerUnhide`,
+  `readerOpenSettings`, `readerHome`, `readerAddSource`, `readerRemoveSource`,
+  `readerSetLanguages`, `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`,
+  `readerRate`, `readerOpenSync`. Rename in both Swift and the page scripts together. The
+  host calls back
   via `window.readerSetHidden(list)`, `window.readerSetSuggestions(items)`,
   `window.readerSourceAdded/Rejected(…)`, `window.readerApplySettings(settings)`,
   `window.readerSetRecents(rows)`, `window.readerSetSyncStatus(folder, summary)`.
-- Hiding a phrase is a **page** affordance, not a menu item: selecting text in the reader
-  raises a Hide button that posts to `readerHide`. It was moved out of the Edit and context
+- Hiding is a **page** affordance, not a menu item: it was moved out of the Edit and context
   menus for issue #16 — the Linux host has no menu bar — and `window.webkit.messageHandlers`
   is the same API on WebKitGTK 6.0, so the page half ports unchanged. Don't reintroduce a
   menu route; there would be two ways to do one thing.
+- Two hiding gestures, two scopes, one list of blocks (`BlockPicker.blocks`, shared with
+  `readerHideBlocks`) and one normalizer (`window.readerNormalize`, exported by
+  `controlsScript` from the copy of `hideScript` it embeds):
+  - **This article** — `BlockPicker`'s mode. Click a block, it goes, and the remaining
+    `<article>` HTML is posted to `readerHideBlock`, which rewrites the article's cached
+    copy. A reload re-fetches the publisher's version, deliberately.
+  - **Every article** — the phrase list, now reached from the picker's "Hide everywhere" on
+    a removed leaf block short enough to be a label (`BlockPicker.phraseOffer`). It still
+    posts `readerHide`, unchanged.
+  Nothing on the reader page listens to the document selection any more: the affordance that
+  did fought the browser's own selection UI, which is what issue #67 was about.
 - Hidden phrases match a **whole block's text only** (never a substring, never inline
   elements) so a learned phrase can't rewrite prose. The stored list is seeded with
   `HiddenPhrases.defaults` the first time it's read and is plain user data afterwards — new

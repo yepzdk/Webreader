@@ -86,10 +86,10 @@ extension ReaderSession {
             return []
 
         case "readerHide":
-            // The reader page's floating affordance: learns the selection as a phrase, strips
-            // it from the article live, and hides it in every article from now on. Rejects
-            // when the selection isn't usable — no text, longer than a sentence, or already
-            // stored.
+            // The phrase route, now reached from the picker's "Hide everywhere" rather than
+            // from a text selection: learns the text as a phrase, strips it from the article
+            // live, and hides it in every article from now on. Rejects when it isn't usable —
+            // no text, longer than a sentence, or already stored.
             guard ownPage, let text = body.text else { return [] }
             var phrases = ReaderStore.hiddenPhrases(store: store)
             guard phrases.add(text) else { return [.reject] }
@@ -98,6 +98,24 @@ extension ReaderSession {
             // selection expecting the blocks to go, so a host that drops this leaves the text
             // on screen with nothing to say why.
             return [.evaluate("window.readerSetHidden(\(phrases.scriptLiteral))")]
+
+        case "readerHideBlock":
+            // The picker removed a block from the article on screen and posted what is left.
+            // It is kept in this article's cached copy — the one a recents row and an offline
+            // open render — so the article stays as the reader left it, while a deliberate
+            // reload fetches the publisher's version again.
+            //
+            // The body is the `<article>` element's own HTML, which is exactly what
+            // `Article.content` is rendered from, so it goes back in unchanged.
+            guard isShowingReader, let content = body.text, let source = readerSourceURL
+            else { return [] }
+            let cleaned = URLCleaner.clean(source)
+            guard let cached = cache.article(for: cleaned) else { return [] }
+            cache.store(Article(title: cached.title, byline: cached.byline,
+                                siteName: cached.siteName, content: content,
+                                hiddenHits: cached.hiddenHits, image: cached.image),
+                        for: cleaned)
+            return []
 
         case "readerUnhide":
             guard ownPage, let phrase = body.text else { return [] }

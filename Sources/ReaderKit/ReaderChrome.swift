@@ -477,11 +477,19 @@ enum ReaderChrome {
         }
         /* Each button owns the popover anchored under it. */
         .reader-control { position: relative; }
-        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn, #readerOriginalBtn"))
+        \(buttonBox("#readerAa, #readerRecentsBtn, #readerHiddenBtn, #readerOriginalBtn, "
+            + "#\(BlockPicker.buttonID)"))
         #readerAa:hover, #readerAa[aria-expanded="true"],
         #readerRecentsBtn:hover, #readerRecentsBtn[aria-expanded="true"],
         #readerOriginalBtn:hover,
+        #\(BlockPicker.buttonID):hover,
         #readerHiddenBtn:hover, #readerHiddenBtn[aria-expanded="true"] { color: var(--fg); }
+        /* On while the picker mode is on, like the rating buttons are on while they hold an
+           opinion: this is the one chrome button that changes what a click on the article
+           does, so it has to look pressed the whole time it does. */
+        #\(BlockPicker.buttonID)[aria-pressed="true"] {
+          color: var(--accent); border-color: var(--accent);
+        }
         /* The icon buttons match the "Aa" button's box; the SVGs inherit currentColor.
            `justify-content` centres the icon once the coarse floor makes the box wider
            than the glyph needs; on a pointer the box is content-sized and it does nothing.
@@ -491,10 +499,12 @@ enum ReaderChrome {
            came out as whatever the engine draws by default — a filled grey slab beside six
            outlined ones. `testEveryChromeButtonIsStyled` now fails if that happens again. */
         #readerRecentsBtn, #readerHiddenBtn, #readerOriginalBtn,
+        #\(BlockPicker.buttonID),
         #readerMoreBtn, #readerLessBtn {
           display: flex; align-items: center; justify-content: center; padding: 5px 9px;
         }
         #readerRecentsBtn svg, #readerHiddenBtn svg, #readerOriginalBtn svg,
+        #\(BlockPicker.buttonID) svg,
         #readerMoreBtn svg, #readerLessBtn svg { display: block; }
         /* Rating buttons: same box as the other icon controls. Pressed is the one place in
            the chrome where a control is "on" rather than merely open, and it says so by
@@ -1082,7 +1092,7 @@ enum ReaderChrome {
     /// markup rather than trusting this to be complete.
     static let stackButtonIDs = ["readerHomeBtn", "startSettings", "readerAa",
                                  "readerRecentsBtn", "readerHiddenBtn",
-                                 "readerOriginalBtn",
+                                 "readerOriginalBtn", BlockPicker.buttonID,
                                  "readerMoreBtn", "readerLessBtn"]
 
     /// The same list plus the toggle: everything that takes the column's square sizing.
@@ -1670,6 +1680,7 @@ enum ReaderChrome {
                          rating: TopicPreferences.Rating? = nil,
                          showsHidden: Bool = false,
                          showsOriginal: Bool = false,
+                         showsPicker: Bool = false,
                          surface: Surface = .start) -> String {
         // Which page this chrome belongs to, and therefore which questions its popover asks.
         // The two lists overlap but are not the same list, and sharing one was a defect
@@ -1764,6 +1775,26 @@ enum ReaderChrome {
             </button>
           </div>
         """
+        // Turning the page into something you aim at. Reader-only, like the original-page
+        // button and for the same reason: there is no article to take blocks out of
+        // anywhere else, and a control that cannot work where it is drawn is worse than a
+        // missing one. `aria-pressed` rather than `aria-expanded`: nothing opens, the next
+        // click on the article means something different.
+        //
+        // A frame with a minus in it, not a pair of scissors: what goes is a whole block,
+        // and nothing is being cut in half.
+        let pickerControl = !showsPicker ? "" : """
+        <div class="reader-control">
+            <button id="\(BlockPicker.buttonID)" aria-label="Remove blocks from this article"
+                    title="Remove blocks from this article" aria-pressed="false">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 3"/>
+                <path d="M8 12h8"/>
+              </svg>
+            </button>
+          </div>
+        """
         return """
         <!-- Behind the sheet on a phone, and nowhere else: a sheet that covers most of the
              screen has to stop the article taking the taps and the flicks meant for it.
@@ -1775,6 +1806,7 @@ enum ReaderChrome {
           \(recentsControl)
           \(hiddenControl)
           \(originalControl)
+          \(pickerControl)
           <div class="reader-control">
             <button id="readerAa" aria-label="\(surface.appearanceLabel)"
                     title="\(surface.appearanceLabel)" aria-haspopup="true"
@@ -1977,6 +2009,10 @@ enum ReaderChrome {
         return """
         (function () {
           \(indent(HiddenPhrases.hideScript, by: 2))
+          // The picker's own IIFE needs the same answer to "does this say anything the
+          // child did not", and one definition of that is the point: exported here rather
+          // than embedded twice, since this script is what the page loads first.
+          window.readerNormalize = readerNormalize;
           var s = \(settings.json);
           var THUMBS = '\(thumbnails.rawValue)';
           var HIDDEN = \(hidden.scriptLiteral);
