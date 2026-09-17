@@ -63,6 +63,7 @@ final class ReaderStoreTests: XCTestCase {
         var topics = TopicPreferences()
         topics.prefer("Vindmøller i Nordsøen")
         ReaderStore.setTopics(topics, store: store)
+        ReaderStore.setHintsSeen(true, store: store)
 
         ReaderStore.resetAppearance(store: store)
 
@@ -71,6 +72,21 @@ final class ReaderStoreTests: XCTestCase {
         XCTAssertEqual(ReaderStore.history(store: store), history)
         XCTAssertTrue(ReaderStore.suggestions(store: store).sources.isEmpty)
         XCTAssertEqual(ReaderStore.topics(store: store), topics)
+        // Reverting the type and the theme is not "make me new again": the first-run tips
+        // stay dismissed, and the same rows are on the settings page anyway.
+        XCTAssertTrue(ReaderStore.hintsSeen(store: store))
+    }
+
+    func testTipsAreUnseenUntilDismissed() {
+        let store = MemoryStore()
+        XCTAssertFalse(ReaderStore.hintsSeen(store: store))
+        ReaderStore.setHintsSeen(true, store: store)
+        XCTAssertTrue(ReaderStore.hintsSeen(store: store))
+        // Written as one key with one value, so clearing it is a real undo rather than a
+        // second marker meaning "shown again".
+        ReaderStore.setHintsSeen(false, store: store)
+        XCTAssertFalse(ReaderStore.hintsSeen(store: store))
+        XCTAssertTrue(store.values[ReaderStore.Key.hintsSeen] == nil)
     }
 
     func testResetAppearanceKeepsWhatTheSettingsPageOwns() {

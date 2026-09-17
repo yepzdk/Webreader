@@ -279,6 +279,7 @@ public enum SettingsPage {
             .langs { gap: 0 18px; }
             #syncOpen { min-height: \(touchTarget)px; padding: 10px 14px; font-size: 15px; }
           }
+          \(ReaderChrome.indent(Hints.css(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.chromeCSS(platform: platform), by: 10))
         </style>
@@ -311,6 +312,9 @@ public enum SettingsPage {
             \(syncSection)
 
             \(hiddenSection)
+
+            \(ReaderChrome.indent(Hints.markup(for: platform, heading: "Tips",
+                                               id: "settingsTips", dismissible: false), by: 4))
 
             \(ReaderChrome.indent(shortcutSection(platform: platform), by: 4))
           </main>

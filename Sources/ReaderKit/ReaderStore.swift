@@ -75,6 +75,10 @@ public enum ReaderStore {
         public static let settingsUpdatedAt = "reader.settings.updatedAt"
         /// Marker set once the one-time import from the webwrap-generated app has run.
         public static let legacyImported = "reader.legacyImported"
+        /// Marker set once the start page's first-run tips have been dismissed. Not cleared
+        /// by `resetAppearance`: reverting the type and the theme is not "make me new
+        /// again", and the tips stay readable on the settings page either way.
+        public static let hintsSeen = "reader.hintsSeen"
 
         // Sync: the folder every instance exchanges device files through, this device's
         // identity within it, and when it last synced (shown in the Sync sheet).
@@ -156,6 +160,20 @@ public enum ReaderStore {
 
     public static func setHiddenPhrases(_ phrases: HiddenPhrases, store: KeyValueStore) {
         store.set(phrases.json, forKey: Key.hiddenPhrases)
+    }
+
+    // MARK: - First-run tips
+
+    /// Whether the start page's tips have been dismissed. Written once, by the page's own
+    /// "Got it": there is no usage signal to infer it from — nothing records whether a theme
+    /// was ever changed or a phrase ever hidden — so the tips are shown blind on a new
+    /// install and never again after that.
+    public static func hintsSeen(store: KeyValueStore) -> Bool {
+        store.string(forKey: Key.hintsSeen) == "1"
+    }
+
+    public static func setHintsSeen(_ seen: Bool, store: KeyValueStore) {
+        store.set(seen ? "1" : nil, forKey: Key.hintsSeen)
     }
 
     // MARK: - Suggestions

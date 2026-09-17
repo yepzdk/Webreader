@@ -16,6 +16,20 @@ final class SettingsPageTests: XCTestCase {
         XCTAssertTrue(page.contains("class=\"source-lang\">da<"))
     }
 
+    func testTheTipsAreHereForGoodWithNothingToDismiss() {
+        // Where the start page's tips go once they are dismissed: the same rows,
+        // permanently, so "Got it" costs nothing. No dismissal here — that is the point of
+        // the copy living on a page you came looking for.
+        let page = html()
+        for hint in Hints.all(for: .macOS) {
+            XCTAssertTrue(page.contains(HTML.escape(hint.term)), "\(hint.term) is not named")
+            XCTAssertTrue(page.contains(HTML.escape(hint.detail)), "\(hint.term) has no detail")
+        }
+        XCTAssertTrue(page.contains("id=\"settingsTips\""))
+        XCTAssertFalse(page.contains("settingsTipsDismiss"))
+        XCTAssertFalse(page.contains("readerHintsSeen"))
+    }
+
     func testSourceTitlesAreEscaped() {
         let page = html(SuggestionSettings(sources: [
             FeedSource(url: "https://x.test/rss\" onload=\"alert(1)", title: "News & <script>", language: nil),

@@ -175,6 +175,43 @@ final class StartPageTests: XCTestCase {
         XCTAssertTrue(html.contains("className = 'row-menu'"))
     }
 
+    func testTheFirstRunTipsAreShownOnceAndOnlyWhenAskedFor() {
+        // Nothing records whether a theme was ever changed or a phrase ever hidden, so the
+        // tips are shown blind on a new install — which makes "only when asked for" the
+        // whole gate. The host reads `ReaderStore.hintsSeen` and passes the answer.
+        XCTAssertFalse(StartPage.html(appName: "Reader").contains("id=\"startHints\""))
+        let shown = StartPage.html(appName: "Reader", showHints: true)
+        XCTAssertTrue(shown.contains("id=\"startHints\""))
+        // Between the field and the lists: a first-run reader has nothing in the lists.
+        guard let tips = shown.range(of: "id=\"startHints\""),
+              let lists = shown.range(of: "class=\"lists\"") else {
+            return XCTFail("the page lost one of its two landmarks")
+        }
+        XCTAssertTrue(tips.lowerBound < lists.lowerBound)
+        // Every hint is on the page, and the dismissal posts the marker rather than just
+        // hiding the block — otherwise it is back on the next visit.
+        for hint in Hints.all(for: .macOS) {
+            XCTAssertTrue(shown.contains(HTML.escape(hint.term)), "\(hint.term) is not named")
+            XCTAssertTrue(shown.contains(HTML.escape(hint.detail)), "\(hint.term) has no detail")
+        }
+        XCTAssertTrue(shown.contains("id=\"startHintsDismiss\""))
+        XCTAssertTrue(shown.contains("post('readerHintsSeen', '')"))
+    }
+
+    func testTheArrivalTipIsTheHostsOwnWording() {
+        // The one hint whose wording is the platform's rather than ours: a share sheet to
+        // name on a phone, a link handler on a desktop.
+        let phone = StartPage.html(appName: "Reader", platform: .iOS, showHints: true)
+        XCTAssertTrue(phone.contains("share sheet"))
+        XCTAssertFalse(phone.contains("link handler"))
+        let desktop = StartPage.html(appName: "Reader", showHints: true)
+        XCTAssertTrue(desktop.contains("link handler"))
+        XCTAssertFalse(desktop.contains("share sheet"))
+        // Not a second telling of the empty-recents paragraph, which answers the same
+        // question for a page with nothing on it.
+        XCTAssertTrue(desktop.contains("Route links here from your browser picker"))
+    }
+
     func testActionsConfirmWithAToast() {
         let html = StartPage.html(appName: "Reader")
         XCTAssertTrue(html.contains("id=\"readerToast\""))
