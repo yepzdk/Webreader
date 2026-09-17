@@ -16,7 +16,7 @@ final class SheetGestureTests: XCTestCase {
         // the sheet CSS is, rather than on the pointer: what makes it a sheet is the
         // viewport, and a narrow desktop window gets the sheet and the gesture with it.
         XCTAssertTrue(js.contains("window.matchMedia('\(ReaderChrome.compactViewport)')"))
-        XCTAssertTrue(js.contains("if (drag || !sheetQuery || !sheetQuery.matches) { return; }"))
+        XCTAssertTrue(js.contains("if (drag || !panel || !sheetQuery || !sheetQuery.matches) { return; }"))
     }
 
     func testTheSheetFollowsTheFingerAndTheScrimFollowsTheSheet() {
@@ -42,29 +42,28 @@ final class SheetGestureTests: XCTestCase {
         XCTAssertGreaterThan(ReaderChrome.sheetDismissTravel, ReaderChrome.touchTarget)
     }
 
-    func testADragBelowTheHandleBelongsToTheListUntilTheListHasNowhereLeft() {
-        // The first guard: a flick through a long list must scroll it, not throw it away.
-        XCTAssertTrue(js.contains("if (!fromHandle && panel.scrollTop > 0) { return; }"))
-        XCTAssertTrue(js.contains("e.clientY - panel.getBoundingClientRect().top <= \(ReaderChrome.sheetGrabZone)"))
-        // The zone has to cover the panel's own 12px of padding, the 4px grabber and its
-        // 8px margin, or the one place the gesture is advertised would not answer.
-        XCTAssertGreaterThanOrEqual(ReaderChrome.sheetGrabZone, 24)
+    func testTheGestureIsTheHandlesAndTheHandleOptsOutOfPanning() {
+        // The defect this exists for, reported from an iPhone: "I can grab the handle and
+        // start the drag, but it slips and jumps back". WebKit gave the touch to its own
+        // pan recogniser, which cancels the pointer stream a few px in. `preventDefault` on
+        // `pointermove` does not stop a scroll there; `touch-action: none` does, and only a
+        // real element can carry it — which is why the handle stopped being a `::before`.
+        XCTAssertTrue(css.contains("touch-action: none;"))
+        XCTAssertTrue(js.contains("var handle = p.panel.querySelector('.sheet-handle');"))
+        XCTAssertTrue(js.contains("handle.addEventListener('touchstart'"))
+        XCTAssertTrue(js.contains("handle.addEventListener('pointerdown'"))
+        // The listener is the handle's, so the sheet is its parent.
+        XCTAssertTrue(js.contains("beginDrag(handle.parentElement,"))
+        // And the sheet itself keeps its scrolling: only the strip opts out.
+        XCTAssertFalse(css.contains("#readerPanel, #readerRecents, #readerHidden {\n            touch-action: none"))
+        // Nothing keys off where in the sheet the pointer landed any more.
+        XCTAssertFalse(js.contains("panel.scrollTop"))
+        XCTAssertFalse(js.contains("fromHandle"))
     }
 
     func testAnUpwardDragIsHandedBackRatherThanHeldForTheRestOfTheGesture() {
-        // The second guard. Without it, starting upward and reversing would drag the sheet
-        // from wherever the finger happened to be by then.
-        XCTAssertTrue(js.contains("if (dy < -4) { drag = null; return; }"))
-        XCTAssertTrue(js.contains("if (dy < \(ReaderChrome.sheetDragSlop)) { return; }"))
-    }
-
-    func testAGestureThatMovedTheSheetDoesNotAlsoPressWhatItStartedOn() {
-        // The third guard, and the one a user would notice: a drag that begins on a stepper
-        // and settles back must not also step. Capture phase, so the click reaches neither
-        // the control nor the outside-click dismissal.
-        XCTAssertTrue(js.contains("swallowClick = true;"))
-        XCTAssertTrue(js.contains("if (!swallowClick) { return; }"))
-        XCTAssertTrue(js.contains("}, true);"))
+        XCTAssertTrue(js.contains("if (dy < -4) { drag = null; return false; }"))
+        XCTAssertTrue(js.contains("if (dy < \(ReaderChrome.sheetDragSlop)) { return false; }"))
     }
 
     func testDismissalGoesThroughTheSamePlaceEveryOtherDismissalDoes() {
@@ -89,21 +88,42 @@ final class SheetGestureTests: XCTestCase {
         XCTAssertTrue(js.contains("if (scrim) { scrim.hidden = !which; scrim.style.opacity = ''; }"))
     }
 
-    func testTheMoveListenerCanStopTheScrollersItCompetesWith() {
-        // Passive listeners cannot `preventDefault`, and without that the sheet's own
-        // scroller and the article behind it take the rest of the gesture.
-        XCTAssertTrue(js.contains("document.addEventListener('pointermove', onSheetMove, { passive: false });"))
+    func testTheDragSurvivesWhicheverStreamTheEngineGivesIt() {
+        // What the iPhone report came down to: on WebKit the pointer stream is synthesised
+        // from touches and cancelled the moment the pan recogniser claims the gesture, and
+        // `preventDefault` on `pointermove` does not stop a scroll there. So touch events
+        // where there is touch — `preventDefault` on a non-passive `touchmove` does stop it
+        // — and pointer events everywhere else, for a mouse in a narrow window.
+        XCTAssertTrue(js.contains("var touchHost = 'ontouchstart' in window;"))
+        XCTAssertTrue(js.contains("document.addEventListener('touchmove', function (e) {"))
+        XCTAssertTrue(js.contains("{ passive: false }"))
         XCTAssertTrue(js.contains("e.preventDefault();"))
-        // Pointer capture, so a finger that leaves the sheet mid-drag still owns it.
-        XCTAssertTrue(js.contains("drag.panel.setPointerCapture(drag.id)"))
-        // And the gesture ends on a cancel as well as on a release.
-        XCTAssertTrue(js.contains("document.addEventListener('pointercancel', onSheetUp);"))
+        // One stream or the other, never both: they describe the same finger, and two
+        // handlers would count its travel twice.
+        XCTAssertTrue(js.contains("if (touchHost) {"))
+        XCTAssertTrue(js.contains("} else {"))
+        // Both ends of both streams, so a cancelled gesture cannot leave a sheet mid-drag.
+        for ending in ["touchend", "touchcancel", "pointerup", "pointercancel"] {
+            XCTAssertTrue(js.contains("document.addEventListener('\(ending)', endDrag);"),
+                          "\(ending) does not end the drag")
+        }
     }
 
     func testEverySheetGetsTheGestureNotJustTheAppearanceOne() {
         // Consistency: the three panels look the same, are dismissed the same three ways
-        // already, and now move the same way too.
-        XCTAssertTrue(js.contains("p.panel.addEventListener('pointerdown', onSheetDown);"))
+        // already, and now move the same way too — which needs the handle in all three
+        // markups, not just the one that was reported.
+        let page = ReaderPage.html(article: Article(title: "T", byline: nil, siteName: nil,
+                                                    content: "<p>x</p>"),
+                                   history: ReaderHistory())
+        for panel in ["readerPanel", "readerRecents", "readerHidden"] {
+            guard let open = page.range(of: "id=\"\(panel)\"") else {
+                return XCTFail("\(panel) is not in the page")
+            }
+            let rest = page[open.upperBound...].prefix(200)
+            XCTAssertTrue(rest.contains(ReaderChrome.sheetHandle),
+                          "\(panel) opens without a grab handle")
+        }
         for id in ["#readerPanel", "#readerRecents", "#readerHidden"] {
             XCTAssertTrue(css.contains("\(id)[data-dragging]"), "\(id) has no dragging rule")
         }
