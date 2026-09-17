@@ -421,6 +421,49 @@ final class TouchLayoutTests: XCTestCase {
         XCTAssertFalse(js.contains("documentElement.setAttribute('data-chrome'"))
     }
 
+    func testTheOpenColumnSitsOnOneSurfaceRatherThanSevenPills() {
+        // What this fixes: every revealed button was `var(--bg)` behind a 12%-opacity
+        // hairline — the page's own background over the page's own text — with 10px of
+        // article showing between them, in the one layout where `#readerBackdrop`'s
+        // gradient is switched off. The panel is the only thing that paints now.
+        let css = ReaderChrome.chromeCSS(collapsible: true)
+        guard let rule = css.range(of: "#readerChromeStack[\(ReaderChrome.chromeOpenAttr)] {"),
+              let close = css[rule.upperBound...].range(of: "}") else {
+            return XCTFail("the open stack paints no surface")
+        }
+        let body = css[rule.upperBound..<close.lowerBound]
+        // The popovers' surface, not a third set of values invented for this one.
+        XCTAssertTrue(body.contains("background: var(--bg);"))
+        XCTAssertTrue(body.contains("border: 1px solid var(--border);"))
+        XCTAssertTrue(body.contains("border-radius: 8px;"))
+        XCTAssertTrue(body.contains("box-shadow: 0 4px 16px rgba(0,0,0,0.12);"))
+        XCTAssertTrue(ReaderChrome.controlsCSS().contains("box-shadow: 0 4px 16px rgba(0,0,0,0.12);"),
+                      "the panel shadow drifted from the popover's")
+        // And the buttons hand their own boxes to it: a bordered pill inside a bordered
+        // panel is a box in a box. `border-color`, not `border`, so nothing moves on open.
+        for id in ReaderChrome.stackButtonIDs {
+            XCTAssertTrue(css.contains("#\(id)[\(ReaderChrome.chromeOpenAttr)]"),
+                          "\(id) keeps its own box inside the panel")
+        }
+        XCTAssertTrue(css.contains("background: transparent; border-color: transparent;"))
+    }
+
+    func testAPageWhoseChromeNeverCollapsesPaintsNoPanel() {
+        // Settings and the offline page render the column with no toggle, so there is no
+        // open state to paint and nothing to put a surface behind.
+        let css = ReaderChrome.chromeCSS()
+        XCTAssertFalse(css.contains("#readerChromeStack[\(ReaderChrome.chromeOpenAttr)]"))
+    }
+
+    func testTheStackCarriesTheOpenStateForItsOwnPaintOnly() {
+        // The buttons still each carry their own state — that is what makes it readable on
+        // the node you are asking about — and the stack carries one more, for the surface.
+        let js = ReaderPage.html(article: article)
+        XCTAssertTrue(js.contains("var chromeStack = document.getElementById('readerChromeStack')"))
+        XCTAssertTrue(js.contains("chromeStack.setAttribute('\(ReaderChrome.chromeOpenAttr)', 'true')"))
+        XCTAssertTrue(js.contains("chromeStack.removeAttribute('\(ReaderChrome.chromeOpenAttr)')"))
+    }
+
     func testEveryButtonInTheColumnIsTheSameSquare() {
         // Measured 44x44 for the icon buttons, 47x44 for "Aa" and 45x44 for the toggle: a
         // ragged right edge in a vertical stack, where on a horizontal row the same

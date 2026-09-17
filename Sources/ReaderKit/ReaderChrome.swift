@@ -1269,6 +1269,37 @@ enum ReaderChrome {
           .reader-chrome-stack {
             position: absolute; right: 0; bottom: calc(100% + \(chromeGap)px);
           }
+          /* Open, the stack is a panel rather than a handful of loose pills. Every button
+             was `var(--bg)` behind a 12%-opacity hairline — the page's own background
+             colour, over the page's own text — with 10px of article showing between them,
+             and the one thing that would have separated them from the prose (`#readerBackdrop`'s
+             gradient) is switched off in exactly this layout.
+
+             The same surface the popovers use, down to the shadow: this is the third thing
+             on these pages that floats over the article, and it should not be the one that
+             invents its own paint. The buttons give up their own boxes to it — a bordered
+             pill inside a bordered panel reads as a box in a box — and keep their borders
+             transparent rather than dropping them, so nothing moves on open.
+
+             The attribute is the stack's own, set beside the buttons' in `setChromeOpen`:
+             the buttons still carry their state themselves (that is what makes it readable
+             on the node you are asking about), and this paints only the container.
+
+             The rows keep their own widths and stay flush with the panel's near edge, so
+             that edge lines up: on the right the icons land on one vertical line, and
+             mirrored to the left the labels do. Stretching them to a common width was tried
+             and is worse — the buttons centre their own contents, so equal rows leave both
+             edges ragged instead of one. */
+          #readerChromeStack[\(chromeOpenAttr)] {
+            padding: 6px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          }
+          \(selector(stackButtonIDs, suffix: "[\(chromeOpenAttr)]")) {
+            background: transparent; border-color: transparent;
+          }
         """
         // Which buttons are labelled, and when. A page whose chrome collapses labels what it
         // reveals; a page with one button that is never hidden labels it outright, because a
@@ -2222,12 +2253,19 @@ enum ReaderChrome {
             .split(' ')
             .map(function (id) { return document.getElementById(id); })
             .filter(Boolean);
+          // The stack itself, which paints the surface the open buttons sit on. Only the
+          // container's paint hangs off this — every button still carries its own state.
+          var chromeStack = document.getElementById('readerChromeStack');
           function setChromeOpen(open) {
             if (!chromeToggle) { return; }
             chromeButtons.forEach(function (b) {
               if (open) { b.setAttribute('\(chromeOpenAttr)', 'true'); }
               else { b.removeAttribute('\(chromeOpenAttr)'); }
             });
+            if (chromeStack) {
+              if (open) { chromeStack.setAttribute('\(chromeOpenAttr)', 'true'); }
+              else { chromeStack.removeAttribute('\(chromeOpenAttr)'); }
+            }
             chromeToggle.setAttribute('aria-expanded', String(open));
             chromeToggle.setAttribute('aria-label',
               open ? 'Hide reader controls' : 'Show reader controls');
