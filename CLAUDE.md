@@ -422,7 +422,8 @@ xcrun simctl spawn booted defaults write \
 # mandatory — Xcode's cannot cross-compile at all, and reports the same version number while
 # producing incompatible .swiftmodule files, so the failure reads as "rebuild Foundation".
 ABIS="aarch64-unknown-linux-android28 x86_64-unknown-linux-android28" Scripts/build-android.sh
-(cd android && ./gradlew :app:assembleDebug)
+# ANDROID_HOME because local.properties is gitignored; adb is not on PATH from the SDK.
+(cd android && ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew :app:assembleDebug)
 adb install -r android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 adb shell am start -n dk.yepz.webreader/.MainActivity -a android.intent.action.SEND \
   -t text/plain --es android.intent.extra.TEXT "https://example.com/article"
@@ -488,6 +489,54 @@ link `releases/latest/download/WebReader.zip`. The cask pins `WebReader-X.Y.Z.zi
 
 One-time setup on a new Mac: import the Developer ID certificate, then
 `xcrun notarytool store-credentials webreader --apple-id <id> --team-id 96DL4CMTDZ`.
+
+## Beta builds: TestFlight, and a phone on the desk
+
+Neither path is the release process above. That one ships the Mac app; these two put the
+current branch on a device, and both run off whatever is checked out — nothing here requires
+`main`, a tag or a CHANGELOG section.
+
+**iOS → TestFlight.** `Scripts/testflight.sh` archives, exports and (with credentials)
+uploads. It needs an "Apple Distribution" identity in the keychain and the app record to
+exist in App Store Connect; `-allowProvisioningUpdates` registers the two bundle ids and the
+App Group on first run, but the record itself cannot be created from here. With no
+`ASC_KEY_ID`/`ASC_ISSUER_ID` or `ASC_USERNAME`/`ASC_PASSWORD` set it stops at a signed
+`build/ipa/WebReader.ipa` and prints how to send it by hand — which is the normal way to use
+it. The archive lands in Xcode's own Archives folder so the Organizer can see it.
+
+Three things about it that are decisions, not incidentals:
+
+- The **build number is `git rev-list --count HEAD`**, so it is monotonic without anyone
+  remembering, and it names the commit a tester's bug report came from. App Store Connect
+  refuses a build number it has already seen for a version, which is what this avoids.
+- It **refuses a dirty tree** unless told otherwise, for the same reason: on a dirty tree the
+  build number points at a commit that does not contain what the testers are running.
+- Distribute as **App Store Connect**, never "TestFlight Internal Only". That flag is
+  permanent per build and bars every external group, so a build carrying it shows external
+  testers no builds at all.
+
+The version a tester sees is `MARKETING_VERSION`, which is *not* bumped by this script and
+does not have to move for a beta — two uploads of `0.14.2` differ only by build number, which
+is fine. Bumping it is the release step, and it lives in two places (see above).
+
+**Android → a connected phone.** Two builds and an install; the first is the slow one:
+
+```sh
+Scripts/build-android.sh                       # the .so and the Swift runtime, ~105 MB
+(cd android && ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew :app:assembleDebug)
+~/Library/Android/sdk/platform-tools/adb install -r \
+  android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+```
+
+`ANDROID_HOME` is needed on a machine with no `android/local.properties` (it is gitignored,
+so a fresh checkout has none): without it Gradle fails at `:app:compileDebugJavaWithJavac`
+with "SDK location not found", which reads like a Gradle problem and is not one. `adb` is not
+on `PATH` by default from the Android Studio SDK install.
+
+Verifying by `adb` needs the phone **awake and unlocked**: `adb exec-out screencap` captures
+the lock screen quite happily, and `am start` on an app already in the foreground answers
+"Activity not started, its current task has been brought to the front" and does nothing with
+the intent — `am force-stop` first when handing it a link.
 
 ## Conventions
 

@@ -50,10 +50,19 @@ dependencies, not this module's.
 
 ```sh
 cd android
-./gradlew :app:assembleDebug
+ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 adb shell am start -n dk.yepz.webreader/.MainActivity
 ```
+
+`ANDROID_HOME` is in the command because `local.properties` is gitignored, so a fresh
+checkout has no `sdk.dir` and nothing else tells Gradle where the SDK is. Without it the
+build fails at `:app:compileDebugJavaWithJavac` with "SDK location not found" — which reads
+like a Gradle problem and is a missing path. Export it in your shell profile, or write
+`sdk.dir` into `local.properties` once, and the commands shorten back to `./gradlew`.
+
+`adb` is not on `PATH` from an Android Studio SDK install; it is at
+`$ANDROID_HOME/platform-tools/adb`.
 
 `splits.abi` produces one APK per ABI and no universal one: the stripped Swift runtime is the
 bulk of the app, so a release APK is around 74 MB per ABI, every device installs exactly one
@@ -65,15 +74,29 @@ build arm64 only and there is one APK to install. A checkout that has never run 
 has no native code to split on at all, and Gradle then emits a single APK that compiles and
 lints but dies in `System.loadLibrary` on launch.
 
-Opening a link the way the app is meant to be used:
+Opening a link the way the app is meant to be used — as a browser, or from a share sheet:
 
 ```sh
 adb shell am start -a android.intent.action.VIEW -d "https://example.com/article"
+adb shell am force-stop dk.yepz.webreader
+adb shell am start -n dk.yepz.webreader/.MainActivity -a android.intent.action.SEND \
+  -t text/plain --es android.intent.extra.TEXT "https://example.com/article"
 ```
 
 `ACTION_VIEW` on `http`/`https` and `ACTION_SEND` on `text/plain` are the two intent filters,
 so WebReader appears in "Open with" and in the share sheet, and can be chosen as the default
 browser. Installing it adds an option and takes none away.
+
+The `force-stop` is not decoration: `am start` aimed at an app already in the foreground
+answers "Activity not started, its current task has been brought to the front" and drops the
+intent, so the link never arrives. And `adb exec-out screencap -p > shot.png` will
+cheerfully photograph the lock screen — wake and unlock the phone before believing a
+screenshot. What the app is actually doing is worth asking `adb` directly:
+
+```sh
+adb shell dumpsys package dk.yepz.webreader | grep -E "versionName|lastUpdateTime"
+adb logcat -d -t 200 | grep -iE "AndroidRuntime|FATAL|dk.yepz"
+```
 
 ## Symbol stripping is optional, and off by default
 
