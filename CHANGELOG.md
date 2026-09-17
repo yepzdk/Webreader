@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The controls behind the burger sit on a panel.** Opened on a narrow screen they were
+  seven separate pills in the page's own background colour, with article text showing
+  through the gaps between them; they now share one surface, like the popovers do.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed
