@@ -53,6 +53,8 @@ Either way the build wants a Swift toolchain, and Arch does not carry one in its
 
 ## Using it
 
+**First run.** The start page opens with five short tips — how links get in, where suggestions come from, what is behind **Aa**, hiding text, and steering what you are offered. **Got it** puts them away for good; the same list stays on the Settings page under **Tips**, so nothing is lost by dismissing it. Reset Reader Appearance leaves it dismissed.
+
 **Getting links in.** WebReader registers as an `http`/`https` handler, so a browser picker can route links to it, and `open -a WebReader https://…` works from the shell. For a page a browser is already showing (which a picker can't intercept), copy the URL and press **⇧⌘O** — **Ctrl+Shift+O** on Linux — in WebReader, or paste it into the field on the start page.
 
 Incoming links are cleaned first: tracking redirects that embed the real destination (newsletter click-trackers, Google/Facebook/SafeLinks) are unwrapped and tracking parameters (`utm_*`, `fbclid`, …) stripped, so the app never contacts the tracking host.

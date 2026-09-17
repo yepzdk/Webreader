@@ -50,6 +50,9 @@ switch, two more built only by Xcode, no dependencies:
   - `HiddenPhrases.swift` — boilerplate phrases removed from articles (cap 100) and the JS
     `readerHideBlocks` that does it, shared by the extraction script and the live reader page.
   - `StartPage.swift`, `OfflinePage.swift` (`OfflineFallback` + `HTML.escape`).
+  - `Hints.swift` — the first-run tips, in one list because two surfaces show them: the
+    start page once (dismissed with `readerHintsSeen` → `ReaderStore.Key.hintsSeen`) and the
+    settings page for good.
   - `URLCleaner.swift` — tracking-redirect unwrap / tracking-param strip (ported from
     yepzdk/url-cleaner; never unwraps OAuth `redirect*` params or unencoded nested URLs).
   - `WebURL.swift` — `isWebURL`, `loadsInApp`, `clipboardURL`, `urlToCopy`.
@@ -158,7 +161,8 @@ switch, two more built only by Xcode, no dependencies:
   `readerClear`, `readerOpenURL`, `readerHide`, `readerUnhide`, `readerOpenSettings`,
   `readerHome`, `readerAddSource`, `readerRemoveSource`, `readerSetLanguages`,
   `readerBlockHost`, `readerUnblockHost`, `readerTopicFeedback`, `readerRate`,
-  `readerOpenSync`. Rename in both Swift and the page scripts together. The host calls back
+  `readerOpenSync`, `readerHintsSeen`. Rename in both Swift and the page scripts together.
+  The host calls back
   via `window.readerSetHidden(list)`, `window.readerSetSuggestions(items)`,
   `window.readerSourceAdded/Rejected(…)`, `window.readerApplySettings(settings)`,
   `window.readerSetRecents(rows)`, `window.readerSetSyncStatus(folder, summary)`.

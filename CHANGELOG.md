@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **First-run tips on the start page.** Five things the app does that nothing on screen
+  said it did — the share/open route, your own feeds, what is behind Aa, hiding text, and
+  steering suggestions. Dismissed once with "Got it"; the same list stays on the settings
+  page.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

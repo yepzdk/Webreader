@@ -84,7 +84,8 @@ public enum StartPage {
                             settings: ReaderSettings = ReaderSettings(),
                             history: ReaderHistory = ReaderHistory(),
                             platform: Platform = .macOS,
-                            palette: ReaderPalette? = nil) -> String {
+                            palette: ReaderPalette? = nil,
+                            showHints: Bool = false) -> String {
         let name = HTML.escape(appName)
         let sans = platform.sansStack
         // The shared touch floor, bound once so the rules below read as CSS.
@@ -120,6 +121,12 @@ public enum StartPage {
                     <button type="button" class="link" id="startClear">Clear history</button>
                   </p>
             """
+        // Once, on a new install, between the field and the lists: the five things the app
+        // does that nothing on screen says it does. Dismissing it posts `readerHintsSeen`
+        // and the same rows stay on the settings page, so "Got it" costs nothing.
+        let hints = !showHints ? "" : "\n    " + ReaderChrome.indent(
+            Hints.markup(for: platform, heading: "Before you start",
+                         id: "startHints", dismissible: true), by: 4)
         return """
         <!doctype html>
         <html lang="en"\(ReaderChrome.themeAttribute(settings, thumbnails: .startPage))>
@@ -368,6 +375,7 @@ public enum StartPage {
               min-height: \(touchTarget)px; padding: 4px 2px;
             }
           }
+          \(ReaderChrome.indent(Hints.css(), by: 10))
           \(ReaderChrome.indent(ReaderChrome.controlsCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.navCSS(platform: platform), by: 10))
           \(ReaderChrome.indent(ReaderChrome.backdropCSS(), by: 10))
@@ -392,7 +400,7 @@ public enum StartPage {
               <button type="submit">Open</button>
             </form>\(openHint)
             <p id="error" hidden role="alert">That doesn't look like a link this app can open.</p>
-            </div>
+            </div>\(hints)
             <div class="lists">
             <div class="recents-column">
             \(recentsList)
@@ -448,6 +456,14 @@ public enum StartPage {
             // to the popover.
             document.querySelector('main').addEventListener('click', function (e) {
               if (e.target.closest('#suggestSettings')) { post('readerOpenSettings', ''); return; }
+              // "Got it": the block goes now and the host remembers, so a reload does not
+              // bring it back. Nothing is lost — the same rows are on the settings page.
+              if (e.target.closest('#startHintsDismiss')) {
+                var tips = document.getElementById('startHints');
+                if (tips) { tips.remove(); }
+                post('readerHintsSeen', '');
+                return;
+              }
               // Clearing history: the host empties the store (and prunes the offline cache
               // with it), the page empties the column. A separate id from the popover's
               // #readerClear, which carries the popover's own styling and is handled by the

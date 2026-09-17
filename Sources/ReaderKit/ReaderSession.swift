@@ -550,7 +550,8 @@ public final class ReaderSession {
         return [.show(html: StartPage.html(appName: appName,
                                            settings: ReaderStore.settings(store: store),
                                            history: ReaderStore.history(store: store),
-                                           platform: platform, palette: palette),
+                                           platform: platform, palette: palette,
+                                           showHints: !ReaderStore.hintsSeen(store: store)),
                       baseURL: nil)]
     }
 

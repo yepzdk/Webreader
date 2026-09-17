@@ -128,6 +128,13 @@ extension ReaderSession {
             guard isShowingSettings else { return [] }
             return [.presentSyncSetup]
 
+        case "readerHintsSeen":
+            // The start page's "Got it". The page has already removed the block; this is
+            // what stops it coming back on the next visit. Nothing to render in reply.
+            guard isShowingStartPage else { return [] }
+            ReaderStore.setHintsSeen(true, store: store)
+            return []
+
         case "readerHome":
             guard ownPage || isShowingFallback else { return [] }
             return showStartPage()

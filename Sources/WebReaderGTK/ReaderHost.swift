@@ -43,7 +43,7 @@ final class ReaderHost {
         "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
         "readerAddSource", "readerRemoveSource", "readerSetLanguages",
         "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate",
-        "readerOriginal",
+        "readerOriginal", "readerHintsSeen",
     ]
 
     // MARK: - Collaborators
@@ -243,7 +243,8 @@ final class ReaderHost {
                                 settings: ReaderStore.settings(store: store),
                                 history: ReaderStore.history(store: store),
                                 platform: .linux,
-                                palette: palette()),
+                                palette: palette(),
+                                showHints: !ReaderStore.hintsSeen(store: store)),
                  base: nil, as: .startPage)
     }
 
@@ -796,6 +797,12 @@ final class ReaderHost {
         case "readerOpenSettings":
             guard isShowingStartPage else { return }
             openSettings()
+
+        case "readerHintsSeen":
+            // The start page's "Got it". The page has already removed the block; this is
+            // what stops it coming back on the next visit.
+            guard isShowingStartPage else { return }
+            ReaderStore.setHintsSeen(true, store: store)
 
         case "readerHome":
             guard ownPage || isShowingFallback else { return }

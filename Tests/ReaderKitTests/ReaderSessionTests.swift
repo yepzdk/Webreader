@@ -107,6 +107,26 @@ final class ReaderSessionTests: XCTestCase {
         XCTAssertNotNil(ReaderStore.history(store: store).clearedAt)
     }
 
+    func testTheTipsStayDismissedAndOnlyTheStartPageMayDismissThem() {
+        // The page that carries the tips is the only one that can put them away — the
+        // handler is session-wide, so without the gate a live site could do it.
+        _ = session.openIncoming(page)
+        _ = session.navigationFinished(url: page, generator: "")
+        XCTAssertEqual(session.message("readerHintsSeen", body: .text("")), [])
+        XCTAssertFalse(ReaderStore.hintsSeen(store: store))
+
+        _ = session.showStartPage()
+        _ = session.navigationFinished(url: nil, generator: "WebReader Start")
+        XCTAssertEqual(session.message("readerHintsSeen", body: .text("")), [])
+        XCTAssertTrue(ReaderStore.hintsSeen(store: store))
+
+        // And the next start page does not carry them.
+        guard case let .show(html, _)? = session.showStartPage().first else {
+            return XCTFail("the start page must render")
+        }
+        XCTAssertFalse(html.contains("id=\"startHints\""))
+    }
+
     func testASavedCopyBeatsTheOfflinePage() {
         // The article is what was asked for, and a reload fetches the live page again once
         // the network is back.
