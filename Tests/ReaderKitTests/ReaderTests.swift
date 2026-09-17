@@ -726,13 +726,16 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.hasSuffix("</html>"))
     }
 
-    func testHideAffordanceIsWiredIntoThePage() {
-        // The floating "Hide text" button is created by its own script, so the page carries
-        // no markup for it — both halves have to be interpolated or it silently never
-        // appears. HiddenPhrasesTests owns its behaviour; this only guards the wiring.
+    func testTheBlockPickerIsWiredIntoThePage() {
+        // The picker's bar is built by its own script, so the page carries no markup for it
+        // — both halves have to be interpolated or the button turns on a mode that has no
+        // bar and no listeners. `BlockPickerTests` owns the behaviour; this guards wiring.
         let html = ReaderPage.html(article: article)
-        XCTAssertTrue(html.contains("#readerHideBtn {"))
-        XCTAssertTrue(html.contains("readerPost('readerHide'"))
+        XCTAssertTrue(html.contains("#readerPickBar {"))
+        XCTAssertTrue(html.contains("readerPost('readerHideBlock'"))
+        XCTAssertTrue(html.contains("id=\"\(BlockPicker.buttonID)\""))
+        // The mode needs the shared normalizer, which the page embeds for phrase hiding.
+        XCTAssertTrue(html.contains("function readerNormalize("))
     }
 }
 
@@ -850,8 +853,9 @@ final class ChromeControlStyleTests: XCTestCase {
         // its neighbours the next time one of them changes.
         let css = ReaderChrome.controlsCSS()
         XCTAssertTrue(css.contains("#readerAa, #readerRecentsBtn, #readerHiddenBtn, "
-                                   + "#readerOriginalBtn {"))
+                                   + "#readerOriginalBtn, #\(BlockPicker.buttonID) {"))
         XCTAssertTrue(css.contains("#readerOriginalBtn svg"), "the glyph needs the shared box")
+        XCTAssertTrue(css.contains("#\(BlockPicker.buttonID) svg"), "the glyph needs the shared box")
     }
 
     func testTheWayBackToTheSiteIsAGlobeAndNotAnArrowLeavingTheApp() {

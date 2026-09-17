@@ -43,7 +43,7 @@ final class ReaderHost {
         "readerHide", "readerUnhide", "readerOpenSettings", "readerHome",
         "readerAddSource", "readerRemoveSource", "readerSetLanguages",
         "readerBlockHost", "readerUnblockHost", "readerTopicFeedback", "readerRate",
-        "readerOriginal",
+        "readerOriginal", "readerHideBlock",
     ]
 
     // MARK: - Collaborators
@@ -775,9 +775,10 @@ final class ReaderHost {
             cache.prune(keeping: [])
 
         case "readerHide":
-            // The reader page's floating affordance: learns the selection as a phrase, strips
-            // it from the article live, and hides it in every article from now on. Beeps when
-            // the selection isn't usable — no text, longer than a sentence, or already stored.
+            // The phrase route, now reached from the picker's "Hide everywhere" rather than
+            // from a text selection: learns the text as a phrase, strips it from the article
+            // live, and hides it in every article from now on. Beeps when it isn't usable —
+            // no text, longer than a sentence, or already stored.
             guard ownPage, let text = messageString(payload) else { return }
             var phrases = ReaderStore.hiddenPhrases(store: store)
             guard phrases.add(text) else {
@@ -786,6 +787,19 @@ final class ReaderHost {
             }
             ReaderStore.setHiddenPhrases(phrases, store: store)
             evaluateJavaScript("window.readerSetHidden(\(phrases.scriptLiteral))")
+
+        case "readerHideBlock":
+            // The picker removed a block and posted what is left of the article. Kept in this
+            // article's cached copy — what a recents row and an offline open render — so it
+            // stays as the reader left it, while a reload fetches the publisher's version.
+            guard isShowingReader, let content = messageString(payload),
+                  let source = readerSourceURL else { return }
+            let cleaned = URLCleaner.clean(source)
+            guard let cached = cache.article(for: cleaned) else { return }
+            cache.store(Article(title: cached.title, byline: cached.byline,
+                                siteName: cached.siteName, content: content,
+                                hiddenHits: cached.hiddenHits, image: cached.image),
+                        for: cleaned)
 
         case "readerUnhide":
             guard ownPage, let phrase = messageString(payload) else { return }
