@@ -603,8 +603,10 @@ private final class FeedParser: NSObject, XMLParserDelegate {
 // primary use case at random, and this keeps ReaderKit on Foundation alone. Revisit if a
 // Danish model appears.
 public enum Suggestions {
-    /// How many rows the start page shows. A short list you might actually read, not a feed.
-    public static let limit = 8
+    /// How deep the ranked list goes: the start page's own column, and the pool the reader
+    /// page slices its two shorter lists out of. Sized like the recents column it sits
+    /// beside — that one carries the full 30 — so neither side of the page runs out first.
+    public static let limit = 20
 
     /// The canonical form of an outlet's host: lowercased, no leading "www.", no trailing
     /// dot. One definition, used by the row that displays a host and by the blocklist that
