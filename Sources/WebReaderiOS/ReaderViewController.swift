@@ -75,7 +75,27 @@ final class ReaderViewController: UIViewController, ReaderHostServices,
         }
         sync.onStatusChange = { [weak self] in self?.controller.syncStatusChanged() }
         controller.sync = sync
+        // The status bar goes while an article is on screen, and comes back on every other
+        // surface — the same arrangement the Android host has. It is the shell's business
+        // rather than the page's: the clock and the battery sit *over* the web view, so on a
+        // phone the article scrolled straight under them, and the reader's own scroll
+        // hairline drew a rule across the text at the inset where they end.
+        controller.onPageChanged = { [weak self] in
+            self?.setNeedsStatusBarAppearanceUpdate()
+        }
     }
+
+    /// Hidden while the reader is on screen. Read from the session rather than tracked here:
+    /// it is the same flag that gates every script message, so the bar cannot disagree with
+    /// what the app thinks is up. `controller` is implicitly unwrapped and built in
+    /// `viewDidLoad`, and UIKit asks this question before that — hence the optional hop.
+    override var prefersStatusBarHidden: Bool {
+        controller?.session.isShowingReader ?? false
+    }
+
+    /// A fade, not a slide: a slide reflows nothing here (the web view is pinned to the
+    /// physical edges) but it does make the whole screen appear to jump.
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
 
     // MARK: - Lifecycle
 

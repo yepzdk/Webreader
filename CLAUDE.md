@@ -97,7 +97,11 @@ switch, two more built only by Xcode, no dependencies:
   haptic and `UIApplication.open`, and pins the web view to the screen edges with
   `contentInsetAdjustmentBehavior = .never` — the pages are drawn edge to edge and place
   themselves with `env(safe-area-inset-*)`, so letting UIKit inset as well counts the notch
-  twice. `SceneDelegate` routes the three ways a link arrives (cold launch, `openURLContexts`,
+  twice. It hides the status bar while the reader is on screen and shows it everywhere else,
+  driven by `ReaderWebController.onPageChanged` reading `session.isShowingReader` — the same
+  arrangement the Android host has, and for the same reason: the clock and the battery sit
+  over the web view, so a scrolled article ran straight under them.
+  `SceneDelegate` routes the three ways a link arrives (cold launch, `openURLContexts`,
   and the share extension's hand-off on activation). `IOSSyncPlatform` is the sandboxed
   `ReaderSyncPlatform`: a document-picker folder is claimed with
   `startAccessingSecurityScopedResource` for as long as sync uses it, and its bookmark is

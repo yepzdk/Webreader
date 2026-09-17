@@ -31,6 +31,11 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     /// a var rather than an init argument; a host without one still works.
     public var loadingCover: ReaderLoadingCover?
 
+    /// Called whenever the page on screen may have changed — after every batch of commands
+    /// and on every navigation start. A shell that dresses the window per page reads
+    /// `session.isShowingReader` from here; a shell that does not simply leaves it nil.
+    public var onPageChanged: (() -> Void)?
+
     /// Sync (issue #7), or nil on a host that has none yet — in which case the settings page
     /// leaves the section out, exactly as it does on Linux.
     public var sync: ReaderSyncBridge? {
@@ -196,6 +201,10 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
             stopWatchingForStall()
             revealWhenPainted()
         }
+        // What is on screen may be a different one of our pages now. A shell that dresses
+        // the window per page — iOS hides the status bar in the reader, as the Android host
+        // hides the system bars — cannot see that for itself: the flag lives on the session.
+        onPageChanged?()
         return navigating
     }
 
@@ -462,6 +471,9 @@ public final class ReaderWebController: NSObject, WKNavigationDelegate, WKUIDele
     @MainActor
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         session.navigationStarted()
+        // Not routed through `run`, so the hook has to be rung here too: leaving the reader
+        // for a site is exactly when a shell that hid its status bar has to bring it back.
+        onPageChanged?()
         // Someone else's page is on its way: cover it rather than let the site paint itself
         // only to be replaced by the reader a moment later (#24).
         if coverSuppressedOnce {
