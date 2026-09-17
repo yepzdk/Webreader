@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+- How to put the current branch on a phone: the TestFlight path and its three rules (build
+  number, dirty trees, "Internal Only"), and the two `adb` traps that make an Android
+  install look like it worked when it did not.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed
