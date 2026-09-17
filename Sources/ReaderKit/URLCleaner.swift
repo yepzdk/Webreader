@@ -25,6 +25,11 @@ public enum URLCleaner {
         "ref", "ref_", "referer", "referrer", "source",
         "aff", "affiliate", "partner", "partnerid",
         "mkt_tok", "cmpid", "li_fat_id", "s_cid", "couponcode", "ssrc", "wt_zmc",
+        // BBC stamps these on every RSS link. By name rather than as an `at_` prefix,
+        // which is broad enough to eat unrelated sites' parameters. Without them the
+        // feed's copy of an article and the same article reached from a link are two
+        // different identities, and the one you just read gets suggested again.
+        "at_medium", "at_campaign",
     ]
     private static let trackingParamPrefixes = [
         "utm_", "otm_", "mc_", "source_", "aff_", "hsa_", "oly_", "et_", "_hs",

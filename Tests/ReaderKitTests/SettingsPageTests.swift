@@ -10,10 +10,14 @@ final class SettingsPageTests: XCTestCase {
 
     func testListsSourcesWithHostAndLanguage() {
         let page = html()
-        XCTAssertTrue(page.contains("Wallnot"))
-        XCTAssertTrue(page.contains("wallnot.dk"))
-        XCTAssertTrue(page.contains("data-url=\"https://wallnot.dk/rss\""))
-        XCTAssertTrue(page.contains("class=\"source-lang\">da<"))
+        // Driven off the shipped list rather than naming a feed: swapping what we ship is a
+        // product decision, that every shipped row renders with its host and language is not.
+        for source in SuggestionSettings.defaults {
+            XCTAssertTrue(page.contains(source.title), "\(source.title) has no row")
+            XCTAssertTrue(page.contains(source.host), "\(source.host) is not named")
+            XCTAssertTrue(page.contains("data-url=\"\(source.url)\""), "\(source.url) has no hook")
+            XCTAssertTrue(page.contains("class=\"source-lang\">\(source.language!)<"))
+        }
     }
 
     func testSourceTitlesAreEscaped() {
@@ -92,7 +96,11 @@ final class SettingsPageTests: XCTestCase {
     func testLanguageSectionOnlyAppearsWithMoreThanOneLanguage() {
         // One language means no choice to make — the section's markup is absent (the
         // shared script still carries the handler, guarded on the section existing).
-        XCTAssertFalse(html().contains("class=\"langs\""))
+        // Spelled out rather than taken from the shipped list, which spans two.
+        let single = SuggestionSettings(sources: [
+            FeedSource(url: "https://a.test/rss", title: "A", language: "da"),
+        ])
+        XCTAssertFalse(html(single).contains("class=\"langs\""))
         let mixed = SuggestionSettings(sources: [
             FeedSource(url: "https://a.test/rss", title: "A", language: "da"),
             FeedSource(url: "https://b.test/rss", title: "B", language: "en"),

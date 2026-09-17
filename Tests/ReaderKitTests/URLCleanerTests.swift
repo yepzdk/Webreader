@@ -114,7 +114,10 @@ final class URLCleanerTests: XCTestCase {
                          "https://dr.dk/nyheder/x/",
                          "https://dr.dk/nyheder/x#comments",
                          "https://dr.dk:443/nyheder/x",
-                         "https://dr.dk/nyheder/x?utm_source=rss"] {
+                         "https://dr.dk/nyheder/x?utm_source=rss",
+                         // What BBC puts on every link in its feeds. Without these stripped,
+                         // the article you just read from the feed is offered again.
+                         "https://dr.dk/nyheder/x?at_medium=RSS&at_campaign=rss"] {
             XCTAssertEqual(URLCleaner.identity(URL(string: spelling)!), key, spelling)
         }
     }

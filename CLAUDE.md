@@ -41,8 +41,8 @@ switch, two more built only by Xcode, no dependencies:
   - `ArticleCache.swift` — one JSON file per recent article in the host-supplied Caches
     directory, keyed by FNV-1a of the cleaned URL (verified on read).
   - `Suggestions.swift` — `FeedSource`/`SuggestionSettings` (the user's sources, seeded with
-    wallnot.dk), `Feed.parse` (RSS 2.0 + Atom via `XMLParser`) / `Feed.discover`, and
-    `Suggestions.rank`.
+    DR Indland, DR Udland and BBC News), `Feed.parse` (RSS 2.0 + Atom via `XMLParser`) /
+    `Feed.discover`, and `Suggestions.rank`.
   - `FeedFetcher.swift` — the only networking outside the web view: an actor fetching the
     sources with a 10-minute in-memory TTL; failures are "no items", never errors.
   - `SettingsPage.swift` — the suggestion sources, the language filter, and the way into
@@ -188,8 +188,16 @@ switch, two more built only by Xcode, no dependencies:
   extraction script returns `Reader.ownPageSentinel` when it sees it, so back/forward onto a
   reader entry marks it as the reader instead of extracting (and caching) our own rendering.
 - Suggestion sources are user data like history and hidden phrases: seeded with
-  `SuggestionSettings.defaults` on first read, plain data afterwards (removing wallnot.dk
-  sticks), and Reset Reader Appearance leaves them alone.
+  `SuggestionSettings.defaults` on first read, plain data afterwards (removing the shipped
+  sources sticks), and Reset Reader Appearance leaves them alone.
+- The shipped sources are DR Indland, DR Udland and BBC News — free feeds whose items point
+  at real article pages. DR's "Kort nyt" feed is deliberately not among them: its items link
+  to river pages that extract as a 16k tail rather than as the story on top. BBC declares no
+  `<language>`, so `defaults` states "en" for it; a source whose language is nil is never
+  filtered, which would put it beyond the reach of the language setting. BBC also stamps
+  `at_medium`/`at_campaign` on every link in its feeds, which is why `URLCleaner` strips
+  those by name — otherwise the feed's copy of an article is a different identity from the
+  same article reached from a link, and the one just read is suggested again.
 - Ranking is TF-IDF cosine, not `NLEmbedding`: Apple ships no Danish sentence-embedding
   model (nor Swedish or Norwegian), so embeddings would rank the primary use case at random.
   The profile is the recents' cached bodies, falling back to the row's title when the body
@@ -214,7 +222,7 @@ switch, two more built only by Xcode, no dependencies:
 - A blocked outlet is stored as `Suggestions.normalizedHost` — the same string
   `FeedItem.host` displays, so what the user sees is what they blocked. Matching is
   whole-host, never a suffix.
-- No feed inspected (wallnot, DR, Information, Rust Blog) carries `<category>`, so there are
+- No feed inspected (DR, BBC, Information, Rust Blog) carries `<category>`, so there are
   no tag badges: any tag would be a machine-derived keyword dressed up as metadata.
 - `PageState` (ReaderKit) owns which generated page is on screen, and `AppDelegate` only
   wires WebKit's callbacks to it. It lives there because the transitions are subtle and the
@@ -282,8 +290,8 @@ switch, two more built only by Xcode, no dependencies:
   never opened. `media:thumbnail` / `media:content` / an image `enclosure` first, then the
   first `<img>` in the item's summary — Information, The Verge and The New Stack carry no
   structured tag at all, while The Guardian and Ars Technica carry nothing else. Coverage is
-  genuinely uneven and **wallnot.dk, the shipped default, publishes no images whatsoever**,
-  so imageless rows are the normal case, not an edge case.
+  genuinely uneven — the shipped DR and BBC feeds publish images for most but not all of
+  their items — so an imageless row is normal, not an edge case.
 - `Feed.bestImage` picks the **smallest** declared width at or above 128px (a 64px row at 2x),
   not the first or the largest: The Guardian ships 140/460/700 per item and Ars a 1152px hero,
   so first-wins is either soft or several hundred KB a row. Measured: 5 KB for the Guardian's

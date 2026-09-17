@@ -29,11 +29,19 @@ public struct FeedSource: Equatable, Codable, Sendable {
 /// it's read and plain user data afterwards — like `HiddenPhrases`, removing the shipped
 /// source sticks, and `ReaderStore.resetAppearance` leaves this alone.
 public struct SuggestionSettings: Equatable, Sendable {
-    /// One shipped source, so the start page can suggest something before anything has been
-    /// read. wallnot.dk is a non-commercial Danish aggregator of paywall-free articles;
-    /// removable like any other row.
+    /// The shipped sources, so the start page can suggest something before anything has been
+    /// read: two DR sections for Danish and BBC News for English. Section feeds rather than
+    /// DR's "Kort nyt", whose items point at river pages that don't extract. Each row is
+    /// removable like any other, and removing them all sticks.
+    ///
+    /// BBC declares no `<language>`, so "en" is stated here — a source with no language is
+    /// never filtered, which would put it beyond the reach of the language setting.
     public static let defaults = [
-        FeedSource(url: "https://wallnot.dk/rss", title: "Wallnot", language: "da"),
+        FeedSource(url: "https://www.dr.dk/nyheder/service/feeds/indland", title: "Indland | DR",
+                   language: "da"),
+        FeedSource(url: "https://www.dr.dk/nyheder/service/feeds/udland", title: "Udland | DR",
+                   language: "da"),
+        FeedSource(url: "https://feeds.bbci.co.uk/news/rss.xml", title: "BBC News", language: "en"),
     ]
 
     /// A reading app, not a feed reader — the list is a handful of sources, not a library.

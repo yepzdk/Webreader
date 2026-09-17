@@ -58,7 +58,8 @@ final class ReaderStoreTests: XCTestCase {
         var history = ReaderHistory()
         history.record(title: "A", url: "https://a.test/x")
         ReaderStore.setHistory(history, store: store)
-        // An emptied source list is a deliberate choice; a reset must not resurrect wallnot.
+        // An emptied source list is a deliberate choice; a reset must not resurrect the
+        // shipped sources.
         ReaderStore.setSuggestions(SuggestionSettings(sources: []), store: store)
         var topics = TopicPreferences()
         topics.prefer("Vindmøller i Nordsøen")
