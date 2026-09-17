@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **More to read next.** The ranked list is 20 deep instead of 8, so the start page offers
+  a column rather than a handful; the end of an article now suggests five articles instead
+  of three, and the recents panel eight instead of five.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

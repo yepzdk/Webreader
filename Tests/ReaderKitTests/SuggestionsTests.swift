@@ -421,9 +421,18 @@ final class SuggestionsTests: XCTestCase {
     }
 
     func testRespectsTheLimit() {
-        let items = (0..<20).map {
-            item("Unik overskrift nummer \(["en","to","tre","fire","fem","seks","syv","otte","ni","ti","elleve","tolv","tretten","fjorten","femten","seksten","sytten","atten","nitten","tyve"][$0])",
-                 "https://a.test/\($0)", daysAgo: Double($0))
+        // Distinct subjects, and more of them than the cap: near-duplicate headlines are
+        // dropped by the dedup above, so a fixture of variations on one title would test
+        // that instead of the cap.
+        let subjects = ["vindmøller", "kagerne", "sygehuset", "kommunalvalget", "banken",
+                        "fodbolden", "klimaet", "togdriften", "boligmarkedet", "skolerne",
+                        "landbruget", "forsvaret", "biografen", "havnen", "biblioteket",
+                        "cykelstierne", "kunstmuseet", "lufthavnen", "universitetet",
+                        "fiskeriet", "broen", "teatret", "dyrehaven", "vandværket",
+                        "genbrugspladsen"]
+        XCTAssertGreaterThan(subjects.count, Suggestions.limit)
+        let items = subjects.enumerated().map { index, subject in
+            item("Alt om \(subject)", "https://a.test/\(index)", daysAgo: Double(index))
         }
         XCTAssertEqual(Suggestions.rank(items, read: []).count, Suggestions.limit)
     }

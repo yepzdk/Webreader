@@ -557,6 +557,14 @@ final class ReaderPageTests: XCTestCase {
         XCTAssertTrue(html.contains("readerPost('readerOpen'"))
     }
 
+    func testEverySurfaceFitsInsideTheRankedPool() {
+        // Both reader-page lists are slices of one payload, so a pool shallower than the
+        // longest slice would truncate it without anything saying so.
+        XCTAssertGreaterThanOrEqual(Suggestions.limit, ReaderChrome.popoverSuggestions)
+        // The end of an article is an offer, the panel is a list you went looking for.
+        XCTAssertGreaterThan(ReaderChrome.popoverSuggestions, ReaderChrome.readNextSuggestions)
+    }
+
     func testTheArticleEndsWithSomethingToReadNext() {
         let html = ReaderPage.html(article: article)
         // Inside `main`, after the article: it belongs to the reading column, and it is only

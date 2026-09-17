@@ -1549,14 +1549,16 @@ enum ReaderChrome {
 
     /// How many rows each of the popover's two groups carries. Short and fixed: the panel
     /// used to be the entire 30-entry history in a 60vh scroller, where nobody ever reached
-    /// row 24 (#33).
+    /// row 24 (#33). Suggestions get a few more than recents — the panel is where you go
+    /// looking for something to read next, and the ranked pool behind it is 20 deep.
     static let popoverRecents = 5
-    static let popoverSuggestions = 5
+    static let popoverSuggestions = 8
 
-    /// How many suggestions the end of an article carries. Fewer than the popover's, and
-    /// deliberately: the popover is a list you went looking for, and this is an offer made
-    /// to someone who has just finished reading. Three is a choice; five is a homepage.
-    static let readNextSuggestions = 3
+    /// How many suggestions the end of an article carries. Fewer than the popover's: the
+    /// popover is a list you went looking for, and this is an offer made to someone who has
+    /// just finished reading. Three came out of an eight-item pool and was the popover's
+    /// list minus its tail; five out of twenty is a choice worth scrolling to.
+    static let readNextSuggestions = 5
 
     /// The recents popover's contents: the recents group — heading, rows, and the clear
     /// action — then the suggested group the host fills in later.
