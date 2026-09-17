@@ -13,10 +13,21 @@ final class SuggestionsTests: XCTestCase {
         XCTAssertNil(settings.languages)
     }
 
-    func testRemovingTheDefaultSourceSticks() {
+    func testTheShippedSourcesCanBeReachedAndFiltered() {
+        for source in SuggestionSettings.defaults {
+            XCTAssertTrue(source.url.hasPrefix("https://"), source.url)
+            // A source with no declared language is never filtered out, so shipping one
+            // would put it beyond the reach of the language setting.
+            XCTAssertNotNil(source.language, source.title)
+        }
+        // Both languages present, or the language section never appears for a new user.
+        XCTAssertEqual(SuggestionSettings().availableLanguages, ["da", "en"])
+    }
+
+    func testRemovingTheDefaultSourcesSticks() {
         // The whole point of a removable default: an emptied list must not re-seed.
         var settings = SuggestionSettings()
-        settings.remove(url: SuggestionSettings.defaults[0].url)
+        for source in SuggestionSettings.defaults { settings.remove(url: source.url) }
         XCTAssertTrue(SuggestionSettings.fromJSON(settings.json).sources.isEmpty)
     }
 
@@ -545,7 +556,7 @@ final class FeedImageTests: XCTestCase {
     }
 
     func testAFeedWithoutImagesYieldsItemsWithoutThem() {
-        // wallnot.dk, the shipped default, declares none — and must still suggest articles.
+        // A feed that declares no image at all must still suggest articles.
         let items = parse(item("<pubDate>Mon, 31 Aug 2026 10:00:00 GMT</pubDate>"))
         XCTAssertEqual(items.count, 1)
         XCTAssertNil(items.first?.image)

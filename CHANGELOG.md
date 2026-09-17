@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Three free feeds ship instead of one.** DR Indland and Udland in Danish, BBC News in
+  English, replacing the wallnot.dk aggregator — more to read on the first launch, in two
+  languages, and most rows now carry a thumbnail. Sources you have already chosen are
+  untouched.
+
+### Fixed
+- **An article read from a BBC feed is not suggested again.** BBC stamps tracking
+  parameters on every link in its feeds, which made the feed's copy of an article count as
+  a different one.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

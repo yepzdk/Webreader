@@ -27,7 +27,7 @@ final class ReaderWebControllerTests: XCTestCase {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         store = FileStore(fileURL: directory.appendingPathComponent("store.json"))
         // No sources, so the start page's best-effort suggestion fetch never reaches the
-        // network: these tests must not depend on wallnot.dk being up.
+        // network: these tests must not depend on the shipped feeds being up.
         ReaderStore.setSuggestions(SuggestionSettings(sources: []), store: store)
         services = StubServices()
         controller = ReaderWebController(
