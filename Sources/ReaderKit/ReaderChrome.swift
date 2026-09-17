@@ -961,7 +961,13 @@ enum ReaderChrome {
     static func progressCSS() -> String {
         """
         #readerProgress {
-          position: fixed; top: var(--safe-top); left: 0; width: 100%;
+          /* The physical top edge, not the safe area. A hairline is not content: it belongs
+             on the edge of the screen, which is where the native page-load line sits on
+             every host. Inside the inset it drew a rule *across the article* on a phone —
+             59px down on an iPhone, straight through a line of the first paragraph — which
+             is what the report of "a problem at the top" was. The reader hides the status
+             bar on the hosts that have one, so nothing is up there to collide with. */
+          position: fixed; top: 0; left: 0; width: 100%;
           height: \(LoadProgress.lineThickness)px; z-index: 9;
           /* Foreground, not accent: the native page-load line is accent-colored, and a
              blue hairline sitting still at 30% reads as a stuck load. */

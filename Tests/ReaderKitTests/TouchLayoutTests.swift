@@ -84,10 +84,21 @@ final class TouchLayoutTests: XCTestCase {
         for offset in [
             "top: calc(14px + var(--safe-top))",       // nav + controls
             "bottom: calc(20px + var(--safe-bottom))", // toast
-            "top: var(--safe-top)",                    // progress hairline
         ] {
             XCTAssertTrue(reader.contains(offset), offset)
         }
+        // The progress hairline is the exception, and deliberately: it is 2.5px of paint
+        // with nothing to read and nothing to tap, so it belongs on the physical edge like
+        // the native load line — inside the inset it drew a rule across the article on a
+        // phone. The reader hides the status bar where there is one.
+        XCTAssertTrue(reader.contains("#readerProgress {"))
+        guard let rule = reader.range(of: "#readerProgress {"),
+              let close = reader[rule.upperBound...].range(of: "}") else {
+            return XCTFail("the hairline has no rule")
+        }
+        let body = reader[rule.upperBound..<close.lowerBound]
+        XCTAssertTrue(body.contains("top: 0;"))
+        XCTAssertFalse(body.contains("--safe-top"))
     }
 
     func testEveryPageOptsIntoTheSafeAreaItThenOffsetsBy() {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The top of an article on a phone.** The status bar goes while you are reading — as it
+  does on Android — so the clock and the battery stop sitting over the text, and the
+  reader's scroll hairline moved to the very top edge instead of drawing a rule across the
+  first paragraph. Every other page brings the bar back.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed
