@@ -785,6 +785,27 @@ enum ReaderChrome {
                for the same reason the rows did — it is a flex item like any other. */
             flex: none;
           }
+          /* The handle promised a gesture the sheet did not have: it said "this moves" and
+             only meant "this scrolls". Now a drag down takes the sheet with it — so the
+             transform is animated when the sheet settles back or leaves, and not while a
+             finger is on it, where every frame is the finger's own position.
+
+             The scrim fades with it, because the sheet's travel is the only thing that says
+             how close the gesture is to dismissing it. */
+          #readerPanel, #readerRecents, #readerHidden {
+            transition: transform \(sheetSettle)ms ease;
+          }
+          #readerPanel[data-dragging], #readerRecents[data-dragging],
+          #readerHidden[data-dragging] {
+            transition: none;
+          }
+          #readerScrim { transition: opacity \(sheetSettle)ms ease; }
+          /* Asked not to animate: the sheet still goes, it just goes at once. The script
+             makes the same check before it animates a dismissal, so nothing waits on a
+             transition that will not run. */
+          @media (prefers-reduced-motion: reduce) {
+            #readerPanel, #readerRecents, #readerHidden, #readerScrim { transition: none; }
+          }
           /* The scrim, which exists only where the panel is a sheet. On a pointer the panel
              hangs off its button and the page behind stays usable, which is the whole point
              of a popover; on a phone it is a modal and dimming says so.
@@ -1121,6 +1142,30 @@ enum ReaderChrome {
     /// Written as a comma list rather than a Level 4 `or`, which WebKitGTK cannot be relied
     /// on for — which is also why nothing combines this with `and`.
     static let compactViewport = "(max-width: 48rem), (max-height: 30rem)"
+
+    /// Dragging a sheet away, in one place because the CSS, the script and the tests all
+    /// have to agree about the same gesture.
+    ///
+    /// `sheetGrabZone` is how far down from the sheet's top edge still counts as the
+    /// handle: 12px of the panel's own padding, the 4px grabber and its 8px margin, plus a
+    /// few px of slack, because a fingertip aiming at a 4px bar lands near it rather than
+    /// on it. Below that line a drag only takes over when the sheet is already scrolled to
+    /// the top — otherwise a flick through a long list would throw the list away.
+    ///
+    /// `sheetDismissTravel` is the distance that means "away" rather than "let me see the
+    /// article behind this": about a fifth of a portrait phone, and comfortably more than
+    /// the slip of a thumb pressing a 44px row. `sheetFlickSpeed` closes it regardless, in
+    /// px/ms, so a fast short flick works like every other sheet on the platform.
+    static let sheetGrabZone = 32
+    static let sheetDismissTravel = 96
+    static let sheetFlickSpeed = 0.5
+    /// How long the sheet takes to settle back or slide out. Matched to the toast's
+    /// 140–180ms register: long enough to read as motion, short enough not to be waited on.
+    static let sheetSettle = 180
+    /// How far a finger must move before the drag takes over from a tap. Under the 10px
+    /// every platform uses for the same distinction, a stepper press that shifts slightly
+    /// would start throwing the sheet around.
+    static let sheetDragSlop = 10
 
     /// Where the chrome's buttons take the comfortable 44px sizing: any touch host, and any
     /// compact viewport whatever is pointing at it.
@@ -2254,10 +2299,14 @@ enum ReaderChrome {
               var open = p.panel === which;
               p.panel.hidden = !open;
               p.btn.setAttribute('aria-expanded', String(open));
+              // Whatever a drag left on it. A sheet that was half-dragged and then closed
+              // some other way would otherwise open again already pushed down the screen.
+              p.panel.style.transform = '';
+              p.panel.removeAttribute('data-dragging');
             });
             // The scrim follows the panels. It is display:none above the breakpoint, so this
             // costs a hidden attribute on a host that will never paint it.
-            if (scrim) { scrim.hidden = !which; }
+            if (scrim) { scrim.hidden = !which; scrim.style.opacity = ''; }
             // A panel fills the screen above the toggle, so the column of buttons that
             // opened it would only be in the way. One thing on screen at a time.
             if (which) { setChromeOpen(false); }
@@ -2265,6 +2314,122 @@ enum ReaderChrome {
             // here, so opening one is what asks the publishers for its images.
             if (which) { window.readerRevealThumbs(); }
           }
+
+          // Swiping a sheet away.
+          //
+          // The grabber at the top of a sheet is the one shape everybody reads as "this
+          // moves", and until now it only meant "this scrolls" — the gesture it advertises
+          // did nothing. It does the obvious thing now: drag down and the sheet follows the
+          // finger, past `\(sheetDismissTravel)px` (or on a flick) it leaves, short of that
+          // it settles back.
+          //
+          // Only where the panel IS a sheet: above the breakpoint it hangs off its button
+          // with the page behind it usable, and dragging a popover off its anchor would
+          // mean nothing. Asked of the same media query the sheet CSS is keyed on rather
+          // than of the pointer, because that is the condition that makes it a sheet.
+          var sheetQuery = window.matchMedia
+            ? window.matchMedia('\(compactViewport)')
+            : null;
+          var stillMotion = window.matchMedia
+            ? window.matchMedia('(prefers-reduced-motion: reduce)')
+            : null;
+          var drag = null;
+          // Set when a drag actually moved the sheet, and read by the capture-phase click
+          // handler below: a gesture that started on a stepper and ended back near where it
+          // began must not also press that stepper.
+          var swallowClick = false;
+
+          function resetSheet(panel) {
+            panel.style.transform = '';
+            panel.removeAttribute('data-dragging');
+            if (scrim) { scrim.style.opacity = ''; }
+          }
+
+          function dismissSheet(panel) {
+            var done = function () {
+              resetSheet(panel);
+              setOpen(null);
+              // Where the scrim's own dismissal leaves it: the button that opened the sheet
+              // is behind the collapsed column by now, so focus goes to what is on screen.
+              if (chromeToggle) { chromeToggle.focus(); }
+            };
+            if (stillMotion && stillMotion.matches) { done(); return; }
+            panel.style.transform = 'translateY(' + panel.offsetHeight + 'px)';
+            if (scrim) { scrim.style.opacity = '0'; }
+            window.setTimeout(done, \(sheetSettle));
+          }
+
+          function onSheetDown(e) {
+            if (drag || !sheetQuery || !sheetQuery.matches) { return; }
+            if (e.pointerType === 'mouse' && e.button !== 0) { return; }
+            var panel = e.currentTarget;
+            var fromHandle =
+              e.clientY - panel.getBoundingClientRect().top <= \(sheetGrabZone);
+            // Below the handle the sheet is a list: a drag there is a scroll until the list
+            // has nowhere left to scroll, which is when it becomes the sheet's own gesture.
+            if (!fromHandle && panel.scrollTop > 0) { return; }
+            drag = { panel: panel, id: e.pointerId, from: e.clientY, at: e.timeStamp,
+                     y: e.clientY, speed: 0, travel: 0, active: false };
+          }
+
+          function onSheetMove(e) {
+            if (!drag || e.pointerId !== drag.id) { return; }
+            var dy = e.clientY - drag.from;
+            if (!drag.active) {
+              // Upward is the list's, not the sheet's — hand the gesture back rather than
+              // holding onto it for the rest of the drag.
+              if (dy < -4) { drag = null; return; }
+              if (dy < \(sheetDragSlop)) { return; }
+              drag.active = true;
+              drag.panel.setAttribute('data-dragging', 'true');
+              if (drag.panel.setPointerCapture) {
+                try { drag.panel.setPointerCapture(drag.id); } catch (err) {}
+              }
+            }
+            // Non-passive, so this can stop the sheet's own scroller and the page behind it
+            // from taking the rest of the gesture.
+            e.preventDefault();
+            var dt = e.timeStamp - drag.at;
+            if (dt > 0) { drag.speed = (e.clientY - drag.y) / dt; }
+            drag.y = e.clientY;
+            drag.at = e.timeStamp;
+            drag.travel = Math.max(0, dy);
+            drag.panel.style.transform = 'translateY(' + drag.travel + 'px)';
+            if (scrim) {
+              var height = drag.panel.offsetHeight || 1;
+              scrim.style.opacity = String(Math.max(0, 1 - drag.travel / height));
+            }
+          }
+
+          function onSheetUp(e) {
+            if (!drag || (e.pointerId !== undefined && e.pointerId !== drag.id)) { return; }
+            var gesture = drag;
+            drag = null;
+            if (!gesture.active) { return; }
+            swallowClick = true;
+            gesture.panel.removeAttribute('data-dragging');
+            if (gesture.travel > \(sheetDismissTravel)
+                || gesture.speed > \(sheetFlickSpeed)) {
+              dismissSheet(gesture.panel);
+            } else {
+              resetSheet(gesture.panel);
+            }
+          }
+
+          popovers.forEach(function (p) {
+            p.panel.addEventListener('pointerdown', onSheetDown);
+          });
+          document.addEventListener('pointermove', onSheetMove, { passive: false });
+          document.addEventListener('pointerup', onSheetUp);
+          document.addEventListener('pointercancel', onSheetUp);
+          // Capture, so the swallowed click never reaches the control it would have pressed
+          // or the document handler that would have read it as a click outside.
+          document.addEventListener('click', function (e) {
+            if (!swallowClick) { return; }
+            swallowClick = false;
+            e.stopPropagation();
+            e.preventDefault();
+          }, true);
           if (chromeToggle) {
             chromeToggle.addEventListener('click', function () {
               // Pressing it while a panel is open means "give me the controls back": the

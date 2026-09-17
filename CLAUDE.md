@@ -238,6 +238,17 @@ switch, two more built only by Xcode, no dependencies:
   `controlsScript` dismisses an open popover on any click outside that class, and reusing it
   would silently break the dismissal. Its button posts inline rather than through
   `controlsScript`, because the offline page carries no chrome script.
+- Under `compactViewport` the three popovers are **sheets, and a sheet can be swiped away**
+  (`sheetGrabZone`/`sheetDismissTravel`/`sheetFlickSpeed`/`sheetSettle`/`sheetDragSlop`,
+  all in `ReaderChrome`). The handle advertised the gesture long before it existed, which
+  is the whole reason it exists. Three guards keep it from stealing what belongs to
+  something else, and each is one line in `controlsScript`: below the handle a drag is the
+  list's until `scrollTop` is 0; an upward move hands the gesture back rather than holding
+  it for the rest of the drag; and a drag that moved the sheet swallows the click that
+  follows, or a gesture starting on a stepper would also step it. Dismissal goes through
+  `setOpen(null)`, so every other dismissal route stays the only place that knows how a
+  panel closes. `prefers-reduced-motion` skips the slide in both the CSS and the script —
+  the script's check is what stops it waiting on a transition that will not run.
 - `readerHome` is reachable from any page of ours **and** the offline page (`ownPage ||
   isShowingFallback`), not just Settings. Try Again retries the URL that failed, so without
   Home the offline page was a dead end — and on Linux there is no menu bar to escape through.
