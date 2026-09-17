@@ -188,9 +188,10 @@ final class TouchLayoutTests: XCTestCase {
         let css = ReaderChrome.controlsCSS()
         XCTAssertTrue(css.contains(
             "#readerPanel > *, #readerRecents > *, #readerHidden > * { flex-shrink: 0; }"))
-        // The handle is a flex item too, and a child selector cannot reach a pseudo-element:
-        // it shrank to 0px for exactly the same reason, and nobody saw the grabber.
-        guard let handle = css.range(of: "#readerPanel::before, #readerRecents::before"),
+        // The handle is a flex item too, and it shrank to 0px for the same reason before a
+        // child selector could reach it — it was a pseudo-element then. It is a real
+        // element now (it has to carry `touch-action`), and the declaration stays anyway.
+        guard let handle = css.range(of: "#readerPanel .sheet-handle, #readerRecents .sheet-handle"),
               let handleEnd = css.range(of: "}", range: handle.upperBound..<css.endIndex) else {
             return XCTFail("the sheet needs a grab handle")
         }

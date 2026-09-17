@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Swipe a sheet away.** On a phone the appearance, recents and hidden-text panels are
+  sheets with a grab handle; dragging the handle down now dismisses them, as the handle
+  always implied. A short drag settles back, and a drag through a list still scrolls it.
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

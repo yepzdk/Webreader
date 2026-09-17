@@ -61,6 +61,8 @@ Incoming links are cleaned first: tracking redirects that embed the real destina
 
 **Appearance.** The **Aa** button in the top-right corner sets font size, serif or sans type, column width, line height, theme (auto, light, sepia, dark, black), and how inline quotations (»…«, “…”) are set — bordered with medium weight, or italic. Changes apply instantly and persist. **⌘+ / ⌘− / ⌘0** zoom any page. View → Reset Reader Appearance returns everything to stock.
 
+**On a phone** these panels are sheets: they take the bottom of the screen, leave a third of the article visible behind them so you can watch the text reflow as you change it, and carry a grab handle. Drag the handle down to dismiss — a short drag settles back, a flick throws it away — or tap outside, or press **Esc**. Dragging through a list inside a sheet still scrolls the list.
+
 **While a page loads** you get a plain screen rather than the site you asked not to read, with the load progress along the top edge. It stays until the article is ready — however long that takes, as long as the connection is still doing something — and steps aside if the page turns out not to be an article.
 
 **Getting back.** Every page except the start page has a Home button in the same top-left corner (**⇧⌘H** / **Ctrl+Shift+H** does the same) — the reader, Settings, and the offline page, so a failed load is never a dead end. On the start page that corner holds **Settings** instead.
